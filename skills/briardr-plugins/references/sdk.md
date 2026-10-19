@@ -23,7 +23,7 @@ nothing else from Briardr: `{{briardr}}/plugins/<id>/`. They're the best example
 | `ApiError` | What failed requests throw: `message` (ready to show), `status`, `code`, `category` (`network`, `timeout`, `auth`, …), `data`. |
 | `persisted(key, initial)` | Reactive state kept on this device (`localStorage`): `.value`, read and assign. Prefix keys with your plugin ID. |
 | `state(initial)`, `derived(fn)` | Reactive state shared between modules (`.value`), for plain `.ts` files. |
-| `keyboardInset()` | Call in a component: `.current` is the on-screen keyboard's height (0 when hidden), to keep an editor above it. |
+| `keyboardInset()` | `.current` is the on-screen keyboard's height (0 when hidden); CSS has it as `var(--kb)`. A `Sheet` and a scrolling surface already stay above the keyboard, and a focused field scrolls into view; use it for a layout that fills the screen, such as an editor. |
 | `prepareImage(blob, name)` | An image made ready to upload: orientation fixed, camera and location metadata dropped, PNG of at most 4096 px and 20 MB: `{ blob, width, height, name, url }`. |
 | `isLocalhostUrl(url)` | True for `http://localhost:…`, `127.0.0.1` and the like (for `onTerminalLink`). |
 | `renderMarkdown(text, { docPath, streamId })` | From `@briardr/sdk/markdown`: Briardr's Markdown renderer, safe for `{@html}` (raw HTML escaped, no remote images; relative images load from the stream's folder). Separate so it loads only with plugins that use it. |
