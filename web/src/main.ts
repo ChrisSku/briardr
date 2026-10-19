@@ -8,6 +8,7 @@ import { record } from './diag.ts';
 import { showAttentionBadge } from './badge.svelte.ts';
 import { pruneScreens } from './idb.ts';
 import { whenIdle } from './idle.ts';
+import { trackKeyboard } from './keyboard.svelte.ts';
 import { liveConn } from './live.ts';
 import { registerShell } from './offline.ts';
 import { preloadBuiltins, setPlugins } from './plugins/registry.svelte.ts';
@@ -63,5 +64,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Every screen keeps the focused field, and the sheet it's in, above the on-screen keyboard.
+trackKeyboard();
 mount(App, { target: document.getElementById('app')! });
 boot();
