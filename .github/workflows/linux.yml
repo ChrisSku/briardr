@@ -1,7 +1,7 @@
 # Linux checks: typecheck, client build, the test suite against an isolated Herdr session, the setup
 # helper (shellcheck) and the generated deployment files (systemd units, Caddy site).
 # Mac-only integrations (power, dictation, Keychain) are covered by stubbed tests or skipped here.
-# The release workflow runs these on a version tag before it publishes (so tags don't start them here too).
+# When they pass on main, the release workflow publishes a new version if the merge brought one.
 # Actions are pinned to commits; the comment names the release each one is.
 name: linux
 
@@ -9,7 +9,6 @@ on:
   push:
     branches: ['**']
   pull_request:
-  workflow_call:
 
 permissions:
   contents: read

@@ -1,6 +1,8 @@
 // Briardr's version and releases. The version is set in server/Cargo.toml (the server reads it when it's
 // compiled); package.json, server/Cargo.lock, CHANGELOG.md and the install instructions, which clone the
-// release tag, must agree with it. CI runs `check`; the release workflow runs `check` and `notes` for a tag.
+// release tag, must agree with it. CI runs `check`; after a merge to main, the release workflow runs
+// `version`, then `check` and `notes` for a version that isn't released yet.
+//   bun scripts/release.ts version          the current version
 //   bun scripts/release.ts check [vX.Y.Z]   everything agrees, and with the tag when one is given
 //   bun scripts/release.ts notes vX.Y.Z     that version's CHANGELOG.md section, for the GitHub release
 //   bun scripts/release.ts bump X.Y.Z       set a new version everywhere and start its CHANGELOG.md section
@@ -78,11 +80,12 @@ function bump(next: string) {
   write('package.json', (t) => t.replace(/("version": )"[^"]*"/, `$1"${next}"`));
   for (const rel of INSTALL_DOCS) write(rel, (t) => t.replace(CLONE, (line) => line.replace(/^git clone (--branch \S+ )?/, `git clone --branch v${next} `)));
   if (notes(next) === null) write('CHANGELOG.md', (t) => t.replace(/^## /m, `## ${next}\n\n- \n\n## `));
-  console.log(`version set to ${next}: write its notes in CHANGELOG.md, then commit, and tag v${next} once that's on main`);
+  console.log(`version set to ${next}: write its notes in CHANGELOG.md, then commit; merging it into main releases v${next}`);
 }
 
 const [command, arg] = process.argv.slice(2);
-if (command === 'check') check(arg);
+if (command === 'version') console.log(version());
+else if (command === 'check') check(arg);
 else if (command === 'notes' && arg) console.log(unwrap(notes(arg.replace(/^v/, '')) ?? fail(`CHANGELOG.md has no notes for ${arg}`)));
 else if (command === 'bump' && arg) bump(arg);
-else fail('usage: bun scripts/release.ts check [vX.Y.Z] | notes vX.Y.Z | bump X.Y.Z');
+else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | bump X.Y.Z');

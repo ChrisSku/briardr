@@ -1,44 +1,44 @@
-# Publishes a GitHub release when a version tag is pushed (`git tag v0.1.0 && git push origin v0.1.0`).
-# The tag must match the version in server/Cargo.toml and everything scripts/release.ts checks, and the
-# Linux checks must pass on the tagged commit. The notes are the version's section of CHANGELOG.md.
+# Publishes a GitHub release when a merge brings a new version to main: after the Linux checks pass on
+# main, the version in server/Cargo.toml is released unless it already is. The release tags that commit,
+# everything scripts/release.ts checks must agree with the version, and the notes are the version's
+# section of CHANGELOG.md. A merge that keeps the version releases nothing.
 # Actions are pinned to commits; the comment names the release each one is.
 name: release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [linux]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
-  version:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
-        with:
-          install_args: bun
-      - run: bun scripts/release.ts check "$GITHUB_REF_NAME"
-
-  linux:
-    uses: ./.github/workflows/linux.yml
-
   release:
-    needs: [version, linux]
+    # Pushes only: a pull request from a fork's branch named main must not release anything.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write # to create the release
+      contents: write # to tag the commit and create the release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
         with:
           install_args: bun
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
-          bun scripts/release.ts notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Briardr ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md"
+          tag="v$(bun scripts/release.ts version)"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          bun scripts/release.ts check "$tag"
+          bun scripts/release.ts notes "$tag" > "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" --target "$COMMIT" --title "Briardr ${tag#v}" --notes-file "$RUNNER_TEMP/notes.md"

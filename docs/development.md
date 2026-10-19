@@ -104,16 +104,16 @@ test that creates temporary state; use a deployment you control and understand t
 
 The version is set in `server/Cargo.toml`; `package.json`, `server/Cargo.lock`, [CHANGELOG.md](../CHANGELOG.md)
 and the install instructions (which clone the release tag) must agree, and CI checks that they do
-(`mise run release:check`). To release:
+(`mise run release:check`). A pull request releases a new version by bringing it:
 
-1. `mise run release:bump 0.2.0` sets the version everywhere and starts its `CHANGELOG.md` section.
-   Write the notes there, then commit the change to `main` the usual way.
-2. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+1. In the pull request, `mise run release:bump 0.2.0` sets the version everywhere and starts its
+   `CHANGELOG.md` section. Write the notes there and commit them with the change.
+2. Merge the pull request.
 
-The [release workflow](../.github/workflows/release.yml) then checks the tag against the version, runs
-the Linux checks on the tagged commit, and publishes the GitHub release with the changelog section as
-its notes. If a check fails, nothing is published: fix it on `main`, then move the tag
-(`git tag -f v0.2.0 && git push -f origin v0.2.0`) or release the next patch version.
+When the Linux checks pass on `main`, the [release workflow](../.github/workflows/release.yml) tags that
+commit `v0.2.0` and publishes the GitHub release with the changelog section as its notes. A merge that
+keeps the version releases nothing. If a check fails, nothing is published: fix it in the next pull
+request, and its merge releases the version.
 
 ## Useful starting points
 
