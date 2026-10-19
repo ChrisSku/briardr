@@ -1,0 +1,86 @@
+[tools]
+# Rust builds the server (server/, binary `briardr`). Bun bundles the web client and runs the tests.
+bun = "1.4.2"
+rust = { version = "1.99.0", components = "rustfmt,clippy" } # `mise run check` uses both
+
+[env]
+_.path = ["{{config_root}}/node_modules/.bin"]
+
+[tasks.install]
+description = "Install dependencies"
+run = "bun install"
+
+[tasks.build]
+description = "Build the web client into web/dist"
+run = "bun scripts/build.ts"
+
+[tasks."build:server"]
+description = "Build the server (release, no test hooks) into server/target/release/briardr"
+run = "cargo build --manifest-path server/Cargo.toml --release"
+
+[tasks."build:test-server"]
+description = "Build the server with the loopback test hooks (debug, for the test suites only)"
+run = "cargo build --manifest-path server/Cargo.toml --features test-hooks"
+
+[tasks.typecheck]
+description = "Typecheck the web client, tests and scripts"
+# Under Bun, so a server with Bun and no Node can typecheck too.
+run = ["bun --bun tsc -p tsconfig.json", "bun --bun svelte-check --tsconfig web/tsconfig.json --fail-on-warnings"]
+
+[tasks.check]
+description = "Server format and lint checks"
+run = ["cargo fmt --manifest-path server/Cargo.toml --check", "cargo clippy --manifest-path server/Cargo.toml --all-targets --all-features -- -D warnings"]
+
+[tasks.serve]
+description = "Run Briardr against the configured Herdr session"
+depends = ["build", "build:server"]
+run = "{{config_root}}/server/target/release/briardr serve"
+
+[tasks.dev]
+description = "Run Briardr against the isolated briardr-dev Herdr session on port 17443 (never touches your real panes)"
+depends = ["build", "build:server"]
+env = { BRIARDR_DATA_DIR = "{{config_root}}/.dev-data", BRIARDR_HERDR_SESSION = "briardr-dev", BRIARDR_PORT = "17443", BRIARDR_PREVIEW_PORT = "17444", BRIARDR_LISTEN = "" }
+run = "{{config_root}}/server/target/release/briardr serve"
+
+[tasks.pair]
+description = "Print a one-time pairing code for a new device"
+depends = ["build:server"]
+run = "{{config_root}}/server/target/release/briardr pair"
+
+[tasks."pair:dev"]
+description = "Pairing code for the dev server"
+depends = ["build:server"]
+env = { BRIARDR_DATA_DIR = "{{config_root}}/.dev-data" }
+run = "{{config_root}}/server/target/release/briardr pair"
+
+[tasks.test]
+description = "Server unit tests, then the integration tests against the server binary (isolated briardr-dev Herdr session)"
+depends = ["build:test-server"]
+run = ["cargo test --manifest-path server/Cargo.toml --features test-hooks", "bun test --timeout 300000 ./test"]
+
+[tasks."test:ui"]
+description = "Browser checks at iPhone, iPad and Mac sizes in light and dark mode (against `mise run dev`)"
+depends = ["build", "build:test-server"]
+run = "bun test --timeout 120000 ./test-ui"
+
+[tasks."release:check"]
+description = "Check that the version agrees across Cargo, package.json, CHANGELOG.md and the install docs"
+run = "bun scripts/release.ts check"
+
+[tasks."release:bump"]
+description = "Set a new version everywhere and start its CHANGELOG.md section: mise run release:bump 0.2.0"
+run = "bun scripts/release.ts bump"
+
+[tasks."install-agent"]
+description = "Write the LaunchAgent so Briardr starts at login"
+depends = ["build:server"]
+run = "{{config_root}}/server/target/release/briardr install-agent"
+
+[tasks."install-cli"]
+description = "Put `briardr` on your PATH (a link in ~/.local/bin to the release build), for `briardr create plugin` and friends"
+depends = ["build:server"]
+run = "{{config_root}}/server/target/release/briardr install-cli"
+
+[tasks."install-power"]
+description = "Allow Briardr's Always on to keep the Mac awake with the lid closed (one sudoers rule for pmset disablesleep)"
+run = "sh scripts/install-power.sh"

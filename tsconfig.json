@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"], // tests and scripts run code in browsers and import web/src helpers
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": false,
+    "types": ["bun"],
+    // web/src/plugins/builtin.ts brings in the built-in plugins, which import @briardr/sdk (see web/tsconfig.json).
+    "paths": {
+      "@briardr/sdk": ["./web/src/sdk/index.ts"],
+      "@briardr/sdk/markdown": ["./web/src/sdk/markdown.ts"]
+    }
+  },
+  "include": ["test/**/*.ts", "scripts/**/*.ts", "test-ui/**/*.ts"],
+  // Plugins are checked against @briardr/sdk with their own tsconfig (plugins/template).
+  "exclude": ["test/fixtures/plugins"]
+}

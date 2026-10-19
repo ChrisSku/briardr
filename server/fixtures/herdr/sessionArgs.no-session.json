@@ -1,0 +1,10 @@
+{
+  "input": [
+    {
+      "herdrPath": "herdr",
+      "session": "",
+      "timeoutMs": 5000
+    }
+  ],
+  "output": []
+}

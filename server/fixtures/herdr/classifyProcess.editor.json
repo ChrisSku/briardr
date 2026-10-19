@@ -1,0 +1,9 @@
+{
+  "input": [
+    "nvim"
+  ],
+  "output": {
+    "kind": "editor",
+    "tool": "nvim"
+  }
+}

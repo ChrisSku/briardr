@@ -1,0 +1,20 @@
+{
+  "input": [
+    {
+      "present": true,
+      "percent": 15,
+      "source": "battery",
+      "charging": false,
+      "charged": false,
+      "minutes": 40,
+      "timeKind": "remaining"
+    },
+    []
+  ],
+  "output": {
+    "level": 20,
+    "alerted": [
+      20
+    ]
+  }
+}

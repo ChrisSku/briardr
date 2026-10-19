@@ -1,0 +1,9 @@
+{
+  "input": [
+    "-zsh"
+  ],
+  "output": {
+    "kind": "shell",
+    "tool": "zsh"
+  }
+}

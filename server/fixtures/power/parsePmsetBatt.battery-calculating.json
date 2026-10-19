@@ -1,0 +1,14 @@
+{
+  "input": [
+    "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1234567)\t30%; discharging; (no estimate) present: true"
+  ],
+  "output": {
+    "present": true,
+    "percent": 30,
+    "source": "battery",
+    "charging": false,
+    "charged": false,
+    "minutes": null,
+    "timeKind": "calculating"
+  }
+}

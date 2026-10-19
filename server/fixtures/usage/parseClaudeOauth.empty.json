@@ -1,0 +1,13 @@
+{
+  "input": [
+    {},
+    1790000000000
+  ],
+  "output": {
+    "provider": "claude",
+    "source": "oauth",
+    "windows": [],
+    "spend": null,
+    "capturedAt": 1790000000000
+  }
+}

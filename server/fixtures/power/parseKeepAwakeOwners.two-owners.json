@@ -1,0 +1,9 @@
+{
+  "input": [
+    "pid 123(Herdr): PreventUserIdleSystemSleep named: \"herdr\"\npid 456(caffeinate): PreventSystemSleep named: \"x\"\npid 456(caffeinate): PreventUserIdleSystemSleep named: \"x\""
+  ],
+  "output": [
+    "Herdr",
+    "caffeinate"
+  ]
+}

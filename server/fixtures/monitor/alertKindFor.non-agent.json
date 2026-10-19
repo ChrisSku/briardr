@@ -1,0 +1,10 @@
+{
+  "input": [
+    {
+      "kind": "pane",
+      "from": "working",
+      "to": "blocked"
+    }
+  ],
+  "output": null
+}

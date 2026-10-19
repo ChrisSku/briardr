@@ -1,0 +1,10 @@
+{
+  "input": [
+    {
+      "kind": "agent",
+      "from": "working",
+      "to": "done"
+    }
+  ],
+  "output": "finished"
+}

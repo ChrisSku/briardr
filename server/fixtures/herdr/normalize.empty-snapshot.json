@@ -1,0 +1,17 @@
+{
+  "input": [
+    {},
+    {},
+    null,
+    "0.9.1",
+    3000
+  ],
+  "output": {
+    "workspaces": [],
+    "projects": [],
+    "streams": [],
+    "focusedStreamId": null,
+    "herdrVersion": "0.9.1",
+    "asOf": 3000
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "input": [],
+  "output": {
+    "herdrPath": "/opt/homebrew/bin/herdr",
+    "herdrSession": "",
+    "port": 7443,
+    "previewPortStart": 7444,
+    "previewPortCount": 16,
+    "listen": [
+      "tailscale"
+    ],
+    "allowedNetworks": [],
+    "hostnames": [],
+    "tls": {
+      "mode": "local-ca"
+    },
+    "publicOrigin": "",
+    "trustedProxies": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "publicPreviewOrigin": "",
+    "herdrTimeoutMs": 8000,
+    "notifications": {
+      "includeNames": true,
+      "needsYou": true,
+      "finished": true,
+      "ready": false,
+      "lowBattery": true,
+      "debounceMs": 3000
+    },
+    "usage": {
+      "claudeKeychainOptIn": false,
+      "codexEnabled": false,
+      "claudeConfigDir": "/Users/me/.claude",
+      "codexPath": "/opt/homebrew/bin/codex"
+    },
+    "power": {
+      "keepAwake": false
+    }
+  }
+}

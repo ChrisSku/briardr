@@ -1,0 +1,13 @@
+{
+  "input": [
+    {
+      "herdrPath": "herdr",
+      "session": "briardr-dev",
+      "timeoutMs": 5000
+    }
+  ],
+  "output": [
+    "--session",
+    "briardr-dev"
+  ]
+}

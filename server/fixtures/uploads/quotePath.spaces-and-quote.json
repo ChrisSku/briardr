@@ -1,0 +1,6 @@
+{
+  "input": [
+    "/tmp/it's a file.png"
+  ],
+  "output": "'/tmp/it'\\''s a file.png'"
+}

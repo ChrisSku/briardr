@@ -1,0 +1,7 @@
+{
+  "input": [
+    "gzip, br",
+    "gzip"
+  ],
+  "output": true
+}

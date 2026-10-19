@@ -1,0 +1,27 @@
+node_modules/
+web/dist/
+.dev-data/
+test-results/
+*.log
+.DS_Store
+.claude/settings.local.json
+bench/builds/
+bench/tmp/
+bench/screens-full/
+bench/worktrees/
+bench/results/
+server/target/
+web/src/sdk/runtime/
+test/fixtures/plugins/*/dist/
+
+# Private configuration, keys, device profiles, and local worktrees.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.mobileconfig
+briardr-backups/
+.worktrees/

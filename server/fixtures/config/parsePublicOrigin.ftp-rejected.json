@@ -1,0 +1,6 @@
+{
+  "input": [
+    "ftp://briardr.lan"
+  ],
+  "error": "publicOrigin must use https."
+}

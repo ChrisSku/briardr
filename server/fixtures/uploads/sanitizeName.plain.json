@@ -1,0 +1,7 @@
+{
+  "input": [
+    "report.pdf",
+    "file"
+  ],
+  "output": "report.pdf"
+}

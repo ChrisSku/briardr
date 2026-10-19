@@ -1,0 +1,7 @@
+{
+  "input": [
+    "../../etc/passwd",
+    "file"
+  ],
+  "output": "passwd"
+}

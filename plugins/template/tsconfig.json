@@ -1,0 +1,26 @@
+{
+  // Made by `briardr plugin create` for the Briardr in {{briardr}}: @briardr/sdk and Svelte are Briardr's own.
+  // `briardr plugin check` type-checks with it.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "typeRoots": ["{{briardr}}/node_modules/@types"],
+    "types": ["bun"],
+    "paths": {
+      "@briardr/sdk": ["{{briardr}}/web/src/sdk/index.ts"],
+      "@briardr/sdk/markdown": ["{{briardr}}/web/src/sdk/markdown.ts"],
+      "svelte": ["{{briardr}}/node_modules/svelte"],
+      "svelte/*": ["{{briardr}}/node_modules/svelte/*"]
+    }
+  },
+  "include": ["{{briardr}}/web/src/svelte-elements.d.ts", "src/**/*.ts", "src/**/*.svelte", "server/**/*.ts"]
+}

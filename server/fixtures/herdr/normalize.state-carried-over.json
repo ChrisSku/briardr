@@ -1,0 +1,221 @@
+{
+  "input": [
+    {
+      "version": "0.9.1",
+      "workspaces": [
+        {
+          "workspace_id": "w1",
+          "number": 1,
+          "label": "briardr",
+          "focused": true,
+          "active_tab_id": "t1"
+        }
+      ],
+      "tabs": [
+        {
+          "tab_id": "t1",
+          "workspace_id": "w1",
+          "number": 1,
+          "label": "api",
+          "focused": true
+        }
+      ],
+      "panes": [
+        {
+          "pane_id": "p_agent",
+          "workspace_id": "w1",
+          "tab_id": "t1",
+          "terminal_id": "term1",
+          "focused": true,
+          "agent": "claude",
+          "agent_status": "working",
+          "foreground_cwd": "/Users/me/code/briardr",
+          "terminal_title_stripped": "Claude Code"
+        },
+        {
+          "pane_id": "p_shell",
+          "workspace_id": "w1",
+          "tab_id": "t1",
+          "terminal_id": "term2",
+          "focused": false,
+          "cwd": "/Users/me/code/briardr/server"
+        },
+        {
+          "pane_id": "p_editor",
+          "workspace_id": "w1",
+          "tab_id": "t1",
+          "terminal_id": "term3",
+          "focused": false,
+          "cwd": "/Users/me/code/briardr/web",
+          "label": "edit"
+        },
+        {
+          "pane_id": "p_prog",
+          "workspace_id": "w1",
+          "tab_id": "t1",
+          "terminal_id": "term4",
+          "focused": false,
+          "cwd": "/tmp"
+        }
+      ],
+      "agents": [
+        {
+          "pane_id": "p_agent",
+          "agent": "claude",
+          "agent_status": "working",
+          "state_change_seq": 7,
+          "foreground_cwd": "/Users/me/code/briardr",
+          "display_agent": null,
+          "label": null
+        }
+      ],
+      "layouts": [
+        {
+          "panes": [
+            {
+              "pane_id": "p_agent",
+              "rect": {
+                "height": 40
+              }
+            },
+            {
+              "pane_id": "p_shell",
+              "rect": {
+                "height": 12
+              }
+            }
+          ]
+        }
+      ],
+      "focused_pane_id": "p_agent"
+    },
+    {},
+    {
+      "workspaces": [],
+      "projects": [],
+      "streams": [
+        {
+          "id": "p_agent",
+          "workspaceId": "w1",
+          "projectId": "t1",
+          "terminalId": "term1",
+          "name": "Claude",
+          "label": null,
+          "kind": "agent",
+          "tool": "claude",
+          "state": "working",
+          "stateChangeSeq": 6,
+          "stateSince": 500,
+          "cwd": "/Users/me/code/briardr",
+          "folder": "briardr",
+          "focused": true,
+          "title": null,
+          "rows": 40
+        }
+      ],
+      "focusedStreamId": "p_agent",
+      "herdrVersion": "0.9.1",
+      "asOf": 1000
+    },
+    "0.9.1",
+    2000
+  ],
+  "output": {
+    "workspaces": [
+      {
+        "id": "w1",
+        "name": "briardr",
+        "number": 1,
+        "focused": true,
+        "activeProjectId": "t1",
+        "cwd": "/Users/me/code/briardr"
+      }
+    ],
+    "projects": [
+      {
+        "id": "t1",
+        "workspaceId": "w1",
+        "name": "api",
+        "number": 1,
+        "focused": true
+      }
+    ],
+    "streams": [
+      {
+        "id": "p_agent",
+        "workspaceId": "w1",
+        "projectId": "t1",
+        "terminalId": "term1",
+        "name": "Claude",
+        "label": null,
+        "kind": "agent",
+        "tool": "claude",
+        "state": "working",
+        "stateChangeSeq": 7,
+        "stateSince": 500,
+        "cwd": "/Users/me/code/briardr",
+        "folder": "briardr",
+        "focused": true,
+        "title": "Claude Code",
+        "rows": 40
+      },
+      {
+        "id": "p_shell",
+        "workspaceId": "w1",
+        "projectId": "t1",
+        "terminalId": "term2",
+        "name": "Shell",
+        "label": null,
+        "kind": "shell",
+        "tool": "shell",
+        "state": null,
+        "stateChangeSeq": null,
+        "stateSince": null,
+        "cwd": "/Users/me/code/briardr/server",
+        "folder": "server",
+        "focused": false,
+        "title": null,
+        "rows": 12
+      },
+      {
+        "id": "p_editor",
+        "workspaceId": "w1",
+        "projectId": "t1",
+        "terminalId": "term3",
+        "name": "edit",
+        "label": "edit",
+        "kind": "shell",
+        "tool": "shell",
+        "state": null,
+        "stateChangeSeq": null,
+        "stateSince": null,
+        "cwd": "/Users/me/code/briardr/web",
+        "folder": "web",
+        "focused": false,
+        "title": null,
+        "rows": null
+      },
+      {
+        "id": "p_prog",
+        "workspaceId": "w1",
+        "projectId": "t1",
+        "terminalId": "term4",
+        "name": "Shell",
+        "label": null,
+        "kind": "shell",
+        "tool": "shell",
+        "state": null,
+        "stateChangeSeq": null,
+        "stateSince": null,
+        "cwd": "/tmp",
+        "folder": "tmp",
+        "focused": false,
+        "title": null,
+        "rows": null
+      }
+    ],
+    "focusedStreamId": "p_agent",
+    "herdrVersion": "0.9.1",
+    "asOf": 2000
+  }
+}

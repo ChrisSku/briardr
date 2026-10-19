@@ -1,0 +1,65 @@
+[package]
+name = "briardr-server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "Briardr's server: a remote window into Herdr"
+repository = "https://github.com/ChrisSku/briardr"
+homepage = "https://briardr.dev"
+
+[[bin]]
+name = "briardr"
+path = "src/main.rs"
+
+[features]
+# Loopback-only test endpoints (see src/test_hooks.rs). Never enabled in release builds.
+test-hooks = []
+
+[dependencies]
+# Async runtime and HTTP/WebSocket stack (axum 0.8 on hyper 1).
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "http1", "client-legacy"] }
+# Preview: forwarding WebSockets to the dev server (same version axum uses), and stream/sink helpers.
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tower = "0.5"
+# Streaming request bodies with a size limit (already in the tree through axum).
+http-body-util = "0.1"
+# TLS: ring provider only, so the build needs no cmake or aws-lc.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+rcgen = "0.14"
+# Serialization and hashing for the existing on-disk JSON formats.
+serde = { version = "1", features = ["derive"] }
+# preserve_order: object keys keep insertion order, as JS objects and JSON.stringify do.
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.11"
+# SHA-1 only for the Changes "reviewed" signature; devices store these digests, so they must not change.
+sha1 = "0.10"
+rand = "0.10"
+base64 = "0.23"
+hex = "0.4"
+ipnet = "2"
+# WHATWG URL parsing for the public origin checks, the same rules as the browser's URL class.
+url = "2.5.8"
+# HTTP client for the Claude usage endpoint and Web Push delivery. rustls on the ring provider
+# (installed by crate::http::client), so no aws-lc/cmake; OS trust store via rustls-platform-verifier.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+# Web Push (RFC 8291 aes128gcm payload encryption, RFC 8292 VAPID ES256), matching the web-push npm package.
+p256 = { version = "0.14", default-features = false, features = ["arithmetic", "ecdh", "ecdsa", "std"] }
+hkdf = "0.13"
+aes-gcm = "0.11"
+# Errors: thiserror for module error enums; anyhow only at the binary edge.
+thiserror = "2"
+anyhow = "1"
+# NFC normalization of client-supplied upload names (String.prototype.normalize('NFC') in JS).
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+
+[profile.release]
+strip = true
+lto = "thin"

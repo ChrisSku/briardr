@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Setup documentation
+    url: https://github.com/ChrisSku/briardr/blob/main/docs/README.md
+    about: Start with the host and device setup guides.
+  - name: Report a vulnerability privately
+    url: https://github.com/ChrisSku/briardr/security/advisories/new
+    about: Use private reporting for security issues; see SECURITY.md if unavailable.

@@ -1,0 +1,12 @@
+{
+  "input": [
+    {
+      "publicPreviewOrigin": "https://preview.tail1234.ts.net",
+      "previewPortCount": 2
+    }
+  ],
+  "output": [
+    "https://preview.tail1234.ts.net",
+    "https://preview.tail1234.ts.net"
+  ]
+}

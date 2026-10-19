@@ -1,0 +1,9 @@
+{
+  "input": [
+    null
+  ],
+  "output": {
+    "kind": "shell",
+    "tool": "shell"
+  }
+}

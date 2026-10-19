@@ -1,0 +1,44 @@
+{
+  "input": [
+    {
+      "rateLimits": {
+        "primary": {
+          "usedPercent": 25,
+          "windowDurationMins": 300,
+          "resetsAt": 1790000000
+        },
+        "secondary": {
+          "usedPercent": 60,
+          "windowDurationMins": 10080,
+          "resetsAt": 1790500000
+        }
+      }
+    },
+    1790000000000
+  ],
+  "output": {
+    "provider": "codex",
+    "source": "app-server",
+    "windows": [
+      {
+        "id": "primary",
+        "label": "5-hour",
+        "usedPercent": 25,
+        "resetsAt": 1790000000000,
+        "windowMinutes": 300
+      },
+      {
+        "id": "secondary",
+        "label": "Weekly",
+        "usedPercent": 60,
+        "resetsAt": 1790500000000,
+        "windowMinutes": 10080
+      }
+    ],
+    "credits": null,
+    "resetCredits": null,
+    "plan": null,
+    "limitReached": null,
+    "capturedAt": 1790000000000
+  }
+}

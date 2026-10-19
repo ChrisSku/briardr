@@ -1,0 +1,14 @@
+{
+  "input": [
+    "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1234567)\t100%; charged; 0:00 remaining present: true"
+  ],
+  "output": {
+    "present": true,
+    "percent": 100,
+    "source": "ac",
+    "charging": false,
+    "charged": true,
+    "minutes": 0,
+    "timeKind": "unavailable"
+  }
+}

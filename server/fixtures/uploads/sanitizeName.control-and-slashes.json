@@ -1,0 +1,7 @@
+{
+  "input": [
+    "a\u0001b/c\\d:e",
+    "file"
+  ],
+  "output": "cde"
+}

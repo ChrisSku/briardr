@@ -1,0 +1,38 @@
+{
+  "input": [
+    {
+      "seven_day": {
+        "utilization": 41.5,
+        "resets_at": "2026-10-15T00:00:00Z"
+      },
+      "five_hour": {
+        "utilization": 12,
+        "resets_at": "2026-10-11T18:00:00Z"
+      },
+      "unknown_thing": {
+        "foo": 1
+      }
+    },
+    1790000000000
+  ],
+  "output": {
+    "provider": "claude",
+    "source": "oauth",
+    "windows": [
+      {
+        "id": "five_hour",
+        "label": "5-hour",
+        "usedPercent": 12,
+        "resetsAt": 1791741600000
+      },
+      {
+        "id": "seven_day",
+        "label": "Weekly",
+        "usedPercent": 41.5,
+        "resetsAt": 1792022400000
+      }
+    ],
+    "spend": null,
+    "capturedAt": 1790000000000
+  }
+}

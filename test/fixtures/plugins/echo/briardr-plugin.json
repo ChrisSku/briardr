@@ -1,0 +1,23 @@
+{
+  "id": "echo",
+  "name": "Echo",
+  "version": "0.1.0",
+  "description": "A test plugin: a stream tab that counts clicks, asks its backend and sends text to the terminal.",
+  "briardr": 1,
+  "client": "src/index.ts",
+  "contributes": {
+    "streamTabs": [
+      {
+        "id": "echo",
+        "label": "Echo",
+        "icon": "plug"
+      }
+    ]
+  },
+  "backend": {
+    "command": [
+      "bun",
+      "server/main.ts"
+    ]
+  }
+}

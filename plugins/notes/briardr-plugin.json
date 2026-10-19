@@ -1,0 +1,8 @@
+{
+  "id": "notes",
+  "name": "Notes",
+  "description": "Keep notes and images per stream and send them to the agent.",
+  "briardr": 1,
+  "client": "src/index.ts",
+  "contributes": { "streamTabs": [{ "id": "notes", "label": "Notes", "icon": "notes" }] }
+}

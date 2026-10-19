@@ -1,0 +1,46 @@
+{
+  "name": "briardr",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A remote window into Herdr on your Mac or Linux server, for your phone, tablet and desktop.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ChrisSku/briardr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ChrisSku/briardr/issues"
+  },
+  "homepage": "https://briardr.dev",
+  "type": "module",
+  "bin": {
+    "briardr": "./bin/briardr"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "start": "./server/target/release/briardr serve",
+    "dev": "bun scripts/build.ts --watch & ./server/target/release/briardr serve",
+    "typecheck": "bun --bun tsc -p tsconfig.json --noEmit && bun --bun svelte-check --tsconfig web/tsconfig.json --fail-on-warnings",
+    "test": "bun test --timeout 300000 ./test",
+    "test:ui": "bun test --timeout 120000 ./test-ui"
+  },
+  "devDependencies": {
+    "@jridgewell/remapping": "^2.3.5",
+    "@types/bun": "^1.4.2",
+    "@types/markdown-it": "^14.1.2",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/addon-unicode11": "^0.9.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "axe-core": "^4.14.0",
+    "highlight.js": "11.11.1",
+    "markdown-it": "^15.0.0",
+    "playwright": "^1.64.0",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "bun": ">=1.4"
+  }
+}

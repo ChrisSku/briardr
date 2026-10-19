@@ -1,0 +1,14 @@
+{
+  "input": [
+    "Now drawing from 'AC Power'"
+  ],
+  "output": {
+    "present": false,
+    "percent": null,
+    "source": "ac",
+    "charging": false,
+    "charged": true,
+    "minutes": null,
+    "timeKind": "unavailable"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "usage",
+  "name": "Usage",
+  "description": "See how much of your Claude Code and Codex plan limits you’ve used.",
+  "briardr": 1,
+  "client": "src/index.ts",
+  "contributes": {
+    "appTabs": [{ "id": "usage", "label": "Usage", "icon": "usage" }],
+    "settings": [{ "id": "usage", "label": "Usage sources" }]
+  }
+}
