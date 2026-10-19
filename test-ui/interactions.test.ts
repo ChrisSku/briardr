@@ -6,7 +6,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
-import { devices, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
+import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
 import { closeWorkspace, herdr, SESSION, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
@@ -108,6 +108,24 @@ async function expectBytes(hex: string, ms = 3000) {
 }
 const hex = (s: string) => Buffer.from(s, 'latin1').toString('hex');
 
+/** Simulates the on-screen keyboard: the visual viewport loses `height` px at the bottom (0 hides it). */
+async function showKeyboard(page: Page, height: number) {
+  await page.evaluate((h) => {
+    if (h) Object.defineProperty(window.visualViewport!, 'height', { value: innerHeight - h, configurable: true });
+    else delete (window.visualViewport as any).height;
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  }, height);
+  await sleep(100);
+}
+/** Asserts that each element ends above a keyboard `height` px tall. */
+async function aboveKeyboard(page: Page, height: number, els: Record<string, Locator>) {
+  const top = page.viewportSize()!.height - height;
+  for (const [name, el] of Object.entries(els)) {
+    const b = (await el.boundingBox())!;
+    assert.ok(b.y + b.height <= top + 0.5, `${name} ends at ${b.y + b.height}, under the keyboard at ${top}`);
+  }
+}
+
 describe('terminal input (iPhone)', () => {
   let page: Page;
   let ctx: BrowserContext;
@@ -171,20 +189,35 @@ describe('terminal input (iPhone)', () => {
     await field.fill('no stream is called this');
     await page.getByText('No matching streams.').waitFor();
     assert.equal((await field.boundingBox())!.y, before);
-    // Simulate the on-screen keyboard: the sheet ends above it.
-    const vh = page.viewportSize()!.height;
-    await page.evaluate(() => {
-      Object.defineProperty(window.visualViewport!, 'height', { value: innerHeight - 300, configurable: true });
-      window.visualViewport!.dispatchEvent(new Event('resize'));
-    });
+    // With the on-screen keyboard up, the sheet ends above it.
+    await showKeyboard(page, 300);
     await field.fill('');
     await sleep(100);
-    const open = (await page.locator('.sheet.jump').boundingBox())!;
-    assert.ok(open.y + open.height <= vh - 300, `sheet bottom ${open.y + open.height} above keyboard ${vh - 300}`);
-    await page.evaluate(() => {
-      delete (window.visualViewport as any).height;
-      window.visualViewport!.dispatchEvent(new Event('resize'));
-    });
+    await aboveKeyboard(page, 300, { sheet: page.locator('.sheet.jump') });
+    await showKeyboard(page, 0);
+  });
+
+  test('sheets over the terminal sit on the on-screen keyboard: their fields and buttons stay above it', async () => {
+    await page.getByRole('button', { name: 'Stream actions' }).click();
+    await page.getByRole('menuitem', { name: 'Rename' }).click();
+    const rename = page.getByRole('dialog', { name: 'Rename stream' });
+    await page.waitForFunction(() => document.activeElement?.closest('[role=dialog]'));
+    await showKeyboard(page, 300);
+    try {
+      await aboveKeyboard(page, 300, { 'Rename field': rename.getByLabel('Name'), Save: rename.getByRole('button', { name: 'Save' }) });
+      await rename.getByRole('button', { name: 'Cancel' }).click();
+      await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+      await page.getByRole('menuitem', { name: /Paste text/ }).click();
+      const paste = page.getByRole('dialog', { name: 'Paste text' });
+      await page.waitForFunction(() => document.activeElement?.classList.contains('paste-area'));
+      await sleep(100);
+      // The sheet fits above the keyboard; its text field starts in view and the sheet body scrolls.
+      await aboveKeyboard(page, 300, { 'Paste sheet': paste, Insert: paste.getByRole('button', { name: 'Insert', exact: true }) });
+      const area = (await paste.getByLabel('Text to paste').boundingBox())!;
+      assert.ok(area.y + 60 <= page.viewportSize()!.height - 300, `text field starts at ${area.y}`);
+    } finally {
+      await showKeyboard(page, 0);
+    }
   });
 
   test('tapping the stream name, or the space after it, opens Jump', async () => {
@@ -687,6 +720,56 @@ describe('workspaces and menus', () => {
     await a.page.getByRole('menu').waitFor({ state: 'detached' });
     assert.equal(await activeRole(), 'terminal', 'Escape returns focus to the terminal');
     await a.ctx.close();
+  });
+});
+
+describe('the on-screen keyboard (iPhone)', () => {
+  test('new-item sheets on the Workspaces screen end above the keyboard', async () => {
+    const a = await device('iphone', 'phone-kb-sheets');
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.getByRole('button', { name: /^(New )?workspace$/i }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'New workspace' });
+    await showKeyboard(a.page, 300);
+    await aboveKeyboard(a.page, 300, { Name: sheet.getByLabel('Name'), Folder: sheet.getByLabel(/^Folder/), Create: sheet.getByRole('button', { name: 'Create' }) });
+    // Without the keyboard, the sheet goes back to the bottom of the screen.
+    await showKeyboard(a.page, 0);
+    const b = (await sheet.boundingBox())!;
+    assert.equal(Math.round(b.y + b.height), a.page.viewportSize()!.height);
+    await a.ctx.close();
+  });
+
+  test('pairing: the screen ends above the keyboard and the focused field scrolls into view', async () => {
+    // A short screen (an iPhone on its side), so the card doesn't fit above the keyboard.
+    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro landscape'], ignoreHTTPSErrors: true, locale: 'en-US' });
+    const page = await ctx.newPage();
+    await page.goto(s.base + '/');
+    const code = page.getByLabel('Pairing code');
+    await code.waitFor();
+    await showKeyboard(page, 160);
+    const pair = (await page.locator('.pair').boundingBox())!;
+    assert.equal(Math.round(pair.y + pair.height), page.viewportSize()!.height - 160);
+    // The card starts at the top rather than being cut off above it.
+    assert.ok((await page.getByRole('heading', { name: 'Briardr' }).boundingBox())!.y >= 0);
+    await page.getByLabel('Name for this device').focus();
+    await sleep(100);
+    await aboveKeyboard(page, 160, { 'device name': page.getByLabel('Name for this device') });
+    await ctx.close();
+  });
+
+  test('a field low on a scrolling screen scrolls above the keyboard when it opens', async () => {
+    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro landscape'], ignoreHTTPSErrors: true, locale: 'en-US' });
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'phone-kb-settings');
+    if (!p.ok) throw new Error('pairing failed');
+    await ctx.addCookies([{ name: '__Host-briardr', value: p.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
+    const page = await ctx.newPage();
+    await page.goto(s.base + '/settings');
+    const field = page.getByLabel(/^Path to the herdr executable/);
+    await field.focus();
+    const top = page.viewportSize()!.height - 160;
+    assert.ok((await field.boundingBox())!.y + 44 > top, 'the field starts under where the keyboard opens');
+    await showKeyboard(page, 160);
+    await aboveKeyboard(page, 160, { 'Herdr path': field });
+    await ctx.close();
   });
 });
 

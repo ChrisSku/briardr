@@ -22,7 +22,7 @@ export type { Save, Settings } from '../screens/settings/settings.ts';
 export { ApiError, type FailureCategory } from '../api.ts';
 export { derived, persisted, state, type Derived, type Persisted, type State } from '../reactive.svelte.ts';
 export { prepareImage, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, type PreparedImage } from '../media.ts';
-export { keyboardInset } from '../screens/stream/keyboard.svelte.ts';
+export { keyboardInset } from '../keyboard.svelte.ts';
 export { isLocalhostUrl } from '../terminal/links.ts';
 export { AsOf, Empty, Sheet, StateBadge, ago, duration, longPress, type MenuItem } from '../ui/kit.ts';
 export { Icon, iconName, type IconName } from '../ui/icons/index.ts';

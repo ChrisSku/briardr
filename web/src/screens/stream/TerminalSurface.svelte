@@ -33,7 +33,7 @@
   import { openMenu, type MenuItem } from '../../ui/kit.ts';
   import { acceptsImages } from './insert.ts';
   import KeyBar from './keybar/KeyBar.svelte';
-  import { keyboardInset } from './keyboard.svelte.ts';
+  import { keyboardInset } from '../../keyboard.svelte.ts';
   import PasteSheet from './PasteSheet.svelte';
   import SelectTextSheet from './SelectTextSheet.svelte';
   import UploadSheet from './UploadSheet.svelte';
@@ -360,7 +360,7 @@
   {/if}
 {/snippet}
 
-<div class={['term-surface', !visible && 'is-hidden']} style:--kb="{kb.current}px" aria-hidden={!visible}>
+<div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onwheel} {oncontextmenu}>

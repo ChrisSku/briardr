@@ -5,6 +5,15 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.1.1
+
+- **Text fields stay above the on-screen keyboard.** Sheets (Rename, Paste text, History, Ask about code,
+  New workspace, project and stream) sit on top of the keyboard with their buttons in reach, Pairing's
+  Sign in button stays visible, a focused field under the keyboard scrolls into view, and toasts show
+  above it.
+- **Sheets are no longer clipped in iOS Safari** when opened inside a scrolling screen; on Workspaces the
+  tab bar covered New workspace's Create button.
+
 ## 0.1.0
 
 The first public release: a self-hosted remote window into [Herdr](https://herdr.dev) for your phone,
