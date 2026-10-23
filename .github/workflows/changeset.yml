@@ -21,4 +21,4 @@ jobs:
         with:
           install_args: bun
       - run: bun install --frozen-lockfile
-      - run: bun --bun changeset status --since="origin/$GITHUB_BASE_REF"
+      - run: bun scripts/release.ts changeset "origin/$GITHUB_BASE_REF"

@@ -1,0 +1,34 @@
+# Git hooks, run by lefthook: `bun install` installs them (outside CI), `mise exec -- lefthook install`
+# does it by hand. They're the quick part of CI, so a pull request, by a person or an agent, can't leave
+# without what CI and review expect: formatting before each commit; a changeset, a consistent version,
+# typecheck and lint before each push. CI still runs everything, the test suites too, so skipping these
+# with --no-verify only moves the failure there. Commands go through mise, which provides Bun, Rust and
+# the linters at the versions mise.toml pins, also in shells that don't have them on PATH.
+# lefthook-local.yml (ignored by Git) can override them for one checkout.
+
+pre-commit:
+  parallel: true
+  skip: [merge, rebase]
+  jobs:
+    - name: rustfmt
+      glob: "server/**/*.rs"
+      run: mise exec -- cargo fmt --manifest-path server/Cargo.toml --check
+      fail_text: "Rust isn't formatted: run `mise exec -- cargo fmt --manifest-path server/Cargo.toml`, stage it and commit again"
+
+# Jobs with a glob run when the pushed commits touch a matching file.
+pre-push:
+  parallel: true
+  jobs:
+    - name: changeset
+      run: mise run changeset:check
+    - name: version
+      run: mise run release:check
+    - name: typecheck
+      glob: ["*.ts", "*.svelte", "*.js", "*.json", "bun.lock"]
+      run: mise run typecheck
+    - name: rust
+      glob: ["server/**"]
+      run: mise run check
+    - name: lint
+      glob: [".github/workflows/*", "scripts/setup-linux.sh", "mise.toml"]
+      run: mise run lint

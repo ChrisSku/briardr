@@ -15,7 +15,9 @@ mise install
 mise run install
 ```
 
-Bun and Rust versions come from [`mise.toml`](../mise.toml). Commit lockfile changes only when
+Bun, Rust and the linters come from [`mise.toml`](../mise.toml). `mise run install` also installs the
+git hooks in [`lefthook.yml`](../lefthook.yml): Rust formatting before each commit, and the changeset,
+version, typecheck, clippy and workflow lint checks before each push. Commit lockfile changes only when
 intentionally changing dependencies. No npm package publication is required; `private: true` and
 Cargo's `publish = false` prevent accidental registry publication while the source remains open.
 
@@ -54,6 +56,7 @@ mise run typecheck      # TypeScript and Svelte
 mise run build          # production web bundle
 mise run check          # cargo fmt and clippy, warnings are errors
 mise run test           # Rust unit/fixture tests, then Bun integration tests
+mise run lint           # the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)
 ```
 
 The integration suite builds a debug server with test hooks and starts throwaway instances on

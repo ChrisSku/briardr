@@ -1,5 +1,5 @@
-# Linux checks: typecheck, client build, the test suite against an isolated Herdr session, the setup
-# helper (shellcheck) and the generated deployment files (systemd units, Caddy site).
+# Linux checks: typecheck, client build, the test suite against an isolated Herdr session, the workflows
+# (actionlint), the setup helper (shellcheck) and the generated deployment files (systemd units, Caddy site).
 # Mac-only integrations (power, dictation, Keychain) are covered by stubbed tests or skipped here.
 # When they pass on main, the release workflow versions and releases the changesets the merge brought.
 # Actions are pinned to commits; the comment names the release each one is.
@@ -38,8 +38,8 @@ jobs:
       - run: mise run check
       - run: mise run test
 
-      - name: Setup helper
-        run: shellcheck -s bash -S error scripts/setup-linux.sh
+      - name: Workflows and setup helper
+        run: mise run lint
 
       - name: Deployment files
         run: |

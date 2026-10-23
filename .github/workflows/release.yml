@@ -34,6 +34,7 @@ jobs:
       contents: write # to tag the commit and create the release
     env:
       COMMIT: ${{ github.event.workflow_run.head_sha }}
+      LEFTHOOK: 0 # no git hooks: the version commit has no changeset of its own (lefthook doesn't install on CI anyway)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

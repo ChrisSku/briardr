@@ -2,6 +2,8 @@
 # Rust builds the server (server/, binary `briardr`). Bun bundles the web client and runs the tests.
 bun = "1.4.2"
 rust = { version = "1.99.0", components = "rustfmt,clippy" } # `mise run check` uses both
+actionlint = "1.7.12" # `mise run lint`: the GitHub workflows (it runs shellcheck on their scripts too)
+shellcheck = "0.11.0"
 
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
@@ -71,6 +73,14 @@ run = "bun scripts/release.ts check"
 description = "Add a changeset: what this pull request changes, for CHANGELOG.md and the version (--empty for none)"
 raw = true # it asks questions
 run = "bun --bun changeset"
+
+[tasks."changeset:check"]
+description = "Check that this branch brings a changeset (the pre-push hook and CI run it)"
+run = "bun scripts/release.ts changeset"
+
+[tasks.lint]
+description = "Lint the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)"
+run = ["actionlint", "shellcheck -s bash -S error scripts/setup-linux.sh"]
 
 [tasks."install-agent"]
 description = "Write the LaunchAgent so Briardr starts at login"

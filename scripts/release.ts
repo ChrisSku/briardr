@@ -7,6 +7,7 @@
 //   bun scripts/release.ts check [vX.Y.Z]   everything agrees, and with the tag when one is given
 //   bun scripts/release.ts notes vX.Y.Z     that version's CHANGELOG.md section, for the GitHub release
 //   bun scripts/release.ts sync             copy package.json's version everywhere and tidy its CHANGELOG.md section
+//   bun scripts/release.ts changeset [base]  the branch brings a changeset (base defaults to origin/main)
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -98,9 +99,31 @@ function sync() {
   console.log(`version ${v} copied to Cargo.toml, Cargo.lock and the install instructions`);
 }
 
+/** The branch brings a changeset compared with `base` (the pre-push hook and CI). Changesets' own message
+ *  says to run `changeset add`, which asks questions an agent can't answer, so this says what to write. */
+function changeset(base: string) {
+  const status = Bun.spawnSync([process.execPath, '--bun', 'changeset', 'status', `--since=${base}`], { cwd: root });
+  if (status.exitCode === 0) return console.log(`this branch brings a changeset (compared with ${base})`);
+  const output = `${status.stdout}${status.stderr}`;
+  if (!output.includes('no changesets were found')) fail(`changeset status --since=${base} failed:\n${output}`);
+  fail(`this branch has no changeset (compared with ${base}). Write one by hand, like .changeset/pinned-streams.md:
+
+  ---
+  "briardr": patch
+  ---
+
+  **What changed, as one bold sentence.** Then the detail someone upgrading needs, wrapped at about 105
+  columns. It becomes this pull request's CHANGELOG.md entry.
+
+patch fixes something; minor adds something or changes setup or behavior. When nothing users notice
+changes (docs, CI, tests), add an empty one instead: mise run changeset --empty
+More in .changeset/README.md. Don't run \`changeset add\` without --empty: it asks questions.`);
+}
+
 const [command, arg] = process.argv.slice(2);
 if (command === 'version') console.log(version());
 else if (command === 'check') check(arg);
 else if (command === 'notes' && arg) console.log(unwrap(notes(arg.replace(/^v/, '')) ?? fail(`CHANGELOG.md has no notes for ${arg}`)));
 else if (command === 'sync') sync();
-else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | sync');
+else if (command === 'changeset') changeset(arg ?? 'origin/main');
+else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | sync | changeset [base]');
