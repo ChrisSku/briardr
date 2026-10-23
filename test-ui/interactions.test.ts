@@ -1,5 +1,5 @@
 // Browser interaction checks in WebKit (Safari's engine) at iPhone size, against an in-process
-// Briardr server and the isolated briardr-dev Herdr session. Verifies what actually reaches the program.
+// Briardr server and the test run's own Herdr session. Verifies what actually reaches the program.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import http from 'node:http';

@@ -56,14 +56,17 @@ env = { BRIARDR_DATA_DIR = "{{config_root}}/.dev-data" }
 run = "{{config_root}}/server/target/release/briardr pair"
 
 [tasks.test]
-description = "Server unit tests, then the integration tests against the server binary (isolated briardr-dev Herdr session)"
+description = "Server unit tests, then the integration tests against the server binary (each run in its own Herdr session)"
 depends = ["build:test-server"]
 run = ["cargo test --manifest-path server/Cargo.toml --features test-hooks", "bun test --timeout 300000 ./test"]
 
 [tasks."test:ui"]
-description = "Browser checks at iPhone, iPad and Mac sizes in light and dark mode (against `mise run dev`)"
-depends = ["build", "build:test-server"]
-run = "bun test --timeout 120000 ./test-ui"
+description = "Browser checks in WebKit at iPhone, iPad and Mac sizes in light and dark mode (each run in its own Herdr session)"
+depends = ["build:test-server"]
+# Its own client build: a running Briardr serves web/dist from this checkout. Installing WebKit is quick
+# once it's there.
+env = { BRIARDR_WEB_DIST = "{{config_root}}/test-results/web-dist" }
+run = ["bun --bun playwright install webkit", "bun scripts/build.ts", "bun test --timeout 120000 ./test-ui"]
 
 [tasks."release:check"]
 description = "Check that the version agrees across Cargo, package.json, CHANGELOG.md and the install docs"

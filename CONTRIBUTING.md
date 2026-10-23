@@ -9,8 +9,8 @@ alongside code. Help us make Briardr useful beyond its first setup.
 - For a larger change, open an issue describing the use case first. Small fixes and documentation
   improvements can go straight to a pull request.
 - Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
-- Set up the code with the [development guide](docs/development.md). Keep personal work out of the
-  `briardr-dev` test session and keep real secrets out of fixtures.
+- Set up the code with the [development guide](docs/development.md). Keep real secrets out of
+  fixtures.
 
 Good first areas include improving setup instructions, testing a device/browser combination, and
 making an interaction easier with a keyboard or screen reader. Only label an issue `good first issue`
@@ -30,8 +30,9 @@ private keys, personal terminal output, or complete private configuration files.
 3. Run the checks appropriate to the change. For code, start with `mise run typecheck`,
    `mise run build`, `mise run check`, and `mise run test`. For UI changes, run relevant browser
    checks and include sanitized screenshots when useful.
-   `mise run install` also installs git hooks ([lefthook.yml](lefthook.yml)) that run the quick checks
-   before each commit and push; CI runs them too.
+   `mise run install` also installs git hooks ([lefthook.yml](lefthook.yml)): formatting before each
+   commit, and the checks and test suites the change needs before each push. CI runs them again, all
+   but the UI suite.
 4. Add a regression test when it demonstrates meaningful behavior. Documentation-only changes do
    not need application tests; verify paths, commands, links, and claimed platform support.
 5. Update user-facing docs if setup or behavior changes. Separate tested behavior from assumptions.

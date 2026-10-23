@@ -31,12 +31,15 @@ setup and checks, [docs/architecture.md](docs/architecture.md) for the code map,
    notice changes (docs, CI, tests), run `mise run changeset --empty`. The summary becomes the pull
    request's `CHANGELOG.md` entry; see [.changeset/README.md](.changeset/README.md). Never set the
    version or write a version's `CHANGELOG.md` section yourself, and never push tags: merging releases.
-3. **Let the hooks run.** Before each commit they check Rust formatting; before each push, the
-   changeset, the version, typecheck, clippy and workflow lint. Fix what they report and never skip
-   them with `--no-verify`: CI runs the same checks.
-4. **Run the tests** the change needs: `mise run test` for any code change, and `mise run test:ui` for a
-   UI change. Both use the isolated `briardr-dev` Herdr session; keep personal work out of it.
-   `mise run build` and `mise run test:ui` write `web/dist`, which a running Briardr serves.
+3. **Let the hooks run.** Before each commit they check Rust formatting. Before each push they check the
+   changeset, the version, typecheck, clippy and workflow lint, and run the tests the pushed files need:
+   `mise run test` (about 25 seconds) for code, and `mise run test:ui` (about 3 minutes) for the client
+   or its tests. Fix what they report and never skip them with `--no-verify`: CI runs the checks and
+   `mise run test` again, and nothing else runs the UI suite.
+4. **Run the tests while you work**, so the push doesn't find the failures: the same two commands, or one
+   file (`mise exec -- bun test ./test/<name>.test.ts`). Each run has its own Herdr session, temp
+   directory and ports, and `test:ui` its own client build, so runs in parallel worktrees don't collide.
+   `mise run build` writes `web/dist`, which a running Briardr serves.
 5. **Describe the pull request** with the sections of
    [.github/pull_request_template.md](.github/pull_request_template.md): what changes and why, what you
    ran and what you didn't test, and docs and compatibility.

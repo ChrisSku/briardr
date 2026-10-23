@@ -1,9 +1,11 @@
 # Git hooks, run by lefthook: `bun install` installs them (outside CI), `mise exec -- lefthook install`
-# does it by hand. They're the quick part of CI, so a pull request, by a person or an agent, can't leave
-# without what CI and review expect: formatting before each commit; a changeset, a consistent version,
-# typecheck and lint before each push. CI still runs everything, the test suites too, so skipping these
-# with --no-verify only moves the failure there. Commands go through mise, which provides Bun, Rust and
-# the linters at the versions mise.toml pins, also in shells that don't have them on PATH.
+# does it by hand. They're what CI and review expect, so a pull request, by a person or an agent, can't
+# leave without it: formatting before each commit, so commits stay quick; before each push, a changeset, a
+# consistent version, typecheck, lint, and the test suites the change needs. Each test run has its own
+# Herdr session, ports and (the UI suite) client build, so parallel pushes don't collide. CI runs the
+# checks and the main suite again, so skipping these with --no-verify only moves the failure there.
+# Commands go through mise, which provides Bun, Rust and the linters at the versions mise.toml pins, also
+# in shells that don't have them on PATH.
 # lefthook-local.yml (ignored by Git) can override them for one checkout.
 
 pre-commit:
@@ -32,3 +34,11 @@ pre-push:
     - name: lint
       glob: [".github/workflows/*", "scripts/setup-linux.sh", "mise.toml"]
       run: mise run lint
+    # About 25 seconds once the test server is built.
+    - name: test
+      glob: ["server/**", "web/**", "test/**", "scripts/**", "package.json", "bun.lock", "bunfig.toml"]
+      run: mise run test
+    # About 3 minutes; CI doesn't run it.
+    - name: ui
+      glob: ["web/**", "test-ui/**"]
+      run: mise run test:ui

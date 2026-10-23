@@ -17,8 +17,10 @@ mise run install
 
 Bun, Rust and the linters come from [`mise.toml`](../mise.toml). `mise run install` also installs the
 git hooks in [`lefthook.yml`](../lefthook.yml): Rust formatting before each commit, and the changeset,
-version, typecheck, clippy and workflow lint checks before each push. Commit lockfile changes only when
-intentionally changing dependencies. No npm package publication is required; `private: true` and
+version, typecheck, clippy and workflow lint checks before each push, with `mise run test` when the push
+changes code and `mise run test:ui` when it changes the client or its tests. Skip one job for a push with
+`LEFTHOOK_EXCLUDE=ui git push`; CI runs everything but the UI suite again. Commit lockfile changes only
+when intentionally changing dependencies. No npm package publication is required; `private: true` and
 Cargo's `publish = false` prevent accidental registry publication while the source remains open.
 
 ## Run without touching your everyday Herdr session
@@ -60,8 +62,11 @@ mise run lint           # the GitHub workflows (actionlint) and the Linux setup 
 ```
 
 The integration suite builds a debug server with test hooks and starts throwaway instances on
-loopback. It uses `briardr-dev`, not the default Herdr session, but creates and removes fixture workspaces
-there: keep personal work out of `briardr-dev`. The tests require `herdr`, `curl`, Git, and Python 3 on PATH.
+loopback ports below the ephemeral range. Each run starts its own Herdr session (`briardr-test-<pid>`) and
+temp directory and removes them when it ends (a killed run's session goes at the next run), so runs in
+parallel don't collide and your sessions are never touched. To watch the tests in Herdr, run them in the
+development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
+Python 3 on PATH.
 
 For Rust-only changes, a narrower check is:
 
@@ -74,16 +79,15 @@ suite, shell helper, and generated deployment files. macOS integrations require 
 
 ## Browser checks
 
-Install Playwright's WebKit browser after installing dependencies:
-
 ```sh
-mise exec -- bunx playwright install webkit
-# Linux also needs browser system libraries:
-# mise exec -- bunx playwright install-deps webkit
 mise run test:ui
+# Linux also needs WebKit's system libraries, once:
+# mise exec -- bunx playwright install-deps webkit
 ```
 
-Most UI suites start their own isolated servers; the screenshot harness uses the running development
+`mise run test:ui` installs Playwright's WebKit when it's missing and builds the client into
+`test-results/web-dist`, so it never changes the `web/dist` a running Briardr serves. The UI suites start
+their own servers, like the integration suite; the screenshot harness uses the running development
 server. `test-ui/screens.ts` expects demo streams such as `refactor auth`; populate the expected
 fixtures or adapt that harness before using it for screenshots. Never capture personal terminals,
 repository names, keys, or sign-in prompts for a public issue or README.

@@ -1,4 +1,4 @@
-// Docs, uploads, preview, creating work, and stream actions, end to end against the briardr-dev session.
+// Docs, uploads, preview, creating work, and stream actions, end to end against the test run's Herdr session.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
