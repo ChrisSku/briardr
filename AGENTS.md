@@ -36,10 +36,9 @@ setup and checks, [docs/architecture.md](docs/architecture.md) for the code map,
    `mise run test` (about 25 seconds) for code, and `mise run test:ui` (about 3 minutes) for the client
    or its tests. Fix what they report and never skip them with `--no-verify`: CI runs the checks and
    `mise run test` again, and nothing else runs the UI suite.
-4. **Run the tests while you work**, so the push doesn't find the failures: the same two commands, or one
-   file (`mise exec -- bun test ./test/<name>.test.ts`). Each run has its own Herdr session, temp
-   directory and ports, and `test:ui` its own client build, so runs in parallel worktrees don't collide.
-   `mise run build` writes `web/dist`, which a running Briardr serves.
+4. **Run the tests while you work** (the same two commands), so the push doesn't find the failures. Each
+   run has its own Herdr session, ports and client build (in `test-results/`), so runs in parallel
+   worktrees don't collide. `mise run build` writes `web/dist`, which a running Briardr serves.
 5. **Describe the pull request** with the sections of
    [.github/pull_request_template.md](.github/pull_request_template.md): what changes and why, what you
    ran and what you didn't test, and docs and compatibility.

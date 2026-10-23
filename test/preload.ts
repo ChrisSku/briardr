@@ -1,6 +1,6 @@
 // Loaded before every test file (bunfig.toml), so its afterAll runs once, when the whole run ends: it
-// removes the Herdr session and the temp directory the run used (test/helpers.ts).
+// removes the Herdr session the run used (test/helpers.ts).
 import { afterAll } from 'bun:test';
-import { endRun } from './helpers.ts';
+import { endSession } from './helpers.ts';
 
-afterAll(endRun);
+afterAll(endSession);

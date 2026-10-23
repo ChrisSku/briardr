@@ -58,14 +58,17 @@ run = "{{config_root}}/server/target/release/briardr pair"
 [tasks.test]
 description = "Server unit tests, then the integration tests against the server binary (each run in its own Herdr session)"
 depends = ["build:test-server"]
-run = ["cargo test --manifest-path server/Cargo.toml --features test-hooks", "bun test --timeout 300000 ./test"]
+# The servers under test need a client build; their own, because a running Briardr serves web/dist from
+# this checkout.
+env = { BRIARDR_WEB_DIST = "{{config_root}}/test-results/web-dist/test" }
+run = ["bun scripts/build.ts", "cargo test --manifest-path server/Cargo.toml --features test-hooks", "bun test --timeout 300000 ./test"]
 
 [tasks."test:ui"]
 description = "Browser checks in WebKit at iPhone, iPad and Mac sizes in light and dark mode (each run in its own Herdr session)"
 depends = ["build:test-server"]
-# Its own client build: a running Briardr serves web/dist from this checkout. Installing WebKit is quick
-# once it's there.
-env = { BRIARDR_WEB_DIST = "{{config_root}}/test-results/web-dist" }
+# Its own client build, like `test`'s (they can run at the same time). Installing WebKit is quick once
+# it's there.
+env = { BRIARDR_WEB_DIST = "{{config_root}}/test-results/web-dist/ui" }
 run = ["bun --bun playwright install webkit", "bun scripts/build.ts", "bun test --timeout 120000 ./test-ui"]
 
 [tasks."release:check"]

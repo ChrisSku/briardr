@@ -61,9 +61,10 @@ mise run test           # Rust unit/fixture tests, then Bun integration tests
 mise run lint           # the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)
 ```
 
-The integration suite builds a debug server with test hooks and starts throwaway instances on
-loopback ports below the ephemeral range. Each run starts its own Herdr session (`briardr-test-<pid>`) and
-temp directory and removes them when it ends (a killed run's session goes at the next run), so runs in
+The integration suite builds a debug server with test hooks and the client (into
+`test-results/web-dist/test`, not `web/dist`), and starts throwaway instances on loopback ports below the
+ephemeral range, each with its own data and uploads directory. Each run starts its own Herdr session
+(`briardr-test-<pid>`) and removes it when it ends (a killed run's session goes at the next run), so runs in
 parallel don't collide and your sessions are never touched. To watch the tests in Herdr, run them in the
 development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
 Python 3 on PATH.
@@ -86,7 +87,7 @@ mise run test:ui
 ```
 
 `mise run test:ui` installs Playwright's WebKit when it's missing and builds the client into
-`test-results/web-dist`, so it never changes the `web/dist` a running Briardr serves. The UI suites start
+`test-results/web-dist/ui`, so it never changes the `web/dist` a running Briardr serves. The UI suites start
 their own servers, like the integration suite; the screenshot harness uses the running development
 server. `test-ui/screens.ts` expects demo streams such as `refactor auth`; populate the expected
 fixtures or adapt that harness before using it for screenshots. Never capture personal terminals,

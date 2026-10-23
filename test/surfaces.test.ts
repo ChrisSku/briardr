@@ -144,7 +144,7 @@ describe('uploads', () => {
   });
 
   test('a cancelled upload removes only its own partial file', async () => {
-    const root = path.join(process.env.TMPDIR || '/tmp', 'briardr-uploads');
+    const root = path.join(s.dataDir, 'briardr-uploads');
     const before = new Set(fs.existsSync(root) ? fs.readdirSync(root) : []);
     await new Promise<void>((resolve) => {
       const req = https.request(`https://127.0.0.1:${s.port}/api/streams/${enc(pane)}/uploads?kind=file&name=big.bin`, {
@@ -346,7 +346,7 @@ describe('notes', () => {
     const copy = r.json.text.split('\n')[1];
     assert.equal(r.json.text, `Login is broken:\n${copy}\nSame as ${copy}. Gone: ![old](note:${unknown})`, 'each image is its path, on the same line; one copy per image');
     assert.deepEqual([r.json.images, r.json.missing], [1, 1]);
-    assert.ok(copy.startsWith(path.join(process.env.TMPDIR || '/tmp', 'briardr-uploads') + '/'), copy);
+    assert.ok(copy.startsWith(path.join(s.dataDir, 'briardr-uploads') + '/'), copy);
     assert.ok(fs.readFileSync(copy).equals(png));
     assert.equal(fs.statSync(path.dirname(copy)).mode & 0o777, 0o700);
     assert.equal(fs.statSync(copy).mode & 0o777, 0o600);

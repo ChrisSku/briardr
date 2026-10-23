@@ -1,6 +1,6 @@
-// Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory and the
-// test run's own Herdr session and temp directory. Nothing here touches the developer's real panes, and runs
-// in parallel (other worktrees, other agents) don't share anything.
+// Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory (uploads
+// too) and the test run's own Herdr session. Nothing here touches the developer's real panes, and runs in
+// parallel (other worktrees, other agents) don't share anything.
 // The binary is `BRIARDR_SERVER_BIN`, else server/target/debug/briardr (`mise run build:test-server`): a build
 // with the loopback test hooks (/__test/*), which stand in for reaching into the server from a test.
 import { execFileSync, spawn } from 'node:child_process';
@@ -15,11 +15,6 @@ import tls from 'node:tls';
  *  to keep instead, such as briardr-dev to watch the tests in Herdr. */
 export const SESSION = process.env.BRIARDR_TEST_SESSION || `briardr-test-${process.pid}`;
 const OWN_SESSION = !process.env.BRIARDR_TEST_SESSION;
-
-/** This run's own temp directory, which the servers it starts inherit (their uploads go there too), removed
- *  when the run ends. */
-const RUN_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'briardr-run-'));
-process.env.TMPDIR = RUN_TMP;
 
 export function tmpDir(prefix = 'briardr-test-'): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -64,11 +59,9 @@ export function ensureSession(): void {
   }
 }
 
-/** When the run ends: stop and delete its session, unless BRIARDR_TEST_SESSION named one to keep, and remove
- *  its temp directory. */
-export function endRun(): void {
+/** When the run ends: stop and delete its session, unless BRIARDR_TEST_SESSION named one to keep. */
+export function endSession(): void {
   if (OWN_SESSION && started) removeSession(SESSION);
-  fs.rmSync(RUN_TMP, { recursive: true, force: true });
 }
 
 function removeSession(name: string) {
@@ -150,6 +143,7 @@ async function startBinary(bin: string, opts: { pair?: boolean; config?: object;
   const env: NodeJS.ProcessEnv = {
     ...scrubbed(),
     BRIARDR_DATA_DIR: dataDir,
+    BRIARDR_UPLOADS_DIR: path.join(dataDir, 'briardr-uploads'), // not the shared one in the temp directory
     BRIARDR_HERDR_SESSION: SESSION,
     BRIARDR_PORT: String(port),
     BRIARDR_PREVIEW_PORT: String(port + 1),
