@@ -33,6 +33,9 @@ private keys, personal terminal output, or complete private configuration files.
 4. Add a regression test when it demonstrates meaningful behavior. Documentation-only changes do
    not need application tests; verify paths, commands, links, and claimed platform support.
 5. Update user-facing docs if setup or behavior changes. Separate tested behavior from assumptions.
+6. Add a [changeset](.changeset/README.md) with `mise run changeset`: how the change moves the
+   version and what the changelog says about it. Docs, CI and test changes add an empty one
+   (`mise run changeset --empty`).
 
 Preserve the [terminal and authentication rules](docs/architecture.md#boundaries-to-preserve).
 Never solve a connection problem by skipping authentication, disabling Origin checks,

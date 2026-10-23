@@ -102,18 +102,30 @@ test that creates temporary state; use a deployment you control and understand t
 
 ## Releases
 
-The version is set in `server/Cargo.toml`; `package.json`, `server/Cargo.lock`, [CHANGELOG.md](../CHANGELOG.md)
-and the install instructions (which clone the release tag) must agree, and CI checks that they do
-(`mise run release:check`). A pull request releases a new version by bringing it:
+Every pull request brings a [changeset](../.changeset/README.md): `mise run changeset` asks whether the
+change is a patch, minor or major one and for its changelog entry, and writes it to `.changeset/`. A pull
+request that changes nothing users notice (docs, CI, tests) adds an empty one with
+`mise run changeset --empty`. CI fails a pull request without one. Each pull request adds its own file,
+so several can be open at once without conflicting over the version or the changelog.
 
-1. In the pull request, `mise run release:bump 0.2.0` sets the version everywhere and starts its
-   `CHANGELOG.md` section. Write the notes there and commit them with the change.
-2. Merge the pull request.
+Merging releases it. When the Linux checks pass on `main`, the
+[release workflow](../.github/workflows/release.yml):
 
-When the Linux checks pass on `main`, the [release workflow](../.github/workflows/release.yml) tags that
-commit `v0.2.0` and publishes the GitHub release with the changelog section as its notes. A merge that
-keeps the version releases nothing. If a check fails, nothing is published: fix it in the next pull
-request, and its merge releases the version.
+1. runs `changeset version`, which sets the next version in `package.json` from the changesets waiting
+   on `main`, writes their section of [CHANGELOG.md](../CHANGELOG.md) and removes them, and
+   `scripts/release.ts sync`, which copies the version to `server/Cargo.toml`, `server/Cargo.lock` and
+   the install instructions (they clone the release tag). The release GitHub App pushes that to `main` as
+   "Version X.Y.Z".
+2. tags that commit `vX.Y.Z` once the Linux checks pass on it too, and publishes the GitHub release with
+   the changelog section as its notes.
+
+Merges that land close together can share a version, and empty changesets release nothing. If a check
+fails, nothing is versioned or published: the changesets wait on `main`, and the merge that fixes it
+releases them. Don't set the version by hand; `mise run release:check` checks that it agrees everywhere.
+
+The workflow needs the release GitHub App (Contents: read and write, installed on the repository, and in
+the `main` ruleset's bypass list): its client ID in the repository variable `RELEASE_APP_CLIENT_ID` and
+a private key in the secret `RELEASE_APP_PRIVATE_KEY`.
 
 ## Useful starting points
 

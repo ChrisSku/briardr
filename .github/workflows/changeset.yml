@@ -1,0 +1,24 @@
+# Every pull request brings a changeset (.changeset/README.md): what it changes for CHANGELOG.md and the
+# version, or an empty one when it changes nothing users notice. Merging releases it (release.yml).
+# Actions are pinned to commits; the comment names the release each one is.
+name: changeset
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  changeset:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # to compare the pull request with its base
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          install_args: bun
+      - run: bun install --frozen-lockfile
+      - run: bun --bun changeset status --since="origin/$GITHUB_BASE_REF"

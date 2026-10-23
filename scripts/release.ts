@@ -1,17 +1,19 @@
-// Briardr's version and releases. The version is set in server/Cargo.toml (the server reads it when it's
-// compiled); package.json, server/Cargo.lock, CHANGELOG.md and the install instructions, which clone the
-// release tag, must agree with it. CI runs `check`; after a merge to main, the release workflow runs
-// `version`, then `check` and `notes` for a version that isn't released yet.
+// Briardr's version and releases. The version is set in package.json, by `changeset version` when the
+// release workflow versions the changesets a merge brought to main; server/Cargo.toml (the server reads it
+// when it's compiled), server/Cargo.lock, CHANGELOG.md and the install instructions, which clone the
+// release tag, must agree with it. CI runs `check`; the release workflow runs `sync` after
+// `changeset version`, and `check` and `notes` for a version that isn't released yet.
 //   bun scripts/release.ts version          the current version
 //   bun scripts/release.ts check [vX.Y.Z]   everything agrees, and with the tag when one is given
 //   bun scripts/release.ts notes vX.Y.Z     that version's CHANGELOG.md section, for the GitHub release
-//   bun scripts/release.ts bump X.Y.Z       set a new version everywhere and start its CHANGELOG.md section
+//   bun scripts/release.ts sync             copy package.json's version everywhere and tidy its CHANGELOG.md section
 import fs from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dir, '..');
 const file = (rel: string) => path.join(root, rel);
 const read = (rel: string) => fs.readFileSync(file(rel), 'utf8');
+const write = (rel: string, change: (text: string) => string) => fs.writeFileSync(file(rel), change(read(rel)));
 
 /** Files whose install instructions clone the current release (docs/development.md clones main on purpose). */
 const INSTALL_DOCS = ['README.md', 'site/index.html', 'docs/macos-setup.md', 'docs/linux-deployment.md'];
@@ -19,6 +21,7 @@ const CLONE = /git clone (?:--branch (\S+) )?https:\/\/github\.com\/ChrisSku\/br
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const CARGO_VERSION = /^(\[package\][^[]*?\nversion = )"([^"]*)"/m;
 const LOCK_VERSION = /(name = "briardr-server"\nversion = )"([^"]*)"/;
+const heading = (v: string) => new RegExp(`^## ${v.replace(/\./g, '\\.')}\\b.*$`, 'm');
 
 function fail(message: string): never {
   console.error(`release: ${message}`);
@@ -26,19 +29,25 @@ function fail(message: string): never {
 }
 
 function version(): string {
-  const v = read('server/Cargo.toml').match(CARGO_VERSION)?.[2];
-  if (!v || !SEMVER.test(v)) fail(`server/Cargo.toml has no X.Y.Z version (found ${v ?? 'none'})`);
+  const v = JSON.parse(read('package.json')).version;
+  if (typeof v !== 'string' || !SEMVER.test(v)) fail(`package.json has no X.Y.Z version (found ${v ?? 'none'})`);
   return v;
+}
+
+/** Where `v`'s CHANGELOG.md section starts (after its heading) and ends; null when there's none. */
+function section(text: string, v: string): [number, number] | null {
+  const start = text.search(heading(v));
+  if (start < 0) return null;
+  const body = text.indexOf('\n', start) + 1;
+  const end = text.slice(body).search(/^## /m);
+  return [body, end < 0 ? text.length : body + end];
 }
 
 /** The CHANGELOG.md section for `v`, without its heading; null when there's none. */
 function notes(v: string): string | null {
   const text = read('CHANGELOG.md');
-  const start = text.search(new RegExp(`^## ${v.replace(/\./g, '\\.')}\\b.*$`, 'm'));
-  if (start < 0) return null;
-  const body = text.slice(text.indexOf('\n', start) + 1);
-  const end = body.search(/^## /m);
-  return (end < 0 ? body : body.slice(0, end)).trim();
+  const at = section(text, v);
+  return at && text.slice(...at).trim();
 }
 
 /** GitHub shows every line break in release notes, so lines wrapped in CHANGELOG.md are joined again. */
@@ -57,10 +66,10 @@ function unwrap(md: string): string {
 function check(tag?: string) {
   const v = version();
   const problems: string[] = [];
-  const pkg = JSON.parse(read('package.json')).version;
-  if (pkg !== v) problems.push(`package.json says ${pkg}`);
+  const cargo = read('server/Cargo.toml').match(CARGO_VERSION)?.[2];
+  if (cargo !== v) problems.push(`server/Cargo.toml says ${cargo} (run bun scripts/release.ts sync)`);
   const lock = read('server/Cargo.lock').match(LOCK_VERSION)?.[2];
-  if (lock !== v) problems.push(`server/Cargo.lock says ${lock} (run cargo build)`);
+  if (lock !== v) problems.push(`server/Cargo.lock says ${lock} (run bun scripts/release.ts sync)`);
   if (!/\w/.test(notes(v) ?? '')) problems.push(`CHANGELOG.md has no notes under "## ${v}"`);
   for (const rel of INSTALL_DOCS) {
     const clones = [...read(rel).matchAll(CLONE)];
@@ -69,23 +78,29 @@ function check(tag?: string) {
   }
   if (tag !== undefined && tag !== `v${v}`) problems.push(`the tag ${tag} doesn't match the version (v${v})`);
   if (problems.length) fail(`version ${v} isn't consistent:\n  ${problems.join('\n  ')}`);
-  console.log(`version ${v}: package.json, Cargo.lock, CHANGELOG.md and the install instructions agree${tag ? `, and so does ${tag}` : ''}`);
+  console.log(`version ${v}: Cargo.toml, Cargo.lock, CHANGELOG.md and the install instructions agree${tag ? `, and so does ${tag}` : ''}`);
 }
 
-function bump(next: string) {
-  if (!SEMVER.test(next)) fail(`"${next}" isn't an X.Y.Z version`);
-  const write = (rel: string, change: (text: string) => string) => fs.writeFileSync(file(rel), change(read(rel)));
-  write('server/Cargo.toml', (t) => t.replace(CARGO_VERSION, `$1"${next}"`));
-  write('server/Cargo.lock', (t) => t.replace(LOCK_VERSION, `$1"${next}"`));
-  write('package.json', (t) => t.replace(/("version": )"[^"]*"/, `$1"${next}"`));
-  for (const rel of INSTALL_DOCS) write(rel, (t) => t.replace(CLONE, (line) => line.replace(/^git clone (--branch \S+ )?/, `git clone --branch v${next} `)));
-  if (notes(next) === null) write('CHANGELOG.md', (t) => t.replace(/^## /m, `## ${next}\n\n- \n\n## `));
-  console.log(`version set to ${next}: write its notes in CHANGELOG.md, then commit; merging it into main releases v${next}`);
+/** After `changeset version`: package.json's version goes everywhere else, and its CHANGELOG.md section
+ *  loses the "### Patch Changes" style headings Changesets groups entries under (the version number
+ *  already says which kind it is), so it's one list like the sections written by hand. */
+function sync() {
+  const v = version();
+  write('server/Cargo.toml', (t) => t.replace(CARGO_VERSION, `$1"${v}"`));
+  write('server/Cargo.lock', (t) => t.replace(LOCK_VERSION, `$1"${v}"`));
+  for (const rel of INSTALL_DOCS) write(rel, (t) => t.replace(CLONE, (line) => line.replace(/^git clone (--branch \S+ )?/, `git clone --branch v${v} `)));
+  write('CHANGELOG.md', (t) => {
+    const at = section(t, v);
+    if (!at) return t;
+    const body = t.slice(...at).replace(/^### (Major|Minor|Patch) Changes\n\n/gm, '').replace(/(\S)\n\n(?=- )/g, '$1\n');
+    return t.slice(0, at[0]) + body + t.slice(at[1]);
+  });
+  console.log(`version ${v} copied to Cargo.toml, Cargo.lock and the install instructions`);
 }
 
 const [command, arg] = process.argv.slice(2);
 if (command === 'version') console.log(version());
 else if (command === 'check') check(arg);
 else if (command === 'notes' && arg) console.log(unwrap(notes(arg.replace(/^v/, '')) ?? fail(`CHANGELOG.md has no notes for ${arg}`)));
-else if (command === 'bump' && arg) bump(arg);
-else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | bump X.Y.Z');
+else if (command === 'sync') sync();
+else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | sync');
