@@ -80,9 +80,13 @@ export interface PendingUpdate {
 export const updateReady = state<PendingUpdate | null>(null);
 let pending: { target: string; reason: PendingUpdate['reason'] } | null = null;
 let poll: ReturnType<typeof setInterval> | null = null;
+// Set once this page reloads. The reconnect's check and the service worker's activation can offer the
+// same build moments apart, and a second location.reload() would start the page load over.
+let reloading = false;
 
 /** Reloads now, after the update's target is marked as tried (no reload loop). */
 export function reloadNow() {
+  reloading = true;
   if (!pending) return location.reload();
   store('briardr.lastAutoReload', pending.target);
   record('app_reload', { reason: pending.reason, mode: updateReady.value ? 'deferred' : 'auto' });
@@ -102,8 +106,8 @@ function applyWhenIdle() {
 
 /** An update for this tab: `target` names it, so a tab reloads for it at most once. */
 function offer(target: string, reason: PendingUpdate['reason']): boolean {
-  // A stale proxy or failed deployment must not cause a reload loop.
-  if (stored('briardr.lastAutoReload') === target) return false;
+  // A stale proxy or failed deployment must not cause a reload loop; a page that's reloading gets it anyway.
+  if (reloading || stored('briardr.lastAutoReload') === target) return false;
   pending = { target, reason };
   applyWhenIdle();
   return true;

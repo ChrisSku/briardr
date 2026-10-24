@@ -4,11 +4,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import net from 'node:net';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import { devices, webkit, type Browser, type Page } from 'playwright';
-import { closeWorkspace, herdr, sleep, testPane, tmpDir } from '../test/helpers.ts';
+import { closeWorkspace, freePort, herdr, SESSION, sleep, testPane, tmpDir } from '../test/helpers.ts';
 import { serverArgv } from './harness.ts';
 
 const dataDir = tmpDir('briardr-linux-ui-');
@@ -20,30 +19,8 @@ let anon: Page;
 let paired: Page;
 let ws: { pane: string; workspace: string };
 
-/** A port the OS says is free, with the next one (the preview port) also free. */
-async function freePort(): Promise<number> {
-  const probe = (port: number) =>
-    new Promise<boolean>((resolve) => {
-      const s = net.createServer();
-      s.once('error', () => resolve(false));
-      s.listen(port, () => s.close(() => resolve(true)));
-    });
-  for (let i = 0; i < 50; i++) {
-    const port = await new Promise<number>((resolve, reject) => {
-      const s = net.createServer();
-      s.once('error', reject);
-      s.listen(0, () => {
-        const p = (s.address() as net.AddressInfo).port;
-        s.close(() => resolve(p));
-      });
-    });
-    if (port < 65535 && (await probe(port + 1))) return port; // 65536 isn't a port
-  }
-  throw new Error('no free port pair');
-}
-
 function serverEnv(port: number): NodeJS.ProcessEnv {
-  return { ...process.env, BRIARDR_PLATFORM: 'linux', BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: 'briardr-dev', BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '' };
+  return { ...process.env, BRIARDR_PLATFORM: 'linux', BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: SESSION, BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '' };
 }
 
 beforeAll(async () => {

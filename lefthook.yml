@@ -1,0 +1,44 @@
+# Git hooks, run by lefthook: `bun install` installs them (outside CI), `mise exec -- lefthook install`
+# does it by hand. They're what CI and review expect, so a pull request, by a person or an agent, can't
+# leave without it: formatting before each commit, so commits stay quick; before each push, a changeset, a
+# consistent version, typecheck, lint, and the test suites the change needs. Each test run has its own
+# Herdr session, ports and client build, so parallel pushes don't collide. CI runs all of them again, for
+# every change, so skipping these with --no-verify only moves the failure there.
+# Commands go through mise, which provides Bun, Rust and the linters at the versions mise.toml pins, also
+# in shells that don't have them on PATH.
+# lefthook-local.yml (ignored by Git) can override them for one checkout.
+
+pre-commit:
+  parallel: true
+  skip: [merge, rebase]
+  jobs:
+    - name: rustfmt
+      glob: "server/**/*.rs"
+      run: mise exec -- cargo fmt --manifest-path server/Cargo.toml --check
+      fail_text: "Rust isn't formatted: run `mise exec -- cargo fmt --manifest-path server/Cargo.toml`, stage it and commit again"
+
+# Jobs with a glob run when the pushed commits touch a matching file.
+pre-push:
+  parallel: true
+  jobs:
+    - name: changeset
+      run: mise run changeset:check
+    - name: version
+      run: mise run release:check
+    - name: typecheck
+      glob: ["*.ts", "*.svelte", "*.js", "*.json", "bun.lock", "mise.toml"]
+      run: mise run typecheck
+    - name: rust
+      glob: ["server/**", "mise.toml"]
+      run: mise run check
+    - name: lint
+      glob: [".github/workflows/*", "scripts/setup-linux.sh", "mise.toml"]
+      run: mise run lint
+    # About 25 seconds once the test server is built. mise.toml sets the Bun and Rust versions and the tasks.
+    - name: test
+      glob: ["server/**", "web/**", "test/**", "scripts/**", "package.json", "bun.lock", "bunfig.toml", "mise.toml"]
+      run: mise run test
+    # About 3 minutes, so only for the client and its tests here; CI runs it for every change.
+    - name: ui
+      glob: ["web/**", "test-ui/**"]
+      run: mise run test:ui

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, test } from 'bun:test';
 import { devices, webkit, type Browser, type Locator, type Page } from 'playwright';
 import { closeWorkspace, herdr, request, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { pageErrors } from './harness.ts';
 
 let server: TestServer;
 let browser: Browser;
@@ -54,10 +55,9 @@ for (const profile of ['iphone', 'mac'] as const) {
       }, { sid: workspace.pane, contents });
       const page = await ctx.newPage();
       const inputs: any[] = [];
-      const errors: string[] = [];
+      const errors = pageErrors(page);
       const fileReads: string[] = [];
       page.on('request', (req) => { if (req.url().includes('/files/file?')) fileReads.push(req.url()); });
-      page.on('pageerror', (e) => errors.push(e.message));
       page.on('websocket', (ws) => ws.on('framesent', ({ payload }) => {
         if (typeof payload !== 'string') return;
         try { const message = JSON.parse(payload); if (message.t === 'input') inputs.push(message); } catch {}

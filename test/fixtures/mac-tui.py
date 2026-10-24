@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-# Run a Herdr TUI client for the isolated briardr-dev session inside a pty, as a stand-in for the Mac's own view.
+# Run a Herdr TUI client for the test run's Herdr session inside a pty, as a stand-in for the Mac's own view.
 import fcntl, os, pty, struct, sys, termios, time, select, signal
 cols = int(sys.argv[1]) if len(sys.argv) > 1 else 140
 rows = int(sys.argv[2]) if len(sys.argv) > 2 else 45
+session = sys.argv[3] if len(sys.argv) > 3 else 'briardr-dev'
 pid, fd = pty.fork()
 if pid == 0:
-    os.execvp('herdr', ['herdr', '--session', 'briardr-dev'])
+    os.execvp('herdr', ['herdr', '--session', session])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
 os.kill(pid, signal.SIGWINCH)
 ctl = os.environ.get('TUI_CTL')  # optional fifo for resize commands "cols rows"

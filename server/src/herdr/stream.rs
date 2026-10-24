@@ -538,37 +538,20 @@ async fn next_line<R: AsyncRead + Unpin>(reader: &mut BufReader<R>, buf: &mut Ve
 
 #[cfg(test)]
 mod tests {
+    use crate::scratch::Scratch;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     use super::*;
 
     const FRAME: &str = r#"printf '%s\n' '{"type":"terminal.frame","seq":1,"width":80,"height":24,"full":true,"bytes":"aGk="}'"#;
 
-    /// A scratch directory with fake herdr scripts, removed on drop.
-    struct TestDir(PathBuf);
-
-    impl TestDir {
-        fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("kstream-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
-        /// Writes an executable `sh` script and returns its path.
-        fn script(&self, name: &str, body: &str) -> String {
-            let path = self.0.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path.to_string_lossy().into_owned()
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    /// Writes an executable `sh` script, a fake herdr, in `dir` and returns its path.
+    fn script(dir: &Path, name: &str, body: &str) -> String {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.to_string_lossy().into_owned()
     }
 
     fn closed_cmd(reason: &str) -> String {
@@ -731,8 +714,9 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_observe_frames_then_one_close() {
-        let dir = TestDir::new("observe");
-        let bin = dir.script(
+        let dir = Scratch::new("stream-observe");
+        let bin = script(
+            &dir,
             "herdr",
             &format!(
                 "{FRAME}\n{}\nsleep 30",
@@ -756,9 +740,10 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_control_writes_after_live() {
-        let dir = TestDir::new("control");
-        let out = dir.0.join("out.txt");
-        let bin = dir.script(
+        let dir = Scratch::new("stream-control");
+        let out = dir.join("out.txt");
+        let bin = script(
+            &dir,
             "herdr",
             &format!(
                 "{FRAME}\nread line\nprintf '%s\\n' \"$line\" > '{}'\nsleep 30",
@@ -779,8 +764,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_observe_release_kills_and_reports_released() {
-        let dir = TestDir::new("release-observe");
-        let bin = dir.script("herdr", &format!("{FRAME}\nsleep 30"));
+        let dir = Scratch::new("stream-release-observe");
+        let bin = script(&dir, "herdr", &format!("{FRAME}\nsleep 30"));
         let (session, mut rx) =
             TerminalSession::start(&target(&bin), "p1", StreamMode::Observe, None, false);
         assert_eq!(next(&mut rx).await, SessionEvent::Live);
@@ -800,8 +785,9 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_control_release_waits_for_herdr_close() {
-        let dir = TestDir::new("release-control");
-        let bin = dir.script(
+        let dir = Scratch::new("stream-release-control");
+        let bin = script(
+            &dir,
             "herdr",
             &format!("{FRAME}\nread line\n{}\nsleep 30", closed_cmd("released")),
         );
@@ -824,8 +810,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_exit_without_close_line_reports_exited() {
-        let dir = TestDir::new("exit");
-        let bin = dir.script("herdr", FRAME);
+        let dir = Scratch::new("stream-exit");
+        let bin = script(&dir, "herdr", FRAME);
         let (_session, mut rx) =
             TerminalSession::start(&target(&bin), "p1", StreamMode::Observe, None, false);
         assert_eq!(next(&mut rx).await, SessionEvent::Live);
@@ -842,8 +828,9 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_stream_stderr_warning_is_classified() {
-        let dir = TestDir::new("stderr");
-        let bin = dir.script(
+        let dir = Scratch::new("stream-stderr");
+        let bin = script(
+            &dir,
             "herdr",
             &format!("echo 'input ignored: busy' >&2\n{FRAME}\nsleep 30"),
         );

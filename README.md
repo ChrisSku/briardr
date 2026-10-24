@@ -186,7 +186,7 @@ mise run test        # Rust unit tests, then integration tests against the binar
 mise run test:ui     # WebKit at iPhone, iPad and Mac sizes, light and dark
 ```
 
-Development and tests use an isolated Herdr session (`briardr-dev`), so your real panes are never touched.
+Development uses an isolated Herdr session (`briardr-dev`) and every test run its own, so your real panes are never touched.
 Please report vulnerabilities through [private reporting](SECURITY.md#reporting-a-vulnerability).
 
 ## License

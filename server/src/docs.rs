@@ -290,32 +290,7 @@ fn image_type(rel: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    /// A scratch directory under the system temp dir, removed on drop.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            static COUNTER: AtomicUsize = AtomicUsize::new(0);
-            let n = COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
-            let dir =
-                std::env::temp_dir().join(format!("briardr-docs-{}-{}", std::process::id(), n));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::scratch::Scratch;
 
     fn write(path: &Path, bytes: &[u8]) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -324,7 +299,7 @@ mod tests {
 
     /// A docs root with a sibling secret outside it: `base/secret.md` and `base/root/`.
     fn layout() -> (Scratch, PathBuf) {
-        let base = Scratch::new();
+        let base = Scratch::new("docs");
         write(&base.path().join("secret.md"), b"secret");
         let root = base.path().join("root");
         fs::create_dir_all(&root).unwrap();

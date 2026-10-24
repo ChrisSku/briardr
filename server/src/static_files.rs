@@ -173,6 +173,7 @@ pub fn static_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use serde_json::Value;
     use std::fs::{self, File};
     use std::time::{Duration, SystemTime};
@@ -199,39 +200,16 @@ mod tests {
         found
     }
 
-    /// A unique directory under the system temp dir, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(tag: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos());
-            let dir = std::env::temp_dir().join(format!(
-                "briardr-static-{tag}-{}-{nanos}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&dir).expect("create temp dir");
-            TempDir(dir)
-        }
-
-        /// Writes `name` with the given modified time.
-        fn write(&self, name: &str, mtime: SystemTime) -> PathBuf {
-            let path = self.0.join(name);
-            fs::write(&path, b"x").expect("write fixture file");
-            File::options()
-                .write(true)
-                .open(&path)
-                .and_then(|f| f.set_modified(mtime))
-                .expect("set mtime");
-            path
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
+    /// Writes `name` in `dir` with the given modified time.
+    fn write(dir: &Path, name: &str, mtime: SystemTime) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, b"x").expect("write fixture file");
+        File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(mtime))
+            .expect("set mtime");
+        path
     }
 
     fn meta(path: &Path) -> Metadata {
@@ -334,11 +312,11 @@ mod tests {
     #[test]
     fn br_copy_newer_than_file_is_served() {
         let base = SystemTime::now();
-        let dir = TempDir::new("br");
-        let src = dir.write("main.js", base - Duration::from_secs(100));
-        dir.write("main.js.br", base - Duration::from_secs(50));
+        let dir = Scratch::new("static-br");
+        let src = write(&dir, "main.js", base - Duration::from_secs(100));
+        write(&dir, "main.js.br", base - Duration::from_secs(50));
         let sf = static_file(&src, &meta(&src), "/main.js", Some("gzip, br"), &[]);
-        assert_eq!(sf.body, dir.0.join("main.js.br"));
+        assert_eq!(sf.body, dir.join("main.js.br"));
         assert_eq!(header(&sf, "content-encoding"), Some("br"));
         assert_eq!(header(&sf, "vary"), Some("accept-encoding"));
         assert_eq!(
@@ -351,21 +329,21 @@ mod tests {
     #[test]
     fn gzip_copy_used_when_br_not_accepted() {
         let base = SystemTime::now();
-        let dir = TempDir::new("gz");
-        let src = dir.write("main.js", base - Duration::from_secs(100));
-        dir.write("main.js.br", base - Duration::from_secs(50));
-        dir.write("main.js.gz", base - Duration::from_secs(50));
+        let dir = Scratch::new("static-gz");
+        let src = write(&dir, "main.js", base - Duration::from_secs(100));
+        write(&dir, "main.js.br", base - Duration::from_secs(50));
+        write(&dir, "main.js.gz", base - Duration::from_secs(50));
         let sf = static_file(&src, &meta(&src), "/main.js", Some("gzip"), &[]);
-        assert_eq!(sf.body, dir.0.join("main.js.gz"));
+        assert_eq!(sf.body, dir.join("main.js.gz"));
         assert_eq!(header(&sf, "content-encoding"), Some("gzip"));
     }
 
     #[test]
     fn older_copy_is_ignored() {
         let base = SystemTime::now();
-        let dir = TempDir::new("old");
-        let src = dir.write("main.js", base - Duration::from_secs(100));
-        dir.write("main.js.br", base - Duration::from_secs(200));
+        let dir = Scratch::new("static-old");
+        let src = write(&dir, "main.js", base - Duration::from_secs(100));
+        write(&dir, "main.js.br", base - Duration::from_secs(200));
         let sf = static_file(&src, &meta(&src), "/main.js", Some("gzip, br"), &[]);
         assert_eq!(sf.body, src);
         assert_eq!(header(&sf, "content-encoding"), None);
@@ -375,9 +353,9 @@ mod tests {
     #[test]
     fn uncompressed_type_has_no_vary_and_no_copy_lookup() {
         let base = SystemTime::now();
-        let dir = TempDir::new("png");
-        let src = dir.write("logo.png", base - Duration::from_secs(100));
-        dir.write("logo.png.br", base - Duration::from_secs(50));
+        let dir = Scratch::new("static-png");
+        let src = write(&dir, "logo.png", base - Duration::from_secs(100));
+        write(&dir, "logo.png.br", base - Duration::from_secs(50));
         let sf = static_file(&src, &meta(&src), "/logo.png", Some("gzip, br"), &[]);
         assert_eq!(sf.body, src);
         assert_eq!(header(&sf, "vary"), None);
@@ -388,8 +366,8 @@ mod tests {
     #[test]
     fn fingerprinted_file_is_immutable() {
         let base = SystemTime::now();
-        let dir = TempDir::new("fp");
-        let src = dir.write("main.abcdef12.js", base - Duration::from_secs(100));
+        let dir = Scratch::new("static-fp");
+        let src = write(&dir, "main.abcdef12.js", base - Duration::from_secs(100));
         let sf = static_file(&src, &meta(&src), "/main.abcdef12.js", None, &[]);
         assert_eq!(header(&sf, "cache-control"), Some(IMMUTABLE_CACHE));
     }
@@ -397,8 +375,8 @@ mod tests {
     #[test]
     fn assets_path_is_immutable() {
         let base = SystemTime::now();
-        let dir = TempDir::new("assets");
-        let src = dir.write("x.woff2", base - Duration::from_secs(100));
+        let dir = Scratch::new("static-assets");
+        let src = write(&dir, "x.woff2", base - Duration::from_secs(100));
         let sf = static_file(&src, &meta(&src), "/assets/x.woff2", None, &[]);
         assert_eq!(header(&sf, "cache-control"), Some(IMMUTABLE_CACHE));
         assert_eq!(header(&sf, "content-type"), Some("font/woff2"));
@@ -408,8 +386,8 @@ mod tests {
     #[test]
     fn extra_headers_override() {
         let base = SystemTime::now();
-        let dir = TempDir::new("extra");
-        let src = dir.write("index.html", base - Duration::from_secs(100));
+        let dir = Scratch::new("static-extra");
+        let src = write(&dir, "index.html", base - Duration::from_secs(100));
         let extra = [("vary".to_string(), "x".to_string())];
         let sf = static_file(&src, &meta(&src), "/index.html", None, &extra);
         assert_eq!(header(&sf, "vary"), Some("x"));

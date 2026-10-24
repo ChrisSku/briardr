@@ -620,32 +620,16 @@ mod tests {
     use super::*;
     use crate::diag::Diagnostics;
     use crate::herdr::rpc::HerdrTarget;
-    use std::path::PathBuf;
+    use crate::scratch::Scratch;
     use std::sync::Arc;
 
     fn set(names: &[&str]) -> HashSet<String> {
         names.iter().map(|s| s.to_string()).collect()
     }
 
-    /// Removes the scratch directory when the test ends.
-    struct Scratch(PathBuf);
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
     /// Actions over a Herdr target whose socket never exists, so any Herdr call fails as unreachable.
     fn offline(host: &str) -> (Actions, Scratch) {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!(
-            "briardr-actions-test-{}-{nanos}",
-            std::process::id()
-        ));
+        let dir = Scratch::new("actions");
         let diag =
             Arc::new(Diagnostics::new(dir.join("logs"), dir.join("salt")).expect("diagnostics"));
         let target = HerdrTarget {
@@ -655,7 +639,7 @@ mod tests {
         };
         (
             Actions::new(HerdrState::new(target, diag), host.to_string()),
-            Scratch(dir),
+            dir,
         )
     }
 

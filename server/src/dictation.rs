@@ -214,35 +214,8 @@ pub async fn transcribe(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            static COUNTER: AtomicUsize = AtomicUsize::new(0);
-            let n = COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
-            let dir = std::env::temp_dir().join(format!(
-                "briardr-dictation-test-{}-{}",
-                std::process::id(),
-                n
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// Writes an executable `sh` helper whose body runs with the audio path as `$1`.
     fn fake_helper(scratch: &Scratch, body: &str) -> PathBuf {
@@ -333,7 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn success_returns_trimmed_output() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let helper = fake_helper(&scratch, "printf '  Please run the integration tests \\n'");
         let text = transcribe(Some(&helper), &audio(), Some("en-US"))
             .await
@@ -343,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn exit_2_is_unsupported_locale() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let helper = fake_helper(&scratch, "exit 2");
         let err = transcribe(Some(&helper), &audio(), Some("xx"))
             .await
@@ -358,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn other_failures_are_failed() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let helper = fake_helper(&scratch, "printf 'hi'; exit 1");
         let err = transcribe(Some(&helper), &audio(), None).await.unwrap_err();
         assert_eq!(err.category, DictationCategory::Failed);
@@ -372,7 +345,7 @@ mod tests {
 
     #[tokio::test]
     async fn blank_output_is_empty() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let helper = fake_helper(&scratch, "printf ' \\n\\n'");
         let err = transcribe(Some(&helper), &audio(), None).await.unwrap_err();
         assert_eq!(err.category, DictationCategory::Empty);
@@ -381,7 +354,7 @@ mod tests {
 
     #[tokio::test]
     async fn locale_is_passed_only_when_valid() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let rec = scratch.path().join("record");
         let helper = fake_helper(
             &scratch,
@@ -405,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn temp_dir_is_removed_after_success_and_failure() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let rec = scratch.path().join("record");
         let ok = fake_helper(
             &scratch,
@@ -447,7 +420,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_helper_reuses_helper_newer_than_source() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("dictation");
         let src = scratch.path().join("transcribe.swift");
         std::fs::write(&src, "// source").unwrap();
         let out = helper_path(scratch.path());

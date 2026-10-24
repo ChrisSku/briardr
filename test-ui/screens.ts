@@ -1,6 +1,6 @@
 // Captures the main screens at iPhone, iPad and Mac sizes, in light and dark mode, for review.
 // Run with the dev server up (mise run dev):  bun test-ui/screens.ts [profile] [scheme]
-import { BASE, launch, pair, shot, type Profile } from './harness.ts';
+import { BASE, launch, pageErrors, pair, shot, type Profile } from './harness.ts';
 
 const profiles = (process.argv[2] ? [process.argv[2]] : ['iphone', 'ipad', 'mac']) as Profile[];
 const schemes = (process.argv[3] ? [process.argv[3]] : ['light', 'dark']) as ('light' | 'dark')[];
@@ -9,8 +9,7 @@ const STREAM = process.env.BRIARDR_STREAM || 'w1:p2';
 for (const profile of profiles)
   for (const scheme of schemes) {
     const { browser, page } = await launch(profile, scheme);
-    const errors: string[] = [];
-    page.on('pageerror', (e) => errors.push(e.message));
+    const errors = pageErrors(page);
     await pair(page, `${profile}-${scheme}`);
     await page.waitForTimeout(700);
     const tag = `${profile}-${scheme}`;

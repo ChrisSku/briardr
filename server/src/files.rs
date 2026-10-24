@@ -300,28 +300,8 @@ fn compare_entries(a: &FileEntry, b: &FileEntry) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            static COUNTER: AtomicUsize = AtomicUsize::new(0);
-            let n = COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
-            let dir =
-                std::env::temp_dir().join(format!("briardr-files-{}-{}", std::process::id(), n));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn write(path: &Path, bytes: &[u8]) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -330,9 +310,9 @@ mod tests {
 
     /// `base/secret.txt` outside, `base/root/` as the stream's folder.
     fn layout() -> (Scratch, PathBuf) {
-        let base = Scratch::new();
-        write(&base.0.join("secret.txt"), b"secret");
-        let root = base.0.join("root");
+        let base = Scratch::new("files");
+        write(&base.join("secret.txt"), b"secret");
+        let root = base.join("root");
         fs::create_dir_all(&root).unwrap();
         (base, root)
     }
@@ -399,8 +379,8 @@ mod tests {
         let (base, root) = layout();
         write(&root.join("real/x.txt"), b"x");
         std::os::unix::fs::symlink(root.join("real"), root.join("inside")).unwrap();
-        std::os::unix::fs::symlink(base.0.join("secret.txt"), root.join("out.txt")).unwrap();
-        std::os::unix::fs::symlink(&base.0, root.join("outdir")).unwrap();
+        std::os::unix::fs::symlink(base.join("secret.txt"), root.join("out.txt")).unwrap();
+        std::os::unix::fs::symlink(base.path(), root.join("outdir")).unwrap();
         let list = list_dir(&root, "", &HashSet::new()).unwrap();
         assert_eq!(names(&list), ["inside", "real"]);
         assert!(list.entries[0].link && list.entries[0].dir);
@@ -483,9 +463,9 @@ mod tests {
         let (base, root) = layout();
         write(&root.join("real/inside.txt"), b"x");
         std::os::unix::fs::symlink(root.join("real/inside.txt"), root.join("alias.txt")).unwrap();
-        std::os::unix::fs::symlink(base.0.join("secret.txt"), root.join("escape.txt")).unwrap();
+        std::os::unix::fs::symlink(base.join("secret.txt"), root.join("escape.txt")).unwrap();
         std::os::unix::fs::symlink(&root, root.join("cycle")).unwrap();
-        std::os::unix::fs::symlink(&base.0, root.join("outside")).unwrap();
+        std::os::unix::fs::symlink(base.path(), root.join("outside")).unwrap();
         let result = search_files(&root, ".txt", &HashSet::new()).unwrap();
         assert_eq!(
             result
@@ -534,7 +514,7 @@ mod tests {
             delete_entry(&root, root.to_str().unwrap()),
             Err(DocsError::Outside(_))
         ));
-        assert_eq!(fs::read(base.0.join("secret.txt")).unwrap(), b"secret");
+        assert_eq!(fs::read(base.join("secret.txt")).unwrap(), b"secret");
         delete_entry(&root, "one.txt").unwrap();
         delete_entry(&root, "nested").unwrap();
         assert!(!root.join("one.txt").exists());
@@ -553,7 +533,7 @@ mod tests {
         std::os::unix::fs::symlink(root.join("real/keep.txt"), root.join("alias.txt")).unwrap();
         std::os::unix::fs::symlink(&root, root.join("root-alias")).unwrap();
         std::os::unix::fs::symlink(root.join(".git"), root.join("git-alias")).unwrap();
-        std::os::unix::fs::symlink(&base.0, root.join("outside")).unwrap();
+        std::os::unix::fs::symlink(base.path(), root.join("outside")).unwrap();
         for rel in [
             "root-alias",
             "outside",
@@ -572,9 +552,9 @@ mod tests {
         assert!(!root.join("alias.txt").exists());
         // A link inside a deleted directory must not take its external target with it.
         fs::create_dir(root.join("delete-me")).unwrap();
-        std::os::unix::fs::symlink(&base.0, root.join("delete-me/outside")).unwrap();
+        std::os::unix::fs::symlink(base.path(), root.join("delete-me/outside")).unwrap();
         delete_entry(&root, "delete-me").unwrap();
-        assert!(base.0.join("secret.txt").exists());
+        assert!(base.join("secret.txt").exists());
         assert!(root.join(".git/HEAD").exists());
     }
 

@@ -405,24 +405,8 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::os::unix::fs::PermissionsExt;
-
-    /// A unique scratch folder under the system temp dir, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(tag: &str) -> Self {
-            let dir =
-                std::env::temp_dir().join(format!("briardr-notes-{tag}-{}", random_hex::<6>()));
-            TempDir(dir)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     fn fake_png(width: u32, height: u32) -> Vec<u8> {
         let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
@@ -449,8 +433,8 @@ mod tests {
 
     #[test]
     fn save_list_get() {
-        let tmp = TempDir::new("basic");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-basic");
+        let notes = Notes::new(tmp.join("notes"));
         let note = saved(notes.save("s1", None, "hello", None).unwrap());
         assert_eq!(note.id.len(), 16);
         assert_eq!(note.revision, 1);
@@ -462,8 +446,8 @@ mod tests {
 
     #[test]
     fn update_and_conflicts() {
-        let tmp = TempDir::new("conflict");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-conflict");
+        let notes = Notes::new(tmp.join("notes"));
         let first = saved(
             notes
                 .save("s1", Some("0123456789abcdef"), "a", None)
@@ -494,8 +478,8 @@ mod tests {
 
     #[test]
     fn too_large_boundary() {
-        let tmp = TempDir::new("large");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-large");
+        let notes = Notes::new(tmp.join("notes"));
         let at_limit = "a".repeat(MAX_NOTE_BYTES);
         assert!(matches!(
             notes.save("s1", None, &at_limit, None).unwrap(),
@@ -510,8 +494,8 @@ mod tests {
 
     #[test]
     fn too_many_allows_updates() {
-        let tmp = TempDir::new("many");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-many");
+        let notes = Notes::new(tmp.join("notes"));
         let mut first = None;
         for n in 0..MAX_NOTES {
             let note = saved(notes.save("s1", None, &format!("n{n}"), None).unwrap());
@@ -532,8 +516,8 @@ mod tests {
 
     #[test]
     fn remove_reports_presence() {
-        let tmp = TempDir::new("remove");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-remove");
+        let notes = Notes::new(tmp.join("notes"));
         let note = saved(notes.save("s1", None, "x", None).unwrap());
         assert!(!notes.remove("s1", "ffffffffffffffff").unwrap());
         assert!(notes.remove("s1", &note.id).unwrap());
@@ -542,8 +526,8 @@ mod tests {
 
     #[test]
     fn list_is_newest_first() {
-        let tmp = TempDir::new("order");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-order");
+        let notes = Notes::new(tmp.join("notes"));
         let mk = |id: &str, created_at: u64| Note {
             id: id.to_string(),
             text: id.to_string(),
@@ -570,8 +554,8 @@ mod tests {
 
     #[test]
     fn legacy_file_reads_as_one_note() {
-        let tmp = TempDir::new("legacy");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-legacy");
+        let notes = Notes::new(tmp.join("notes"));
         fs::create_dir_all(&notes.dir).unwrap();
         fs::write(
             notes.file("s1"),
@@ -595,8 +579,8 @@ mod tests {
 
     #[test]
     fn stream_id_mismatch_reads_empty() {
-        let tmp = TempDir::new("mismatch");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-mismatch");
+        let notes = Notes::new(tmp.join("notes"));
         fs::create_dir_all(&notes.dir).unwrap();
         fs::write(
             notes.file("s2"),
@@ -608,9 +592,9 @@ mod tests {
 
     #[test]
     fn add_image_and_paste() {
-        let tmp = TempDir::new("paste");
-        let notes = Notes::new(tmp.0.join("notes"));
-        let uploads = tmp.0.join("uploads");
+        let tmp = Scratch::new("notes-paste");
+        let notes = Notes::new(tmp.join("notes"));
+        let uploads = tmp.join("uploads");
 
         let name = notes.add_image("s1", &fake_png(3, 2)).unwrap();
         assert!(is_image_name(&name));
@@ -635,7 +619,7 @@ mod tests {
 
         // Text with no references passes through and creates no folder.
         let plain = notes
-            .for_terminal_in("s1", "just words", &tmp.0.join("none"))
+            .for_terminal_in("s1", "just words", &tmp.join("none"))
             .unwrap();
         assert_eq!(
             plain,
@@ -645,7 +629,7 @@ mod tests {
                 missing: 0
             }
         );
-        assert!(!tmp.0.join("none").exists());
+        assert!(!tmp.join("none").exists());
     }
 
     #[test]
@@ -667,8 +651,8 @@ mod tests {
 
     #[test]
     fn prune_drops_old_unreferenced_images() {
-        let tmp = TempDir::new("prune");
-        let notes = Notes::new(tmp.0.join("notes"));
+        let tmp = Scratch::new("notes-prune");
+        let notes = Notes::new(tmp.join("notes"));
         let kept_old = notes.add_image("s1", &fake_png(1, 1)).unwrap();
         let dropped_old = notes.add_image("s1", &fake_png(1, 1)).unwrap();
         let fresh = notes.add_image("s1", &fake_png(1, 1)).unwrap();

@@ -782,6 +782,7 @@ fn parse_date_ms(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -977,16 +978,14 @@ mod tests {
         std::env::remove_var("BRIARDR_TEST_CLAUDE_TOKEN");
     }
 
-    /// A temporary directory that is removed on drop.
-    struct Scratch(PathBuf);
+    /// A scratch directory with a `claude` settings folder, and room for the tap's state and bin folders.
+    struct ClaudeHome(Scratch);
 
-    impl Scratch {
-        fn new(name: &str) -> Scratch {
-            let dir =
-                std::env::temp_dir().join(format!("briardr-claude-{name}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&dir);
+    impl ClaudeHome {
+        fn new(name: &str) -> Self {
+            let dir = Scratch::new(&format!("claude-{name}"));
             fs::create_dir_all(dir.join("claude")).unwrap();
-            Scratch(dir)
+            ClaudeHome(dir)
         }
         fn tap(&self) -> StatuslineTap {
             StatuslineTap::new(
@@ -1000,12 +999,6 @@ mod tests {
         }
     }
 
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     const ORIGINAL: &str = r#"{
   "theme": "dark",
   "statusLine": { "type": "command", "command": "printf 'orig:%s' \"$(cat | wc -c | tr -d ' ')\"", "padding": 1 }
@@ -1014,7 +1007,7 @@ mod tests {
 
     #[test]
     fn tap_install_then_remove_restores_backup_byte_for_byte() {
-        let dir = Scratch::new("backup");
+        let dir = ClaudeHome::new("backup");
         let tap = dir.tap();
         fs::write(dir.settings(), ORIGINAL).unwrap();
 
@@ -1050,7 +1043,7 @@ mod tests {
 
     #[test]
     fn tap_remove_restores_only_the_status_line_when_settings_changed() {
-        let dir = Scratch::new("field");
+        let dir = ClaudeHome::new("field");
         let tap = dir.tap();
         fs::write(dir.settings(), r#"{"model":"opus"}"#).unwrap();
         let preview = tap.preview().unwrap();
@@ -1065,7 +1058,7 @@ mod tests {
 
     #[test]
     fn tap_without_settings_file_removes_the_file_again() {
-        let dir = Scratch::new("missing");
+        let dir = ClaudeHome::new("missing");
         let tap = dir.tap();
         fs::remove_dir_all(dir.0.join("claude")).unwrap();
         let preview = tap.preview().unwrap();
@@ -1081,7 +1074,7 @@ mod tests {
 
     #[test]
     fn tap_refuses_settings_that_already_point_at_briardr() {
-        let dir = Scratch::new("configured");
+        let dir = ClaudeHome::new("configured");
         let tap = dir.tap();
         let settings = r#"{"statusLine":{"type":"command","command":"'node' '/x/briardr-statusline-tap.mjs'"}}"#;
         fs::write(dir.settings(), settings).unwrap();

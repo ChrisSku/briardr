@@ -526,6 +526,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::scratch::Scratch;
 
     const FIXTURE: &str =
         include_str!("../../fixtures/usage/parseCodex.primary-and-secondary.json");
@@ -545,17 +546,14 @@ done
 
     /// A throwaway directory holding one fake `codex` script and its stdin log.
     struct FakeCodex {
-        dir: PathBuf,
+        _dir: Scratch,
         path: String,
         log: PathBuf,
     }
 
     impl FakeCodex {
         fn new(script: &str, reply: &str) -> Self {
-            let mut b = [0u8; 6];
-            rand::fill(&mut b);
-            let dir = std::env::temp_dir().join(format!("briardr-codex-test-{}", hex::encode(b)));
-            std::fs::create_dir_all(&dir).expect("test dir");
+            let dir = Scratch::new("codex");
             let log = dir.join("stdin.log");
             let body = script
                 .replace("__LOG__", &log.to_string_lossy())
@@ -565,7 +563,7 @@ done
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
                 .expect("test script mode");
             FakeCodex {
-                dir,
+                _dir: dir,
                 path: path.to_string_lossy().into_owned(),
                 log,
             }
@@ -584,12 +582,6 @@ done
                 .iter()
                 .filter_map(|m| m.get("method").and_then(Value::as_str).map(str::to_string))
                 .collect()
-        }
-    }
-
-    impl Drop for FakeCodex {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 

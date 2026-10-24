@@ -4,13 +4,12 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
 import { devices, webkit, type Browser } from 'playwright';
-import { closeWorkspace, herdr, sleep, testPane, tmpDir } from '../test/helpers.ts';
+import { closeWorkspace, freePort, herdr, SESSION, sleep, testPane, tmpDir } from '../test/helpers.ts';
 import { serverArgv } from './harness.ts';
 
 const dataDir = tmpDir('briardr-recovery-');
-const port = 30000 + Math.floor(Math.random() * 5000);
-const base = `https://localhost:${port}`;
-const env = { ...process.env, BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: 'briardr-dev', BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '', BRIARDR_NO_DICTATION: '1' };
+let base = ''; // the same port every time the server starts, set in beforeAll
+let env: NodeJS.ProcessEnv = {};
 let server: ChildProcess | null = null;
 let browser: Browser;
 let ws: { pane: string; workspace: string };
@@ -28,6 +27,9 @@ async function startServer() {
 
 beforeAll(async () => {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  const port = await freePort();
+  base = `https://localhost:${port}`;
+  env = { ...process.env, BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: SESSION, BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '', BRIARDR_NO_DICTATION: '1' };
   ws = testPane('briardr-recovery');
   herdr('pane', 'rename', ws.pane, 'recovery target');
   await startServer();
@@ -89,7 +91,8 @@ describe('recovery', () => {
     await page.locator('.connbar').waitFor({ state: 'detached', timeout: 40_000 });
     await page.waitForSelector('.tree');
     assert.equal(new URL(page.url()).pathname, '/workspaces');
-    assert.equal(await page.locator('.tree.is-dim').count(), 0);
+    // Herdr's state arrives just after the connection does; then the rows aren't dimmed any more.
+    await page.locator('.tree.is-dim').waitFor({ state: 'detached', timeout: 10_000 });
     await ctx.close();
   });
 

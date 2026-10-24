@@ -1,7 +1,8 @@
-# Linux checks: typecheck, client build, the test suite against an isolated Herdr session, the setup
-# helper (shellcheck) and the generated deployment files (systemd units, Caddy site).
+# Linux checks: typecheck, the Rust checks, the integration suite and the browser checks (each builds the client
+# and runs against its own Herdr session), the workflows (actionlint), the setup helper (shellcheck) and the
+# generated deployment files (systemd units, Caddy site). Every change runs all of them.
 # Mac-only integrations (power, dictation, Keychain) are covered by stubbed tests or skipped here.
-# The release workflow runs these on a version tag before it publishes (so tags don't start them here too).
+# When they pass on main, the release workflow versions and releases the changesets the merge brought.
 # Actions are pinned to commits; the comment names the release each one is.
 name: linux
 
@@ -9,7 +10,6 @@ on:
   push:
     branches: ['**']
   pull_request:
-  workflow_call:
 
 permissions:
   contents: read
@@ -26,7 +26,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun scripts/release.ts check # the version agrees across Cargo, package.json, CHANGELOG.md and the install docs
       - run: mise run typecheck
-      - run: mise run build
 
       - name: Herdr (the version and checksum pinned for servers)
         run: |
@@ -39,8 +38,8 @@ jobs:
       - run: mise run check
       - run: mise run test
 
-      - name: Setup helper
-        run: shellcheck -s bash -S error scripts/setup-linux.sh
+      - name: Workflows and setup helper
+        run: mise run lint
 
       - name: Deployment files
         run: |
@@ -55,3 +54,8 @@ jobs:
           $briardr caddyfile > "$out/briardr.caddy"
           . deploy/linux/versions.env # the Caddy version servers fall back to
           docker run --rm -v "$out:/etc/caddy:ro" "caddy:$CADDY_VERSION" caddy validate --config /etc/caddy/briardr.caddy --adapter caddyfile
+
+      - name: Browser checks (WebKit, with the system libraries it needs)
+        run: |
+          bun --bun playwright install --with-deps webkit
+          mise run test:ui

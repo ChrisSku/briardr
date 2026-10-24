@@ -783,7 +783,6 @@ fn launch_info(p: &Active, cfg: &BriardrConfig) -> PreviewInfo {
 mod tests {
     use super::*;
     use std::error::Error;
-    use std::path::PathBuf;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::mpsc;
@@ -877,15 +876,6 @@ mod tests {
         Ok(())
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "briardr-preview-test-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
-
     async fn free_port() -> Result<u16, Box<dyn Error>> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         Ok(listener.local_addr()?.port())
@@ -902,8 +892,7 @@ mod tests {
 
     #[tokio::test]
     async fn direct_preview_forwards_for_its_device_only() -> TestResult {
-        let dir = temp_dir("direct");
-        std::fs::create_dir_all(&dir)?;
+        let dir = crate::scratch::Scratch::new("preview-direct");
         std::fs::write(
             dir.join("devices.json"),
             format!(
@@ -947,7 +936,7 @@ mod tests {
         cfg.preview_port_count = 1;
         cfg.preview_port_start = free_port().await?;
         let listen = cfg.preview_port_start;
-        let paths = Paths::new(&dir);
+        let paths = Paths::new(dir.path());
         let auth = Arc::new(Auth::new(
             dir.join("devices.json"),
             dir.join("pairing.json"),

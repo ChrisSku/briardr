@@ -1,5 +1,6 @@
-// Test helpers: the Briardr server binary on loopback on random ports, using a throwaway data directory and
-// the isolated "briardr-dev" Herdr session. Nothing here touches the developer's real panes.
+// Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory (uploads
+// too) and the test run's own Herdr session. Nothing here touches the developer's real panes, and runs in
+// parallel (other worktrees, other agents) don't share anything.
 // The binary is `BRIARDR_SERVER_BIN`, else server/target/debug/briardr (`mise run build:test-server`): a build
 // with the loopback test hooks (/__test/*), which stand in for reaching into the server from a test.
 import { execFileSync, spawn } from 'node:child_process';
@@ -10,10 +11,24 @@ import os from 'node:os';
 import path from 'node:path';
 import tls from 'node:tls';
 
-export const SESSION = 'briardr-dev';
+/** This run's own Herdr session, removed when the run ends (test/preload.ts). BRIARDR_TEST_SESSION picks one
+ *  to keep instead, such as briardr-dev to watch the tests in Herdr. */
+export const SESSION = process.env.BRIARDR_TEST_SESSION || `briardr-test-${process.pid}`;
+const OWN_SESSION = !process.env.BRIARDR_TEST_SESSION;
 
+/** The folders this run made, one per line, so they go when it ends, or at the next run if it was killed. The
+ *  folders themselves stay directly in the temp directory: a pane's folder shows in its prompt, and a longer one
+ *  wraps the typed text on Linux at 80 columns. */
+const MADE = path.join(os.tmpdir(), `briardr-test-${process.pid}.dirs`);
+let made = false;
+
+/** A throwaway folder, removed when the run ends (test/preload.ts). */
 export function tmpDir(prefix = 'briardr-test-'): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  if (!made) removeStaleDirs();
+  made = true;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.appendFileSync(MADE, `${dir}\n`);
+  return dir;
 }
 
 export interface TestServer {
@@ -26,16 +41,16 @@ export interface TestServer {
   close(): Promise<void>;
 }
 
-let portSeed = 20000 + Math.floor(Math.random() * 20000);
-
 function scrubbed(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('HERDR_')) env[k] = v;
   return env;
 }
 
-/** Make sure the isolated briardr-dev Herdr server is running (a test fixture; it never touches the default session). */
-export function ensureDevSession(): void {
+let started = false;
+
+/** Make sure this run's Herdr session is running (a test fixture; it never touches the default session). */
+export function ensureSession(): void {
   const running = () => {
     try {
       return /status:\s*running/.test(execFileSync('herdr', ['--session', SESSION, 'status'], { env: scrubbed(), encoding: 'utf8' }));
@@ -43,14 +58,97 @@ export function ensureDevSession(): void {
       return false;
     }
   };
+  if (!started && OWN_SESSION) removeStaleSessions();
+  started = true;
   if (running()) return;
   const child = spawn('herdr', ['--session', SESSION, 'server'], { env: scrubbed(), stdio: 'ignore', detached: true });
   child.unref();
   const until = Date.now() + 10_000;
   while (!running()) {
-    if (Date.now() > until) throw new Error('could not start the briardr-dev Herdr session');
+    if (Date.now() > until) throw new Error(`could not start the ${SESSION} Herdr session`);
     execFileSync('sleep', ['0.2']);
   }
+}
+
+/** When the run ends: stop and delete its session (unless BRIARDR_TEST_SESSION named one to keep), then remove
+ *  the folders it made. */
+export function endRun(): void {
+  if (OWN_SESSION && started) removeSession(SESSION);
+  removeDirs(MADE);
+}
+
+/** Removes the folders a list names, then the list. Only a list this user wrote, and not a link: the temp
+ *  directory can be shared, and another user could put a list there under a run's name. */
+function removeDirs(list: string) {
+  let dirs = '';
+  try {
+    const stat = fs.lstatSync(list);
+    if (!stat.isFile() || stat.uid !== process.getuid?.()) return;
+    dirs = fs.readFileSync(list, 'utf8');
+  } catch {
+    return;
+  }
+  for (const dir of dirs.split('\n')) if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(list, { force: true });
+}
+
+/** Folders of runs that ended early (interrupted or killed): their process is gone. */
+function removeStaleDirs() {
+  const tmp = os.tmpdir();
+  for (const name of fs.readdirSync(tmp)) {
+    const pid = /^briardr-test-(\d+)\.dirs$/.exec(name)?.[1];
+    if (!pid) continue;
+    const list = path.join(tmp, name);
+    try {
+      process.kill(Number(pid), 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ESRCH') removeDirs(list);
+    }
+  }
+}
+
+function removeSession(name: string) {
+  for (const command of ['stop', 'delete']) {
+    try {
+      execFileSync('herdr', ['session', command, name], { env: scrubbed(), stdio: 'ignore' });
+    } catch {}
+  }
+}
+
+/** Sessions left by runs that ended early (interrupted or killed): their process is gone. */
+function removeStaleSessions() {
+  let list = '';
+  try {
+    list = execFileSync('herdr', ['session', 'list'], { env: scrubbed(), encoding: 'utf8' });
+  } catch {
+    return;
+  }
+  for (const [, name, pid] of list.matchAll(/^(briardr-test-(\d+))\s/gm)) {
+    try {
+      process.kill(Number(pid), 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ESRCH') removeSession(name!);
+    }
+  }
+}
+
+/** A port for a server under test, free on 127.0.0.1 (where it listens: a port taken there can look free on
+ *  all addresses) with its 16 preview ports after it. Below the ephemeral ranges (macOS 49152+, Linux 32768+),
+ *  so a port the OS hands out, such as a test's dev server, never lands among them. */
+export async function freePort(): Promise<number> {
+  const free = (port: number) =>
+    new Promise<boolean>((resolve) => {
+      const s = net.createServer();
+      s.once('error', () => resolve(false));
+      s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
+    });
+  for (let i = 0; i < 100; i++) {
+    const port = 20000 + Math.floor(Math.random() * 12000);
+    let ok = true;
+    for (let p = port; ok && p <= port + 16; p++) ok = await free(p);
+    if (ok) return port;
+  }
+  throw new Error('no free ports for a test server');
 }
 
 export const SERVER_BIN = process.env.BRIARDR_SERVER_BIN || path.resolve(import.meta.dir, '..', 'server', 'target', 'debug', 'briardr');
@@ -81,14 +179,14 @@ export function startServer(opts: { pair?: boolean; config?: object; platform?: 
  * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
  */
 async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string }): Promise<TestServer> {
-  ensureDevSession();
+  ensureSession();
   const dataDir = tmpDir('briardr-data-');
   if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
-  const port = portSeed++;
-  portSeed += 20;
+  const port = await freePort();
   const env: NodeJS.ProcessEnv = {
     ...scrubbed(),
     BRIARDR_DATA_DIR: dataDir,
+    BRIARDR_UPLOADS_DIR: path.join(dataDir, 'briardr-uploads'), // not the shared one in the temp directory
     BRIARDR_HERDR_SESSION: SESSION,
     BRIARDR_PORT: String(port),
     BRIARDR_PREVIEW_PORT: String(port + 1),
@@ -343,7 +441,7 @@ export function herdr(...args: string[]): any {
 
 /** A dedicated test workspace with a shell pane in a disposable folder. */
 export function testPane(label: string): { pane: string; workspace: string; dir: string } {
-  ensureDevSession();
+  ensureSession();
   const dir = tmpDir('briardr-ws-');
   const r = herdr('workspace', 'create', '--cwd', dir, '--label', label, '--no-focus');
   return { pane: r.result.root_pane.pane_id, workspace: r.result.workspace.workspace_id, dir };

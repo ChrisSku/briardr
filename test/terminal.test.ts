@@ -1,4 +1,4 @@
-// Safety rules for live terminals (against the isolated briardr-dev Herdr session):
+// Safety rules for live terminals (against the test run's own Herdr session):
 //  - input is never replayed after a reconnect and never queued while connecting;
 //  - watching is read-only; Peek never resizes the Mac's pane;
 //  - control is never taken from another client without an explicit takeover;
@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import { closeWorkspace, closed, herdr, opened, readPane, request, sleep, startServer, testPane, until, ws, type TestServer } from './helpers.ts';
+import { closeWorkspace, closed, herdr, opened, readPane, request, SESSION, sleep, startServer, testPane, until, ws, type TestServer } from './helpers.ts';
 
 let s: TestServer;
 let pane: string;
@@ -126,7 +126,7 @@ describe('live terminal safety', () => {
     herdr('workspace', 'focus', workspace);
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('HERDR_')) env[k] = v;
-    const tui = spawn('python3', [path.join(import.meta.dirname, 'fixtures', 'mac-tui.py'), '140', '45'], { env, stdio: 'ignore' });
+    const tui = spawn('python3', [path.join(import.meta.dirname, 'fixtures', 'mac-tui.py'), '140', '45', SESSION], { env, stdio: 'ignore' });
     try {
       let macRows = 0;
       for (let i = 0; i < 30 && !(macRows > 30); i++) {

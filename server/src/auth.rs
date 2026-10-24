@@ -353,14 +353,8 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::collections::BTreeSet;
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("briardr-auth-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let _ = fs::create_dir_all(&dir);
-        dir
-    }
 
     fn auth_in(dir: &Path) -> Auth {
         Auth::new(dir.join("devices.json"), dir.join("pairing.json"))
@@ -439,7 +433,7 @@ mod tests {
 
     #[test]
     fn pair_authenticate_revoke_flow() {
-        let dir = scratch_dir("flow");
+        let dir = Scratch::new("auth-flow");
         let auth = auth_in(&dir);
         let mut revoked = auth.subscribe_revoked();
         let (code, expires_at) = auth.create_pairing_code();
@@ -470,7 +464,7 @@ mod tests {
 
     #[test]
     fn wrong_codes_lock_client_then_code() {
-        let dir = scratch_dir("locks");
+        let dir = Scratch::new("auth-locks");
         let auth = auth_in(&dir);
         let (code, _) = auth.create_pairing_code();
         let wrong = wrong_code(&normalize_code(&code));
@@ -496,7 +490,7 @@ mod tests {
 
     #[test]
     fn file_shapes_match_ts() {
-        let dir = scratch_dir("shape");
+        let dir = Scratch::new("auth-shape");
         let auth = auth_in(&dir);
         let (code, _) = auth.create_pairing_code();
         let pairing_path = dir.join("pairing.json");

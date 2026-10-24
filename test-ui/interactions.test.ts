@@ -1,5 +1,5 @@
 // Browser interaction checks in WebKit (Safari's engine) at iPhone size, against an in-process
-// Briardr server and the isolated briardr-dev Herdr session. Verifies what actually reaches the program.
+// Briardr server and the test run's own Herdr session. Verifies what actually reaches the program.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import http from 'node:http';
@@ -7,15 +7,19 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
-import { closeWorkspace, herdr, SESSION, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
+/** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
+ *  (CI). The client words its messages after it, and only a Mac dictates (the Enter key's hold). */
+let host: { noun: string; platform: string };
 let browser: Browser;
 let ws: { pane: string; workspace: string; dir: string };
 const rawecho = path.resolve('test/fixtures/rawecho.py');
 
 beforeAll(async () => {
   s = await startServer({ pair: false });
+  host = (await request(s, 'GET', '/api/session', undefined, { cookie: false })).json.host;
   ws = testPane('briardr-ui');
   herdr('pane', 'rename', ws.pane, 'ui target');
   herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c'); // a clean shell prompt
@@ -137,7 +141,7 @@ describe('terminal input (iPhone)', () => {
     await page.keyboard.type('hi');
     await expectBytes(hex('h'));
     await expectBytes(hex('i'));
-    await page.getByRole('button', { name: 'Enter. Hold to dictate.' }).click();
+    await page.getByRole('button', { name: host.platform === 'macos' ? 'Enter. Hold to dictate.' : 'Enter', exact: true }).click();
     await expectBytes('0d');
   });
 
@@ -325,7 +329,7 @@ describe('terminal input (iPhone)', () => {
       return ctl.paste('stale-insert', true, ctl.generation.value - 1);
     });
     assert.equal(r, false);
-    await page.getByText('Not inserted: the connection to the Mac changed since you picked it.').waitFor();
+    await page.getByText(`Not inserted: the connection to the ${host.noun} changed since you picked it.`).waitFor();
     await sleep(300);
     assert.ok(!Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1').includes('stale-insert'));
   });
@@ -541,7 +545,8 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('preview zoom scales the page on iPhone, preserves state, and resets', async () => {
-    const dev = http.createServer((_req, res) => res.end('<meta name="viewport" content="width=device-width, initial-scale=1"><button style="width:100px;height:40px" onclick="this.textContent=\'Clicked\'">Try me</button>'));
+    // Says it's HTML, like a real dev server: WebKit on Linux shows a page that starts with <meta> as text.
+    const dev = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end('<meta name="viewport" content="width=device-width, initial-scale=1"><button style="width:100px;height:40px" onclick="this.textContent=\'Clicked\'">Try me</button>'));
     await new Promise<void>((r) => dev.listen(0, '127.0.0.1', () => r()));
     onTestFinished(() => {
       dev.closeAllConnections();
@@ -587,7 +592,7 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('tapping a localhost link opens it in Preview, keeping path and query', async () => {
-    const dev = http.createServer((req, res) => res.end(`<h1>dev ${req.url}</h1>`));
+    const dev = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(`<h1>dev ${req.url}</h1>`));
     await new Promise<void>((r) => dev.listen(0, '127.0.0.1', () => r()));
     onTestFinished(() => {
       dev.closeAllConnections();
@@ -716,7 +721,7 @@ describe('notes', () => {
     await a.page.getByRole('button', { name: 'New note' }).click();
     const area = a.page.getByLabel('Note for ui target');
     await area.fill('Next: ask Claude to add retries\nCheck the flaky test');
-    await a.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     // A second device sees the same note as a card and opens it.
     const b = await device('mac', 'mac-notes');
     onTestFinished(() => b.ctx.close().catch(() => {}));
@@ -730,12 +735,12 @@ describe('notes', () => {
     await area.fill('Phone version');
     await a.page.getByText('Not saved yet').waitFor({ timeout: 5000 });
     await bArea.fill('Mac version');
-    await b.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await b.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     await a.ctx.setOffline(false);
     await a.page.getByText('Changed on another device').first().waitFor({ timeout: 10000 });
     assert.equal(await area.inputValue(), 'Phone version', 'the phone’s text is still there while you decide');
     await a.page.getByRole('button', { name: 'Keep mine' }).click();
-    await a.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     // After a reload the open note is still there.
     await a.page.reload(); // relaunch restores the Notes surface and the open note
     await a.page.waitForFunction(() => (document.querySelector('.notes-area') as HTMLTextAreaElement)?.value === 'Phone version');
@@ -773,7 +778,7 @@ describe('notes', () => {
       el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     });
     await a.page.waitForFunction(() => /^!\[screenshot\]\(note:[a-f0-9]{24}\.png\)\n/.test((document.querySelector('.notes-area') as HTMLTextAreaElement).value));
-    await a.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     await a.page.getByRole('button', { name: 'Preview' }).click();
     const img = a.page.locator('.notes-preview img[alt="screenshot"]');
     await a.page.waitForFunction(() => (document.querySelector('.notes-preview img') as HTMLImageElement | null)?.naturalWidth === 40);
@@ -799,12 +804,12 @@ describe('notes', () => {
     await expectBytes(hex('\x1b[200~prompt from notes\x1b[201~'));
     await sleep(300);
     assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'no Enter');
-    await a.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     // A second note; both show as cards, newest first.
     await a.page.getByRole('button', { name: 'All notes' }).click();
     await a.page.getByRole('button', { name: 'New note' }).click();
     await a.page.getByLabel('Note for ui target').fill('second prompt');
-    await a.page.getByText('Saved on the Mac').waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
     await a.page.getByRole('button', { name: 'All notes' }).click();
     const cards = a.page.locator('.note-card');
     await cards.filter({ hasText: 'second prompt' }).waitFor();

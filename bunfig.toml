@@ -1,0 +1,3 @@
+[test]
+# Removes each run's own Herdr session and temp folders when the run ends.
+preload = ["./test/preload.ts"]
