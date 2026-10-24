@@ -19,8 +19,8 @@ export function serverArgv(cmd: string): [string, string[]] {
   return [SERVER_BIN, [cmd]];
 }
 
-// WebKit on Linux logs a fetch that a navigation cancels as "Fetch API cannot load https://host/ due to access
-// control checks.", and Playwright reports that as a page error. The page's update check (GET /, which catches
+// WebKit logs a fetch that a navigation cancels as "Fetch API cannot load https://host/ due to access control
+// checks.", and Playwright reports that as a page error. The page's update check (GET /, which catches
 // its own failures) is often in flight when a test navigates, so that one isn't the page's error.
 const CANCELLED_UPDATE_CHECK = /^Fetch API cannot load https:\/\/[^/\s]+\/ due to access control checks\./;
 
