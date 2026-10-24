@@ -77,9 +77,13 @@ export function endRun(): void {
   removeDirs(MADE);
 }
 
+/** Removes the folders a list names, then the list. Only a list this user wrote, and not a link: the temp
+ *  directory can be shared, and another user could put a list there under a run's name. */
 function removeDirs(list: string) {
   let dirs = '';
   try {
+    const stat = fs.lstatSync(list);
+    if (!stat.isFile() || stat.uid !== process.getuid?.()) return;
     dirs = fs.readFileSync(list, 'utf8');
   } catch {
     return;
@@ -88,8 +92,7 @@ function removeDirs(list: string) {
   fs.rmSync(list, { force: true });
 }
 
-/** Folders of runs that ended early (interrupted or killed): their process is gone. Only lists this user wrote,
- *  since the temp directory can be shared. */
+/** Folders of runs that ended early (interrupted or killed): their process is gone. */
 function removeStaleDirs() {
   const tmp = os.tmpdir();
   for (const name of fs.readdirSync(tmp)) {
@@ -97,7 +100,6 @@ function removeStaleDirs() {
     if (!pid) continue;
     const list = path.join(tmp, name);
     try {
-      if (fs.statSync(list).uid !== process.getuid?.()) continue;
       process.kill(Number(pid), 0);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ESRCH') removeDirs(list);
