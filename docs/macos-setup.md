@@ -18,7 +18,7 @@ toolchain, and an available speech model for the selected language.
 ## Build and configure
 
 ```sh
-git clone --branch v0.1.1 https://github.com/ChrisSku/briardr.git
+git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git
 cd briardr
 mise trust
 mise install

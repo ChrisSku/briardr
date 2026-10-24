@@ -220,7 +220,7 @@
           <div class="card">
             <h3>On your Mac</h3>
             <p>Serves on your tailnet at port 7443, with a Tailscale certificate or its own local CA.</p>
-<pre><code>git clone --branch v0.1.1 https://github.com/ChrisSku/briardr.git
+<pre><code>git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git
 cd briardr
 mise trust && mise install && mise run install
 mise run serve         <span class="c"># build and serve</span>
@@ -230,7 +230,7 @@ mise run install-agent <span class="c"># optional: start at login</span></code><
           <div class="card">
             <h3>On a Linux server</h3>
             <p>Ubuntu 24.04 or 26.04, public HTTPS behind Caddy at your domain, or private over WireGuard.</p>
-<pre><code>git clone --branch v0.1.1 https://github.com/ChrisSku/briardr.git ~/briardr
+<pre><code>git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh install --domain you.example \
   --agents claude,codex

@@ -5,6 +5,15 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.1.2
+
+- **Sheets are no longer clipped in iOS Safari** when opened inside a scrolling screen; on Workspaces the
+  tab bar covered New workspace's Create button. ([#1](https://github.com/ChrisSku/briardr/pull/1))
+- **Text fields stay above the on-screen keyboard.** Sheets (Rename, Paste text, History, Ask about code,
+  New workspace, project and stream) sit on top of the keyboard with their buttons in reach, Pairing's
+  Sign in button stays visible, a focused field under the keyboard scrolls into view, and toasts show
+  above it. ([#1](https://github.com/ChrisSku/briardr/pull/1))
+
 ## 0.1.1
 
 - **A page reloads once for an update, not twice in a row.** When a new build arrived, a page you weren't
