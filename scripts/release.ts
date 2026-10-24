@@ -2,11 +2,11 @@
 // release workflow versions the changesets a merge brought to main; server/Cargo.toml (the server reads it
 // when it's compiled), server/Cargo.lock, CHANGELOG.md and the install instructions, which clone the
 // release tag, must agree with it. CI runs `check`; the release workflow runs `sync` after
-// `changeset version`, and `check` and `notes` for a version that isn't released yet.
+// `changeset version`, and `publish` before versioning and after pushing a new version.
 //   bun scripts/release.ts version          the current version
 //   bun scripts/release.ts check [vX.Y.Z]   everything agrees, and with the tag when one is given
-//   bun scripts/release.ts notes vX.Y.Z     that version's CHANGELOG.md section, for the GitHub release
 //   bun scripts/release.ts sync             copy package.json's version everywhere and tidy its CHANGELOG.md section
+//   bun scripts/release.ts publish          the current version's GitHub release, unless it has one (needs gh and GH_TOKEN)
 //   bun scripts/release.ts changeset [base]  the branch brings a changeset (base defaults to origin/main)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -99,6 +99,28 @@ function sync() {
   console.log(`version ${v} copied to Cargo.toml, Cargo.lock and the install instructions`);
 }
 
+/** The current version's GitHub release, unless it has one: the tag goes on the commit that set the version
+ *  (its "Version X.Y.Z" commit, also when main has moved on since), and the notes are its CHANGELOG.md
+ *  section. The release workflow runs it after pushing a new version, and before versioning more
+ *  changesets: a version whose release failed is released then, so a newer one never skips it. */
+function publish() {
+  const v = version();
+  const tag = `v${v}`;
+  if (Bun.spawnSync(['gh', 'release', 'view', tag], { cwd: root }).exitCode === 0) return console.log(`${tag} is already released`);
+  check(tag);
+  const log = Bun.spawnSync(['git', 'log', '-1', '--format=%H', `-S"version": "${v}"`, '--', 'package.json'], { cwd: root });
+  const commit = log.stdout.toString().trim();
+  if (log.exitCode !== 0 || !commit) fail(`no commit in the history sets package.json's version to ${v}`);
+  const notesText = unwrap(notes(v) ?? fail(`CHANGELOG.md has no notes for ${v}`));
+  const create = Bun.spawnSync(['gh', 'release', 'create', tag, '--target', commit, '--title', `Briardr ${v}`, '--notes', notesText], {
+    cwd: root,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  if (create.exitCode !== 0) fail(`gh release create ${tag} failed`);
+  console.log(`released ${tag} at ${commit}`);
+}
+
 /** The branch brings a changeset compared with `base` (the pre-push hook and CI). Changesets' own message
  *  says to run `changeset add`, which asks questions an agent can't answer, so this says what to write. */
 function changeset(base: string) {
@@ -123,7 +145,7 @@ More in .changeset/README.md. Don't run \`changeset add\` without --empty: it as
 const [command, arg] = process.argv.slice(2);
 if (command === 'version') console.log(version());
 else if (command === 'check') check(arg);
-else if (command === 'notes' && arg) console.log(unwrap(notes(arg.replace(/^v/, '')) ?? fail(`CHANGELOG.md has no notes for ${arg}`)));
 else if (command === 'sync') sync();
+else if (command === 'publish') publish();
 else if (command === 'changeset') changeset(arg ?? 'origin/main');
-else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | notes vX.Y.Z | sync | changeset [base]');
+else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | sync | publish | changeset [base]');

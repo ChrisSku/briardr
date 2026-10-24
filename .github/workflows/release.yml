@@ -2,10 +2,12 @@
 # - Changesets waiting on main (.changeset/*.md, one per pull request) become a new version.
 #   `changeset version` sets it in package.json and writes their CHANGELOG.md section, scripts/release.ts
 #   copies it to the other files, and the release GitHub App pushes that to main as "Version X.Y.Z" (the
-#   main ruleset lets the App push without a pull request). That push runs the Linux checks again, and
-#   then this workflow, which releases it:
-# - A version on main without a release is released: the commit is tagged vX.Y.Z, and the notes are the
-#   version's CHANGELOG.md section.
+#   main ruleset lets the App push without a pull request).
+# - The same run releases it right away, since the install instructions it pushed clone the tag: the
+#   commit is tagged vX.Y.Z, and the notes are the version's CHANGELOG.md section. The Linux checks run
+#   on that commit afterwards; it only changes the version.
+# - Every run first releases the version on main if it has no release yet (its run failed after the
+#   push), at its "Version X.Y.Z" commit, so a newer version never skips it.
 # A merge with only empty changesets releases nothing; they're removed with the next version.
 # Actions are pinned to commits; the comment names the release each one is.
 name: release
@@ -19,7 +21,7 @@ on:
 permissions:
   contents: read
 
-# One at a time, so two quick merges can't push two versions.
+# One at a time, so two quick merges can't push two versions or release one twice.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -46,6 +48,11 @@ jobs:
           install_args: bun
       - run: bun install --frozen-lockfile
 
+      - name: Release the version on main, if its run didn't
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun scripts/release.ts publish
+
       - name: Version the changesets
         id: version
         run: |
@@ -59,7 +66,6 @@ jobs:
             echo "no changesets to release"
           elif [ "$(git ls-remote origin refs/heads/main | cut -f1)" != "$COMMIT" ]; then
             echo "main has moved on; the run for its newest commit versions these changesets"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             bun scripts/release.ts check
             echo "version=$after" >> "$GITHUB_OUTPUT"
@@ -87,17 +93,8 @@ jobs:
           git commit -m "Version $VERSION"
           git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" HEAD:refs/heads/main
 
-      - name: Release
-        if: ${{ !steps.version.outputs.version && !steps.version.outputs.skip }}
+      - name: Release the version
+        if: steps.version.outputs.version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          git checkout -- . # undo what versioning only empty changesets did
-          tag="v$(bun scripts/release.ts version)"
-          if gh release view "$tag" > /dev/null 2>&1; then
-            echo "$tag is already released"
-            exit 0
-          fi
-          bun scripts/release.ts check "$tag"
-          bun scripts/release.ts notes "$tag" > "$RUNNER_TEMP/notes.md"
-          gh release create "$tag" --target "$COMMIT" --title "Briardr ${tag#v}" --notes-file "$RUNNER_TEMP/notes.md"
+        run: bun scripts/release.ts publish

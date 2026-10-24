@@ -125,12 +125,15 @@ Merging releases it. When the Linux checks pass on `main`, the
    `scripts/release.ts sync`, which copies the version to `server/Cargo.toml`, `server/Cargo.lock` and
    the install instructions (they clone the release tag). The release GitHub App pushes that to `main` as
    "Version X.Y.Z".
-2. tags that commit `vX.Y.Z` once the Linux checks pass on it too, and publishes the GitHub release with
-   the changelog section as its notes.
+2. tags that commit `vX.Y.Z` and publishes the GitHub release with the changelog section as its notes,
+   in the same run, so the install instructions never name a tag that doesn't exist yet. The Linux
+   checks then run on the version commit too.
 
 Merges that land close together can share a version, and empty changesets release nothing. If a check
 fails, nothing is versioned or published: the changesets wait on `main`, and the merge that fixes it
-releases them. Don't set the version by hand; `mise run release:check` checks that it agrees everywhere.
+releases them. If publishing fails after the push, the next run on `main` releases that version first,
+at its "Version X.Y.Z" commit, before it makes a newer one, so no version is skipped. Don't set the
+version by hand; `mise run release:check` checks that it agrees everywhere.
 
 The workflow needs the release GitHub App (Contents: read and write, installed on the repository, and in
 the `main` ruleset's bypass list): its client ID in the repository variable `RELEASE_APP_CLIENT_ID` and
