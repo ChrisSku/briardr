@@ -751,10 +751,16 @@ describe('the on-screen keyboard (iPhone)', () => {
     const code = page.getByLabel('Pairing code');
     await code.waitFor();
     await showKeyboard(page, 160);
-    const pair = (await page.locator('.pair').boundingBox())!;
-    assert.equal(Math.round(pair.y + pair.height), page.viewportSize()!.height - 160);
-    // The card starts at the top rather than being cut off above it.
-    assert.ok((await page.getByRole('heading', { name: 'Briardr' }).boundingBox())!.y >= 0);
+    const pair = page.locator('.pair');
+    const box = (await pair.boundingBox())!;
+    assert.equal(Math.round(box.y + box.height), page.viewportSize()!.height - 160);
+    // The focused code field is above the keyboard: where the text above it is taller (Linux's fonts),
+    // the screen scrolls to it.
+    await aboveKeyboard(page, 160, { 'pairing code': code });
+    // Scrolled to its top, the card starts in view rather than being cut off above it.
+    await pair.evaluate((el) => (el.scrollTop = 0));
+    const heading = (await page.getByRole('heading', { name: 'Briardr' }).boundingBox())!;
+    assert.ok(heading.y >= 0, `the heading starts at ${heading.y}, above the screen`);
     await page.getByLabel('Name for this device').focus();
     await sleep(100);
     await aboveKeyboard(page, 160, { 'device name': page.getByLabel('Name for this device') });
