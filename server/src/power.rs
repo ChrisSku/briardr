@@ -926,6 +926,7 @@ impl Power {
 mod tests {
     use super::*;
     use crate::platform::capabilities;
+    use crate::scratch::Scratch;
     use std::fs;
     use std::sync::Mutex;
 
@@ -1086,15 +1087,6 @@ mod tests {
             .count()
     }
 
-    /// A scratch directory under the system temp dir, removed on drop.
-    struct Scratch(PathBuf);
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     /// The Power under test, and its scratch directory: keep that until the test ends.
     fn setup(
         name: &str,
@@ -1102,9 +1094,7 @@ mod tests {
         w: Shared,
         state: Option<&str>,
     ) -> (Scratch, Power) {
-        let dir = std::env::temp_dir().join(format!("briardr-power-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        let dir = Scratch::new(&format!("power-{name}"));
         let diag = Arc::new(Diagnostics::new(dir.join("logs"), dir.join("salt")).unwrap());
         let state_file = dir.join("power.json");
         if let Some(text) = state {
@@ -1116,7 +1106,7 @@ mod tests {
             diag,
             Box::new(FakeHost(w)),
         );
-        (Scratch(dir), power)
+        (dir, power)
     }
 
     #[test]

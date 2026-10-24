@@ -485,6 +485,7 @@ pub fn info_json(p: &Plugin, state: &PluginState, runtime: Option<&str>) -> Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
 
     fn manifest(v: Value) -> Manifest {
         serde_json::from_value(v).unwrap()
@@ -530,9 +531,8 @@ mod tests {
 
     #[test]
     fn state_cell_sees_changes_made_by_another_process() {
-        let root =
-            std::env::temp_dir().join(format!("briardr-plugin-state-{}", std::process::id()));
-        let paths = Paths::new(&root);
+        let root = Scratch::new("plugin-state");
+        let paths = Paths::new(root.path());
         let cell = StateCell::new(paths.clone());
         assert_eq!(cell.get(), PluginState::default());
         let mut other = PluginState::default();
@@ -547,7 +547,6 @@ mod tests {
             .set_modified(later)
             .unwrap();
         assert!(!cell.get().is_enabled("docs"));
-        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -584,8 +583,8 @@ mod tests {
 
     #[test]
     fn discover_reads_installed_plugins_and_reports_problems() {
-        let root = std::env::temp_dir().join(format!("briardr-plugins-{}", std::process::id()));
-        let paths = Paths::new(&root);
+        let root = Scratch::new("plugins");
+        let paths = Paths::new(root.path());
         let write = |dir: &str, v: Value| {
             let d = paths.plugins().join(dir);
             fs::create_dir_all(&d).unwrap();
@@ -598,7 +597,6 @@ mod tests {
         );
         fs::create_dir_all(paths.plugins().join("empty")).unwrap();
         let all = discover(&paths);
-        fs::remove_dir_all(&root).unwrap();
         let find = |id: &str| all.iter().find(|p| p.id == id).unwrap();
         assert_eq!(all.len(), builtins().len() + 3);
         assert!(find("files").builtin && find("files").usable());

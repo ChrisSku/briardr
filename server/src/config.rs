@@ -552,15 +552,8 @@ pub fn read_json<T: serde::de::DeserializeOwned>(file: &Path, fallback: T) -> T 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::collections::HashMap;
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("briardr-config-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let _ = fs::create_dir_all(&dir);
-        dir
-    }
 
     fn fixture(name: &str) -> Value {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -590,7 +583,7 @@ mod tests {
 
     #[test]
     fn default_config_matches_fixture() {
-        let root = scratch_dir("default");
+        let root = Scratch::new("config-default");
         let home = root.join("home");
         let bin = root.join("bin");
         fs::create_dir_all(&bin).unwrap_or_default();
@@ -617,7 +610,7 @@ mod tests {
 
     #[test]
     fn which_prefers_executable_on_path() {
-        let root = scratch_dir("which");
+        let root = Scratch::new("config-which");
         let bin = root.join("bin");
         fs::create_dir_all(&bin).unwrap_or_default();
         let herdr = bin.join("herdr");
@@ -833,8 +826,8 @@ mod tests {
 
     #[test]
     fn load_config_applies_env_overrides() {
-        let root = scratch_dir("env");
-        let paths = Paths::new(&root);
+        let root = Scratch::new("config-env");
+        let paths = Paths::new(root.path());
         let env = env_with(&[
             ("HOME", root.to_str().unwrap_or("")),
             ("BRIARDR_PORT", " 8443 "),
@@ -857,8 +850,8 @@ mod tests {
 
     #[test]
     fn load_config_merges_file_over_defaults() {
-        let root = scratch_dir("merge");
-        let paths = Paths::new(&root);
+        let root = Scratch::new("config-merge");
+        let paths = Paths::new(root.path());
         fs::write(
             paths.config(),
             r#"{"port": 9001, "usage": {"codexEnabled": true}, "tls": {"mode": "files", "certFile": "/c.pem"}}"#,
@@ -879,8 +872,8 @@ mod tests {
 
     #[test]
     fn save_config_writes_owner_only_json() {
-        let root = scratch_dir("save");
-        let paths = Paths::new(&root);
+        let root = Scratch::new("config-save");
+        let paths = Paths::new(root.path());
         let env = env_with(&[("HOME", root.to_str().unwrap_or(""))]);
         let cfg = default_config(&env, &root);
         save_config(&paths, &cfg).unwrap_or_else(|e| panic!("save failed: {e}"));
@@ -896,7 +889,7 @@ mod tests {
 
     #[test]
     fn write_file_atomic_cleans_up_on_failure() {
-        let root = scratch_dir("atomic");
+        let root = Scratch::new("config-atomic");
         let target = root.join("target");
         fs::create_dir_all(target.join("occupied")).unwrap_or_default();
         assert!(write_file_atomic(&target, b"data", 0o600).is_err());
@@ -914,7 +907,7 @@ mod tests {
 
     #[test]
     fn ensure_creates_tree_owner_only() {
-        let root = scratch_dir("ensure");
+        let root = Scratch::new("config-ensure");
         let paths = Paths::new(root.join("data"));
         paths
             .ensure()
@@ -937,7 +930,7 @@ mod tests {
 
     #[test]
     fn read_json_falls_back() {
-        let root = scratch_dir("read-json");
+        let root = Scratch::new("config-read-json");
         let file = root.join("value.json");
         assert_eq!(read_json(&file, 7u32), 7);
         fs::write(&file, b"not json").unwrap_or_default();

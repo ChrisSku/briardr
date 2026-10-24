@@ -265,30 +265,7 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A unique directory under the system temp dir, removed on drop.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(name: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!(
-                "briardr-diag-{name}-{}-{nanos}",
-                std::process::id()
-            ));
-            let _ = fs::remove_dir_all(&path);
-            TempDir(path)
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::scratch::Scratch;
 
     fn fields(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
         pairs
@@ -340,25 +317,25 @@ mod tests {
 
     #[test]
     fn anon_stable_and_shaped() {
-        let dir = TempDir::new("anon");
-        let salt = dir.0.join("salt");
-        let d = Diagnostics::new(dir.0.clone(), salt.clone()).expect("new");
+        let dir = Scratch::new("diag-anon");
+        let salt = dir.join("salt");
+        let d = Diagnostics::new(dir.to_path_buf(), salt.clone()).expect("new");
         let id = d.anon("w1:p1").expect("some");
         assert_eq!(id.len(), 11);
         assert!(id.starts_with('a'));
         assert!(id[1..]
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
-        let again = Diagnostics::new(dir.0.clone(), salt).expect("new");
+        let again = Diagnostics::new(dir.to_path_buf(), salt).expect("new");
         assert_eq!(again.anon("w1:p1"), Some(id));
         assert_eq!(d.anon(""), None);
     }
 
     #[test]
     fn rotates_and_persists() {
-        let dir = TempDir::new("rotate");
-        let salt = dir.0.join("salt");
-        let d = Diagnostics::new(dir.0.clone(), salt.clone()).expect("new");
+        let dir = Scratch::new("diag-rotate");
+        let salt = dir.join("salt");
+        let d = Diagnostics::new(dir.to_path_buf(), salt.clone()).expect("new");
         for i in 0..12000u64 {
             d.event(
                 "retry_scheduled",
@@ -369,7 +346,7 @@ mod tests {
                 ]),
             );
         }
-        let mut names: Vec<String> = fs::read_dir(&dir.0)
+        let mut names: Vec<String> = fs::read_dir(dir.path())
             .expect("read_dir")
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -378,17 +355,17 @@ mod tests {
         names.sort();
         assert_eq!(names, vec!["connection.log", "connection.log.1"]);
         for n in &names {
-            let len = fs::metadata(dir.0.join(n)).expect("metadata").len();
+            let len = fs::metadata(dir.join(n)).expect("metadata").len();
             assert!(len <= LOG_ROTATE_BYTES);
         }
-        let reopened = Diagnostics::new(dir.0.clone(), salt).expect("new");
+        let reopened = Diagnostics::new(dir.to_path_buf(), salt).expect("new");
         assert!(reopened.export().contains("retry_scheduled"));
     }
 
     #[test]
     fn record_redacts_privacy() {
-        let dir = TempDir::new("privacy");
-        let d = Diagnostics::new(dir.0.clone(), dir.0.join("salt")).expect("new");
+        let dir = Scratch::new("diag-privacy");
+        let d = Diagnostics::new(dir.to_path_buf(), dir.join("salt")).expect("new");
         let entry = d
             .record(
                 "client",
@@ -412,7 +389,7 @@ mod tests {
             Some(&DiagValue::Str("redacted".into()))
         );
         assert_eq!(entry.fields.get("n"), Some(&DiagValue::Num(3.0)));
-        let text = fs::read_to_string(dir.0.join(LOG_FILE)).expect("log");
+        let text = fs::read_to_string(dir.join(LOG_FILE)).expect("log");
         assert!(!text.contains("token=abc"));
         assert!(!text.contains("100.64.0.9"));
         assert!(text.contains("\"n\":3"));
@@ -420,16 +397,16 @@ mod tests {
 
     #[test]
     fn record_rejects_bad_ev() {
-        let dir = TempDir::new("badev");
-        let d = Diagnostics::new(dir.0.clone(), dir.0.join("salt")).expect("new");
+        let dir = Scratch::new("diag-badev");
+        let d = Diagnostics::new(dir.to_path_buf(), dir.join("salt")).expect("new");
         assert_eq!(d.record("server", "Bad-Event", &BTreeMap::new()), None);
-        assert!(!dir.0.join(LOG_FILE).exists());
+        assert!(!dir.join(LOG_FILE).exists());
     }
 
     #[test]
     fn record_timestamp_format() {
-        let dir = TempDir::new("timestamp");
-        let d = Diagnostics::new(dir.0.clone(), dir.0.join("salt")).expect("new");
+        let dir = Scratch::new("diag-timestamp");
+        let d = Diagnostics::new(dir.to_path_buf(), dir.join("salt")).expect("new");
         let entry = d.record("server", "tick", &BTreeMap::new()).expect("entry");
         let b = entry.t.as_bytes();
         assert_eq!(b.len(), 24, "{}", entry.t);

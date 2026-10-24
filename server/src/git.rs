@@ -709,28 +709,7 @@ pub fn file_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A scratch directory under the system temp dir, removed on drop.
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "briardr-git-{}-{}-{}",
-                name,
-                std::process::id(),
-                now_ms()
-            ));
-            fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    use crate::scratch::Scratch;
 
     fn strs(argv: &[String]) -> Vec<&str> {
         argv.iter().map(String::as_str).collect()
@@ -801,8 +780,8 @@ mod tests {
 
     #[test]
     fn porcelain_status_parses_each_entry_kind() {
-        let scratch = Scratch::new("status");
-        let dir = &scratch.0;
+        let scratch = Scratch::new("git-status");
+        let dir = scratch.path();
         git(dir, &["init", "-q", "-b", "main"]);
         fs::write(dir.join("keep.txt"), "one\n").unwrap();
         fs::write(dir.join("gone.txt"), "x\n").unwrap();
@@ -928,8 +907,8 @@ mod tests {
 
     #[test]
     fn diff_truncates_at_the_line_cap() {
-        let scratch = Scratch::new("trunc");
-        let dir = &scratch.0;
+        let scratch = Scratch::new("git-trunc");
+        let dir = scratch.path();
         git(dir, &["init", "-q", "-b", "main"]);
         let body: String = (0..MAX_DIFF_LINES + 50)
             .map(|i| format!("line {i}\n"))
@@ -953,9 +932,9 @@ mod tests {
 
     #[test]
     fn missing_git_binary_is_reported_as_git_missing() {
-        let scratch = Scratch::new("missing");
+        let scratch = Scratch::new("git-missing");
         let err = run_git(
-            &scratch.0,
+            scratch.path(),
             &["status"],
             &[],
             GIT_TIMEOUT,
@@ -967,8 +946,8 @@ mod tests {
 
     #[test]
     fn slow_git_is_killed_at_the_timeout() {
-        let scratch = Scratch::new("slow");
-        let script = scratch.0.join("fake-git");
+        let scratch = Scratch::new("git-slow");
+        let script = scratch.join("fake-git");
         fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
@@ -976,7 +955,7 @@ mod tests {
         }
         let started = Instant::now();
         let err = run_git(
-            &scratch.0,
+            scratch.path(),
             &["status"],
             &[],
             Duration::from_millis(200),
@@ -989,15 +968,15 @@ mod tests {
 
     #[test]
     fn output_past_the_cap_is_killed_and_returned_as_partial_success() {
-        let scratch = Scratch::new("overflow");
-        let script = scratch.0.join("fake-git");
+        let scratch = Scratch::new("git-overflow");
+        let script = scratch.join("fake-git");
         fs::write(&script, "#!/bin/sh\nhead -c 40000000 /dev/zero\n").unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let res = run_git(
-            &scratch.0,
+            scratch.path(),
             &["status"],
             &[],
             GIT_TIMEOUT,

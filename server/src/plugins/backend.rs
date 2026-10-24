@@ -342,6 +342,7 @@ fn open_log(dir: &Path, id: &str) -> Option<std::fs::File> {
 mod tests {
     use super::*;
     use crate::plugins::{BackendSpec, Contributes, Manifest};
+    use crate::scratch::Scratch;
     use std::os::unix::fs::PermissionsExt;
 
     fn plugin(dir: &Path, script: &str) -> Plugin {
@@ -369,13 +370,6 @@ mod tests {
         }
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("briardr-backend-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     // Answers every request with its id and path; an "event" path also pushes an event first.
     const ECHO: &str = r#"#!/bin/sh
 while IFS= read -r line; do
@@ -388,7 +382,7 @@ done
 
     #[tokio::test]
     async fn round_trips_requests_and_events() {
-        let dir = scratch("echo");
+        let dir = Scratch::new("backend-echo");
         let (b, mut events) = Backends::new(Paths::new(dir.join("data")));
         let p = plugin(&dir, ECHO);
         let r = b
@@ -411,7 +405,7 @@ done
 
     #[tokio::test]
     async fn a_backend_that_exits_fails_the_request_and_repeated_crashes_pause_it() {
-        let dir = scratch("crash");
+        let dir = Scratch::new("backend-crash");
         let (b, _events) = Backends::new(Paths::new(dir.join("data")));
         let p = plugin(&dir, "#!/bin/sh\necho oops >&2\nexit 1\n");
         for _ in 0..CRASH_LIMIT {
@@ -433,7 +427,7 @@ done
 
     #[tokio::test]
     async fn a_missing_program_says_so() {
-        let dir = scratch("missing");
+        let dir = Scratch::new("backend-missing");
         let (b, _events) = Backends::new(Paths::new(dir.join("data")));
         let mut p = plugin(&dir, "");
         p.manifest.as_mut().unwrap().backend = Some(BackendSpec {
