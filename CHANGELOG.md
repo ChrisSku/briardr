@@ -5,6 +5,12 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.1.1
+
+- **A page reloads once for an update, not twice in a row.** When a new build arrived, a page you weren't
+  using could hear about it from both the reconnect and the service worker, a moment apart, and start its
+  reload over. ([#2](https://github.com/ChrisSku/briardr/pull/2))
+
 ## 0.1.0
 
 The first public release: a self-hosted remote window into [Herdr](https://herdr.dev) for your phone,
