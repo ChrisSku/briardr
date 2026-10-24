@@ -91,7 +91,8 @@ describe('recovery', () => {
     await page.locator('.connbar').waitFor({ state: 'detached', timeout: 40_000 });
     await page.waitForSelector('.tree');
     assert.equal(new URL(page.url()).pathname, '/workspaces');
-    assert.equal(await page.locator('.tree.is-dim').count(), 0);
+    // Herdr's state arrives just after the connection does; then the rows aren't dimmed any more.
+    await page.locator('.tree.is-dim').waitFor({ state: 'detached', timeout: 10_000 });
     await ctx.close();
   });
 

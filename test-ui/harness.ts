@@ -19,6 +19,20 @@ export function serverArgv(cmd: string): [string, string[]] {
   return [SERVER_BIN, [cmd]];
 }
 
+// WebKit on Linux logs a fetch that a navigation cancels as "Fetch API cannot load https://host/ due to access
+// control checks.", and Playwright reports that as a page error. The page's update check (GET /, which catches
+// its own failures) is often in flight when a test navigates, so that one isn't the page's error.
+const CANCELLED_UPDATE_CHECK = /^Fetch API cannot load https:\/\/[^/\s]+\/ due to access control checks\./;
+
+/** The page's uncaught errors, collected as they happen. */
+export function pageErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => {
+    if (!CANCELLED_UPDATE_CHECK.test(e.stack ?? '')) errors.push(e.message);
+  });
+  return errors;
+}
+
 /** A pairing code for the dev server's data dir (`BRIARDR_PAIR_CMD` replaces the command). */
 export function pairingCode(): string {
   const env = { ...process.env, BRIARDR_DATA_DIR: DATA_DIR };

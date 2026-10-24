@@ -6,6 +6,7 @@ import { devices, webkit, type Browser, type BrowserContext, type Page } from 'p
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildPlugin, closeWorkspace, herdr, installPlugin, readPane, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { pageErrors } from './harness.ts';
 
 let server: TestServer;
 let browser: Browser;
@@ -34,8 +35,7 @@ async function open(profile: 'iphone' | 'mac'): Promise<{ ctx: BrowserContext; p
   assert.ok(paired.ok);
   await ctx.addCookies([{ name: '__Host-briardr', value: paired.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
   const page = await ctx.newPage();
-  const errors: string[] = [];
-  page.on('pageerror', (e) => errors.push(e.message));
+  const errors = pageErrors(page);
   return { ctx, page, errors };
 }
 

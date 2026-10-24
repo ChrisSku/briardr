@@ -545,7 +545,8 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('preview zoom scales the page on iPhone, preserves state, and resets', async () => {
-    const dev = http.createServer((_req, res) => res.end('<meta name="viewport" content="width=device-width, initial-scale=1"><button style="width:100px;height:40px" onclick="this.textContent=\'Clicked\'">Try me</button>'));
+    // Says it's HTML, like a real dev server: WebKit on Linux shows a page that starts with <meta> as text.
+    const dev = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end('<meta name="viewport" content="width=device-width, initial-scale=1"><button style="width:100px;height:40px" onclick="this.textContent=\'Clicked\'">Try me</button>'));
     await new Promise<void>((r) => dev.listen(0, '127.0.0.1', () => r()));
     onTestFinished(() => {
       dev.closeAllConnections();
@@ -591,7 +592,7 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('tapping a localhost link opens it in Preview, keeping path and query', async () => {
-    const dev = http.createServer((req, res) => res.end(`<h1>dev ${req.url}</h1>`));
+    const dev = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html' }).end(`<h1>dev ${req.url}</h1>`));
     await new Promise<void>((r) => dev.listen(0, '127.0.0.1', () => r()));
     onTestFinished(() => {
       dev.closeAllConnections();
