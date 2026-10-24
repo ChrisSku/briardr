@@ -19,8 +19,8 @@ Bun, Rust and the linters come from [`mise.toml`](../mise.toml). `mise run insta
 git hooks in [`lefthook.yml`](../lefthook.yml): Rust formatting before each commit, and the changeset,
 version, typecheck, clippy and workflow lint checks before each push, with `mise run test` when the push
 changes code and `mise run test:ui` when it changes the client or its tests. Skip one job for a push with
-`LEFTHOOK_EXCLUDE=ui git push`; CI runs everything but the UI suite again. Commit lockfile changes only
-when intentionally changing dependencies. No npm package publication is required; `private: true` and
+`LEFTHOOK_EXCLUDE=ui git push`; CI runs everything again, for every change. Commit lockfile changes
+only when intentionally changing dependencies. No npm package publication is required; `private: true` and
 Cargo's `publish = false` prevent accidental registry publication while the source remains open.
 
 ## Run without touching your everyday Herdr session
@@ -76,7 +76,8 @@ mise exec -- cargo test --manifest-path server/Cargo.toml --features test-hooks
 ```
 
 The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust server, integration
-suite, shell helper, and generated deployment files. macOS integrations require Mac-specific testing.
+suite, browser checks, shell helper, and generated deployment files, for every change. macOS
+integrations require Mac-specific testing.
 
 ## Browser checks
 

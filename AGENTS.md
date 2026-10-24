@@ -34,8 +34,8 @@ setup and checks, [docs/architecture.md](docs/architecture.md) for the code map,
 3. **Let the hooks run.** Before each commit they check Rust formatting. Before each push they check the
    changeset, the version, typecheck, clippy and workflow lint, and run the tests the pushed files need:
    `mise run test` (about 25 seconds) for code, and `mise run test:ui` (about 3 minutes) for the client
-   or its tests. Fix what they report and never skip them with `--no-verify`: CI runs the checks and
-   `mise run test` again, and nothing else runs the UI suite.
+   or its tests. Fix what they report and never skip them with `--no-verify`: CI runs all the checks and
+   both suites again, for every change, so skipping only moves the failure there.
 4. **Run the tests while you work** (the same two commands), so the push doesn't find the failures. Each
    run has its own Herdr session, ports and client build (in `test-results/`), so runs in parallel
    worktrees don't collide. `mise run build` writes `web/dist`, which a running Briardr serves.

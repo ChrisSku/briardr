@@ -31,8 +31,8 @@ private keys, personal terminal output, or complete private configuration files.
    `mise run build`, `mise run check`, and `mise run test`. For UI changes, run relevant browser
    checks and include sanitized screenshots when useful.
    `mise run install` also installs git hooks ([lefthook.yml](lefthook.yml)): formatting before each
-   commit, and the checks and test suites the change needs before each push. CI runs them again, all
-   but the UI suite.
+   commit, and the checks and test suites the change needs before each push. CI runs all of them
+   again, for every change.
 4. Add a regression test when it demonstrates meaningful behavior. Documentation-only changes do
    not need application tests; verify paths, commands, links, and claimed platform support.
 5. Update user-facing docs if setup or behavior changes. Separate tested behavior from assumptions.
