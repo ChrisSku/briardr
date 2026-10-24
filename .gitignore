@@ -25,3 +25,6 @@ test/fixtures/plugins/*/dist/
 *.mobileconfig
 briardr-backups/
 .worktrees/
+
+# Personal overrides of the git hooks in lefthook.yml.
+lefthook-local.yml

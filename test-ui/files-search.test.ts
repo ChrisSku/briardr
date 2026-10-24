@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, test } from 'bun:test';
 import { devices, webkit, type Browser } from 'playwright';
 import { closeWorkspace, herdr, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { pageErrors } from './harness.ts';
 
 let server: TestServer;
 let browser: Browser;
@@ -45,8 +46,7 @@ for (const profile of ['iphone', 'mac'] as const) {
       assert.ok(paired.ok);
       await ctx.addCookies([{ name: '__Host-briardr', value: paired.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
       const page = await ctx.newPage();
-      const errors: string[] = [];
-      page.on('pageerror', (e) => errors.push(e.message));
+      const errors = pageErrors(page);
       await page.goto(server.base + '/workspaces');
       await page.locator('.tree-streams .row-main', { hasText: 'filename search target' }).click();
       await page.getByRole('tab', { name: 'Files', exact: true }).click();

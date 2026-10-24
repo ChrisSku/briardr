@@ -389,29 +389,14 @@ fn closed_error() -> HerdrError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use tokio::net::unix::OwnedWriteHalf;
     use tokio::net::UnixListener;
 
-    /// A unique short directory for a fake server socket, removed on drop.
-    struct TestDir(PathBuf);
-
-    impl TestDir {
-        fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("krpc-{}-{tag}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Self(dir)
-        }
-
-        fn socket(&self) -> PathBuf {
-            self.0.join("s.sock")
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    /// Where a test's fake Herdr server listens, in a scratch directory with a short name (a socket path
+    /// can't be much longer than 100 bytes).
+    fn socket(dir: &Scratch) -> PathBuf {
+        dir.join("s.sock")
     }
 
     /// Accepts one connection and reads its request line.
@@ -539,8 +524,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_request_round_trip() {
-        let dir = TestDir::new("req");
-        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let dir = Scratch::new("rpc-req");
+        let listener = UnixListener::bind(socket(&dir)).unwrap();
         let server = tokio::spawn(async move {
             let (req, mut w) = accept_request(&listener).await;
             reply(
@@ -551,7 +536,7 @@ mod tests {
             req
         });
         let result = herdr_request(
-            &dir.socket(),
+            &socket(&dir),
             "pane.list",
             json!({ "session": "briardr-dev" }),
             Duration::from_secs(5),
@@ -569,8 +554,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_request_server_error_returns_code() {
-        let dir = TestDir::new("err");
-        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let dir = Scratch::new("rpc-err");
+        let listener = UnixListener::bind(socket(&dir)).unwrap();
         tokio::spawn(async move {
             let (req, mut w) = accept_request(&listener).await;
             reply(
@@ -579,7 +564,7 @@ mod tests {
             )
             .await;
         });
-        let err = herdr_request(&dir.socket(), "pane.get", json!({}), Duration::from_secs(5))
+        let err = herdr_request(&socket(&dir), "pane.get", json!({}), Duration::from_secs(5))
             .await
             .unwrap_err();
         assert_eq!(err.code, "pane_not_found");
@@ -588,14 +573,14 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_request_timeout() {
-        let dir = TestDir::new("timeout");
-        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let dir = Scratch::new("rpc-timeout");
+        let listener = UnixListener::bind(socket(&dir)).unwrap();
         tokio::spawn(async move {
             let (_req, _w) = accept_request(&listener).await;
             std::future::pending::<()>().await;
         });
         let err = herdr_request(
-            &dir.socket(),
+            &socket(&dir),
             "pane.list",
             json!({}),
             Duration::from_millis(200),
@@ -608,9 +593,9 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_request_missing_socket_is_unreachable() {
-        let dir = TestDir::new("missing");
+        let dir = Scratch::new("rpc-missing");
         let err = herdr_request(
-            &dir.socket(),
+            &socket(&dir),
             "pane.list",
             json!({}),
             Duration::from_secs(5),
@@ -623,8 +608,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_subscribe_started_event_then_closed() {
-        let dir = TestDir::new("sub");
-        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let dir = Scratch::new("rpc-sub");
+        let listener = UnixListener::bind(socket(&dir)).unwrap();
         let server = tokio::spawn(async move {
             let (req, mut w) = accept_request(&listener).await;
             reply(
@@ -639,7 +624,7 @@ mod tests {
             .await;
             req
         });
-        let mut sub = herdr_subscribe(&dir.socket(), vec![json!({ "kind": "pane" })]);
+        let mut sub = herdr_subscribe(&socket(&dir), vec![json!({ "kind": "pane" })]);
         assert_eq!(sub.events.recv().await, Some(SubEvent::Started));
         assert_eq!(
             sub.events.recv().await,
@@ -666,8 +651,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_subscribe_close_ends_once() {
-        let dir = TestDir::new("close");
-        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let dir = Scratch::new("rpc-close");
+        let listener = UnixListener::bind(socket(&dir)).unwrap();
         tokio::spawn(async move {
             let (req, mut w) = accept_request(&listener).await;
             reply(
@@ -677,7 +662,7 @@ mod tests {
             .await;
             std::future::pending::<()>().await;
         });
-        let mut sub = herdr_subscribe(&dir.socket(), Vec::new());
+        let mut sub = herdr_subscribe(&socket(&dir), Vec::new());
         assert_eq!(sub.events.recv().await, Some(SubEvent::Started));
         (sub.close)();
         assert_eq!(
@@ -689,8 +674,8 @@ mod tests {
 
     #[tokio::test]
     async fn herdr_rpc_subscribe_missing_socket_ends_with_socket() {
-        let dir = TestDir::new("subgone");
-        let mut sub = herdr_subscribe(&dir.socket(), Vec::new());
+        let dir = Scratch::new("rpc-subgone");
+        let mut sub = herdr_subscribe(&socket(&dir), Vec::new());
         assert_eq!(
             sub.events.recv().await,
             Some(SubEvent::End("socket".to_string()))

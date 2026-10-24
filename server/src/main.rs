@@ -29,6 +29,9 @@ pub mod usage;
 #[cfg(feature = "test-hooks")]
 pub mod test_hooks;
 
+#[cfg(test)]
+mod scratch;
+
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};

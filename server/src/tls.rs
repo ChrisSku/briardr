@@ -362,7 +362,6 @@ fn failed(program: &str, status: ExitStatus, mut child: std::process::Child) -> 
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
 
     const FIXED_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
 MIIBszCCAVmgAwIBAgIUR2tVd0pK7m1cMAoGCCqGSM49BAMCMBkxFzAVBgNVBAMM
@@ -389,15 +388,6 @@ DktlbHBpZSBUZXN0MB4XDTI2MTAwMTAwMDAwMFoXDTM2MTAwMTAwMDAwMFowGTEX
 <key>PayloadUUID</key><string>6F1B2C3D-0000-4A5B-8C9D-0E1F2A3B4C5D</string>
 <key>PayloadVersion</key><integer>1</integer>
 </dict></plist>"#;
-
-    /// Removes the temp directory when the test ends, even on failure.
-    struct TempDir(PathBuf);
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     #[test]
     fn san_and_stamp_dedupe_sort_and_include_loopback() {
@@ -449,13 +439,8 @@ DktlbHBpZSBUZXN0MB4XDTI2MTAwMTAwMDAwMFoXDTM2MTAwMTAwMDAwMFowGTEX
 
     #[test]
     fn ensure_local_ca_creates_leaf_material_in_fresh_dir() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir =
-            std::env::temp_dir().join(format!("briardr-tls-test-{}-{nanos}", std::process::id()));
-        let _guard = TempDir(dir.clone());
+        let scratch = crate::scratch::Scratch::new("tls");
+        let dir = scratch.join("tls"); // doesn't exist yet
 
         let hostnames = vec!["mac.local".to_string()];
         let ips: Vec<IpAddr> = vec!["192.168.1.20".parse().unwrap()];

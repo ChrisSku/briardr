@@ -313,22 +313,8 @@ impl Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use std::sync::atomic::{AtomicU32, Ordering};
-
-    struct Scratch(PathBuf);
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn scratch(name: &str) -> Scratch {
-        let mut b = [0u8; 6];
-        rand::fill(&mut b);
-        let dir = std::env::temp_dir().join(format!("briardr-usage-{name}-{}", hex::encode(b)));
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
 
     fn report(at: u64) -> ProviderReport {
         ProviderReport {
@@ -345,8 +331,8 @@ mod tests {
     }
 
     fn usage(dir: &Scratch, calls: Arc<AtomicU32>, fail: Option<UsageError>) -> Usage {
-        let diag = Arc::new(Diagnostics::new(dir.0.join("logs"), dir.0.join("salt")).unwrap());
-        let tap = StatuslineTap::new(dir.0.join("claude"), dir.0.join("state"), dir.0.join("bin"));
+        let diag = Arc::new(Diagnostics::new(dir.join("logs"), dir.join("salt")).unwrap());
+        let tap = StatuslineTap::new(dir.join("claude"), dir.join("state"), dir.join("bin"));
         let deps = UsageDeps {
             claude_enabled: Box::new(|| true),
             codex_enabled: Box::new(|| false),
@@ -366,12 +352,12 @@ mod tests {
             fetch_codex: None,
             consume_codex_reset: None,
         };
-        Usage::new(dir.0.join("usage.json"), tap, deps, diag)
+        Usage::new(dir.join("usage.json"), tap, deps, diag)
     }
 
     #[tokio::test]
     async fn caches_and_shares_inflight_reads() {
-        let dir = scratch("cache");
+        let dir = Scratch::new("usage-cache");
         let calls = Arc::new(AtomicU32::new(0));
         let u = usage(&dir, calls.clone(), None);
         tokio::join!(u.refresh(false), u.refresh(true));
@@ -393,14 +379,14 @@ mod tests {
             "manual refresh bypasses the cache"
         );
         let saved: Value =
-            serde_json::from_slice(&std::fs::read(dir.0.join("usage.json")).unwrap()).unwrap();
+            serde_json::from_slice(&std::fs::read(dir.join("usage.json")).unwrap()).unwrap();
         assert_eq!(saved["claude"]["report"]["capturedAt"], json!(1));
         assert_eq!(saved["codex"]["failures"], json!(0));
     }
 
     #[tokio::test]
     async fn rate_limits_hold_even_for_manual_refresh() {
-        let dir = scratch("rl");
+        let dir = Scratch::new("usage-rl");
         let calls = Arc::new(AtomicU32::new(0));
         let err = UsageError {
             category: "rate_limited".into(),
@@ -425,7 +411,7 @@ mod tests {
 
     #[tokio::test]
     async fn reset_credit_refused_when_codex_is_off() {
-        let dir = scratch("reset");
+        let dir = Scratch::new("usage-reset");
         let u = usage(&dir, Arc::new(AtomicU32::new(0)), None);
         let e = u.use_codex_reset_credit().await.unwrap_err();
         assert_eq!(e.category, "not_enabled");

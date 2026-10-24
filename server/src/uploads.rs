@@ -255,33 +255,9 @@ pub fn quote_path(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use serde_json::Value;
     use std::os::unix::fs::PermissionsExt;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    struct Scratch(PathBuf);
-
-    impl Scratch {
-        fn new() -> Self {
-            static COUNTER: AtomicUsize = AtomicUsize::new(0);
-            let n = COUNTER.fetch_add(1, AtomicOrdering::SeqCst);
-            let dir =
-                std::env::temp_dir().join(format!("briardr-uploads-{}-{}", std::process::id(), n));
-            let _ = fs::remove_dir_all(&dir);
-            fs::create_dir_all(&dir).unwrap();
-            Scratch(dir)
-        }
-
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
 
     /// A PNG header (signature, IHDR length and type, dimensions) with no image data.
     fn png_header(width: u32, height: u32) -> Vec<u8> {
@@ -358,7 +334,7 @@ mod tests {
 
     #[test]
     fn new_upload_dir_is_private_and_unique() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("uploads");
         let root = scratch.path().join("root");
         let a = new_upload_dir(&root).unwrap();
         let b = new_upload_dir(&root).unwrap();
@@ -370,7 +346,7 @@ mod tests {
 
     #[test]
     fn receive_image_renames_to_png_and_leaves_no_partial() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("uploads");
         let mut bytes = png_header(10, 10);
         bytes.extend_from_slice(&[0; 16]);
         let path = receive_upload(&bytes, UploadKind::Image, "shot.jpg", scratch.path()).unwrap();
@@ -386,7 +362,7 @@ mod tests {
 
     #[test]
     fn receive_rejects_bad_images_without_leaving_folders() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("uploads");
         let err = receive_upload(
             b"not a png at all, padded out",
             UploadKind::Image,
@@ -402,7 +378,7 @@ mod tests {
 
     #[test]
     fn receive_file_keeps_sanitized_name() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("uploads");
         let path = receive_upload(
             b"data",
             UploadKind::File,
@@ -416,7 +392,7 @@ mod tests {
 
     #[test]
     fn prune_removes_only_entries_older_than_max_age() {
-        let scratch = Scratch::new();
+        let scratch = Scratch::new("uploads");
         let old = scratch.path().join("old");
         let fresh = scratch.path().join("fresh");
         fs::create_dir_all(&old).unwrap();

@@ -713,18 +713,12 @@ async fn web_push(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
     use p256::ecdsa::VerifyingKey;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     use p256::ecdsa::signature::Verifier as _;
-
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("briardr-push-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let _ = fs::create_dir_all(&dir);
-        dir
-    }
 
     fn diagnostics(dir: &Path) -> Arc<Diagnostics> {
         Arc::new(Diagnostics::new(dir.join("diag"), dir.join("diag-salt")).expect("diag"))
@@ -762,7 +756,7 @@ mod tests {
 
     #[tokio::test]
     async fn accepted_and_delivered_are_separate_confirmed_states() {
-        let dir = scratch_dir("accepted");
+        let dir = Scratch::new("push-accepted");
         let push = new_push(&dir);
         let (sender, seen) = fake_sender(Ok(201));
         push.set_sender(sender);
@@ -821,7 +815,7 @@ mod tests {
 
     #[tokio::test]
     async fn refused_push_is_not_sent_and_expired_subscription_is_removed() {
-        let dir = scratch_dir("gone");
+        let dir = Scratch::new("push-gone");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/gone", &p256dh, &auth)
@@ -839,7 +833,7 @@ mod tests {
 
     #[tokio::test]
     async fn error_strings_and_resolved_non_2xx() {
-        let dir = scratch_dir("errors");
+        let dir = Scratch::new("push-errors");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/a", &p256dh, &auth)
@@ -874,7 +868,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_device_targets_one_subscription_and_urgency_and_topic_follow_the_kind() {
-        let dir = scratch_dir("targets");
+        let dir = Scratch::new("push-targets");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/1", &p256dh, &auth)
@@ -905,7 +899,7 @@ mod tests {
 
     #[tokio::test]
     async fn trims_deliveries_to_the_newest_300_past_500() {
-        let dir = scratch_dir("trim");
+        let dir = Scratch::new("push-trim");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/1", &p256dh, &auth)
@@ -928,7 +922,7 @@ mod tests {
 
     #[test]
     fn a_device_can_see_its_endpoint_and_the_attention_count_is_optional() {
-        let dir = scratch_dir("endpoint");
+        let dir = Scratch::new("push-endpoint");
         let push = new_push(&dir);
         assert_eq!(push.device_endpoint("d1"), None);
         push.subscribe("d1", "https://push.example/1", "k", "a")
@@ -956,7 +950,7 @@ mod tests {
 
     #[test]
     fn subscribe_rejects_non_https_and_missing_keys() {
-        let dir = scratch_dir("subscribe");
+        let dir = Scratch::new("push-subscribe");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         for (endpoint, p, a) in [
@@ -978,7 +972,7 @@ mod tests {
 
     #[test]
     fn subscriptions_file_has_the_ts_shape_and_is_owner_only() {
-        let dir = scratch_dir("subs-file");
+        let dir = Scratch::new("push-subs-file");
         let push = new_push(&dir);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/s", &p256dh, &auth)
@@ -1013,7 +1007,7 @@ mod tests {
 
     #[test]
     fn vapid_file_is_created_owner_only_and_reused() {
-        let dir = scratch_dir("vapid");
+        let dir = Scratch::new("push-vapid");
         let push = new_push(&dir);
         let path = dir.join("vapid.json");
         let text = fs::read_to_string(&path).expect("vapid file");
