@@ -719,11 +719,23 @@ mod tests {
 
     use p256::ecdsa::signature::Verifier as _;
 
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("briardr-push-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        let _ = fs::create_dir_all(&dir);
-        dir
+    /// A scratch directory under the system temp dir, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("briardr-push-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&dir);
+            let _ = fs::create_dir_all(&dir);
+            Scratch(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     fn diagnostics(dir: &Path) -> Arc<Diagnostics> {
@@ -762,8 +774,8 @@ mod tests {
 
     #[tokio::test]
     async fn accepted_and_delivered_are_separate_confirmed_states() {
-        let dir = scratch_dir("accepted");
-        let push = new_push(&dir);
+        let dir = Scratch::new("accepted");
+        let push = new_push(&dir.0);
         let (sender, seen) = fake_sender(Ok(201));
         push.set_sender(sender);
         let (_, p256dh, auth) = receiver_keys();
@@ -821,8 +833,8 @@ mod tests {
 
     #[tokio::test]
     async fn refused_push_is_not_sent_and_expired_subscription_is_removed() {
-        let dir = scratch_dir("gone");
-        let push = new_push(&dir);
+        let dir = Scratch::new("gone");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/gone", &p256dh, &auth)
             .expect("subscribe");
@@ -833,14 +845,14 @@ mod tests {
         assert_eq!(records[0].status_code, Some(410));
         assert_eq!(records[0].error.as_deref(), Some("subscription_gone"));
         assert!(!push.has_device("dev1"));
-        let saved = fs::read_to_string(dir.join("subs.json")).expect("subs file");
+        let saved = fs::read_to_string(dir.0.join("subs.json")).expect("subs file");
         assert_eq!(saved, "[]");
     }
 
     #[tokio::test]
     async fn error_strings_and_resolved_non_2xx() {
-        let dir = scratch_dir("errors");
-        let push = new_push(&dir);
+        let dir = Scratch::new("errors");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/a", &p256dh, &auth)
             .expect("subscribe");
@@ -874,8 +886,8 @@ mod tests {
 
     #[tokio::test]
     async fn only_device_targets_one_subscription_and_urgency_and_topic_follow_the_kind() {
-        let dir = scratch_dir("targets");
-        let push = new_push(&dir);
+        let dir = Scratch::new("targets");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/1", &p256dh, &auth)
             .expect("subscribe");
@@ -905,8 +917,8 @@ mod tests {
 
     #[tokio::test]
     async fn trims_deliveries_to_the_newest_300_past_500() {
-        let dir = scratch_dir("trim");
-        let push = new_push(&dir);
+        let dir = Scratch::new("trim");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/1", &p256dh, &auth)
             .expect("subscribe");
@@ -928,8 +940,8 @@ mod tests {
 
     #[test]
     fn a_device_can_see_its_endpoint_and_the_attention_count_is_optional() {
-        let dir = scratch_dir("endpoint");
-        let push = new_push(&dir);
+        let dir = Scratch::new("endpoint");
+        let push = new_push(&dir.0);
         assert_eq!(push.device_endpoint("d1"), None);
         push.subscribe("d1", "https://push.example/1", "k", "a")
             .unwrap();
@@ -956,8 +968,8 @@ mod tests {
 
     #[test]
     fn subscribe_rejects_non_https_and_missing_keys() {
-        let dir = scratch_dir("subscribe");
-        let push = new_push(&dir);
+        let dir = Scratch::new("subscribe");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         for (endpoint, p, a) in [
             (
@@ -978,8 +990,8 @@ mod tests {
 
     #[test]
     fn subscriptions_file_has_the_ts_shape_and_is_owner_only() {
-        let dir = scratch_dir("subs-file");
-        let push = new_push(&dir);
+        let dir = Scratch::new("subs-file");
+        let push = new_push(&dir.0);
         let (_, p256dh, auth) = receiver_keys();
         push.subscribe("dev1", "https://web.push.apple.com/s", &p256dh, &auth)
             .expect("subscribe");
@@ -989,7 +1001,7 @@ mod tests {
             .expect("subscribe");
         assert_eq!(push.device_count(), 2, "a device keeps one subscription");
 
-        let path = dir.join("subs.json");
+        let path = dir.0.join("subs.json");
         let text = fs::read_to_string(&path).expect("subs file");
         let parsed: Value = serde_json::from_str(&text).expect("json");
         let first = &parsed[0];
@@ -1006,16 +1018,16 @@ mod tests {
         let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
 
-        let reloaded = new_push(&dir);
+        let reloaded = new_push(&dir.0);
         assert!(reloaded.has_device("dev1"));
         assert!(reloaded.has_device("dev2"));
     }
 
     #[test]
     fn vapid_file_is_created_owner_only_and_reused() {
-        let dir = scratch_dir("vapid");
-        let push = new_push(&dir);
-        let path = dir.join("vapid.json");
+        let dir = Scratch::new("vapid");
+        let push = new_push(&dir.0);
+        let path = dir.0.join("vapid.json");
         let text = fs::read_to_string(&path).expect("vapid file");
         assert!(!text.contains(' ') && !text.contains('\n'), "compact JSON");
         let mode = fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
@@ -1031,7 +1043,7 @@ mod tests {
             .public_key();
         assert_eq!(derived.to_sec1_point(false).as_bytes(), public.as_slice());
 
-        let again = new_push(&dir);
+        let again = new_push(&dir.0);
         assert_eq!(again.public_key(), push.public_key());
         assert_eq!(fs::read_to_string(&path).expect("vapid file"), text);
     }

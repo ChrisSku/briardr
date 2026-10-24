@@ -1086,7 +1086,22 @@ mod tests {
             .count()
     }
 
-    fn setup(name: &str, platform: HostPlatform, w: Shared, state: Option<&str>) -> Power {
+    /// A scratch directory under the system temp dir, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The Power under test, and its scratch directory: keep that until the test ends.
+    fn setup(
+        name: &str,
+        platform: HostPlatform,
+        w: Shared,
+        state: Option<&str>,
+    ) -> (Scratch, Power) {
         let dir = std::env::temp_dir().join(format!("briardr-power-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -1095,18 +1110,19 @@ mod tests {
         if let Some(text) = state {
             fs::write(&state_file, text).unwrap();
         }
-        Power::new(
+        let power = Power::new(
             state_file,
             capabilities(platform),
             diag,
             Box::new(FakeHost(w)),
-        )
+        );
+        (Scratch(dir), power)
     }
 
     #[test]
     fn linux_host_runs_no_power_commands() {
         let w = world(String::new(), "", false);
-        let mut p = setup("linux", HostPlatform::Linux, w.clone(), None);
+        let (_dir, mut p) = setup("linux", HostPlatform::Linux, w.clone(), None);
         let report = p.start(true, 0);
         assert!(!report.summary.battery.present);
         assert_eq!(report.summary.name, "host.local");
@@ -1125,7 +1141,7 @@ mod tests {
     #[test]
     fn always_on_holds_idle_sleep_and_lid_closed_until_switched_off() {
         let w = world(batt(80, true), "SleepDisabled\t0\n", true);
-        let mut p = setup("awake", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("awake", HostPlatform::Macos, w.clone(), None);
         p.start(true, 0);
         let s = p.summary().unwrap().clone();
         assert_eq!(s.name, "Studio");
@@ -1139,7 +1155,7 @@ mod tests {
     #[test]
     fn missing_sudoers_rule_keeps_idle_hold_and_retries_later() {
         let w = world(batt(80, true), "SleepDisabled\t0\n", false);
-        let mut p = setup("sudoers", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("sudoers", HostPlatform::Macos, w.clone(), None);
         p.start(true, 0);
         let s = p.summary().unwrap();
         assert!(s.keep_awake.setup_needed && s.keep_awake.briardr);
@@ -1153,7 +1169,7 @@ mod tests {
     #[test]
     fn low_battery_pauses_then_sleeps_after_the_grace_period() {
         let w = world(batt(9, false), "SleepDisabled\t0\n", true);
-        let mut p = setup("low", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("low", HostPlatform::Macos, w.clone(), None);
         let report = p.start(true, 0);
         assert!(report.summary.keep_awake.low_battery);
         assert!(!report.summary.keep_awake.briardr);
@@ -1173,7 +1189,7 @@ mod tests {
     #[test]
     fn plugging_in_cancels_the_low_battery_sleep() {
         let w = world(batt(9, false), "SleepDisabled\t0\n", true);
-        let mut p = setup("plugged", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("plugged", HostPlatform::Macos, w.clone(), None);
         p.start(true, 0);
         w.lock().unwrap().batt = batt(9, true);
         p.tick(30_000);
@@ -1183,7 +1199,7 @@ mod tests {
     #[test]
     fn sleep_request_runs_once_per_id() {
         let w = world(batt(80, true), "SleepDisabled\t0\n", true);
-        let mut p = setup("sleep", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("sleep", HostPlatform::Macos, w.clone(), None);
         p.start(false, 0);
         assert_eq!(
             p.request_sleep("bad id!", 0),
@@ -1206,7 +1222,7 @@ mod tests {
     #[test]
     fn sleep_is_refused_when_another_app_disabled_sleep() {
         let w = world(batt(80, true), "SleepDisabled\t1\n", true);
-        let mut p = setup("refused", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("refused", HostPlatform::Macos, w.clone(), None);
         p.start(false, 0);
         assert_eq!(
             p.request_sleep("req-123456", 0),
@@ -1218,7 +1234,7 @@ mod tests {
     #[test]
     fn release_gives_back_disablesleep_and_caffeinate() {
         let w = world(batt(80, true), "SleepDisabled\t0\n", true);
-        let mut p = setup("release", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("release", HostPlatform::Macos, w.clone(), None);
         p.start(true, 0);
         p.release();
         assert_eq!(count(&w, "caffeinate-stop"), 1);
@@ -1228,7 +1244,7 @@ mod tests {
     #[test]
     fn leftover_disablesleep_from_a_crash_is_cleared_on_start() {
         let w = world(batt(80, true), "SleepDisabled\t0\n", true);
-        let mut p = setup(
+        let (_dir, mut p) = setup(
             "crash",
             HostPlatform::Macos,
             w.clone(),
@@ -1243,7 +1259,7 @@ mod tests {
         let w = world(batt(80, true), "SleepDisabled\t0\n", true);
         w.lock().unwrap().asserts =
             "pid 77(Herdr): PreventUserIdleSystemSleep named: \"herdr\"".into();
-        let mut p = setup("wake", HostPlatform::Macos, w.clone(), None);
+        let (_dir, mut p) = setup("wake", HostPlatform::Macos, w.clone(), None);
         p.start(false, 0);
         p.request_sleep("req-123456", 1_000);
         p.tick(1_600);

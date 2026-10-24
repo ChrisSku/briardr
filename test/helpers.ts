@@ -16,8 +16,19 @@ import tls from 'node:tls';
 export const SESSION = process.env.BRIARDR_TEST_SESSION || `briardr-test-${process.pid}`;
 const OWN_SESSION = !process.env.BRIARDR_TEST_SESSION;
 
+/** The folders this run made, one per line, so they go when it ends, or at the next run if it was killed. The
+ *  folders themselves stay directly in the temp directory: a pane's folder shows in its prompt, and a longer one
+ *  wraps the typed text on Linux at 80 columns. */
+const MADE = path.join(os.tmpdir(), `briardr-test-${process.pid}.dirs`);
+let made = false;
+
+/** A throwaway folder, removed when the run ends (test/preload.ts). */
 export function tmpDir(prefix = 'briardr-test-'): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  if (!made) removeStaleDirs();
+  made = true;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.appendFileSync(MADE, `${dir}\n`);
+  return dir;
 }
 
 export interface TestServer {
@@ -59,9 +70,39 @@ export function ensureSession(): void {
   }
 }
 
-/** When the run ends: stop and delete its session, unless BRIARDR_TEST_SESSION named one to keep. */
-export function endSession(): void {
+/** When the run ends: stop and delete its session (unless BRIARDR_TEST_SESSION named one to keep), then remove
+ *  the folders it made. */
+export function endRun(): void {
   if (OWN_SESSION && started) removeSession(SESSION);
+  removeDirs(MADE);
+}
+
+function removeDirs(list: string) {
+  let dirs = '';
+  try {
+    dirs = fs.readFileSync(list, 'utf8');
+  } catch {
+    return;
+  }
+  for (const dir of dirs.split('\n')) if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(list, { force: true });
+}
+
+/** Folders of runs that ended early (interrupted or killed): their process is gone. Only lists this user wrote,
+ *  since the temp directory can be shared. */
+function removeStaleDirs() {
+  const tmp = os.tmpdir();
+  for (const name of fs.readdirSync(tmp)) {
+    const pid = /^briardr-test-(\d+)\.dirs$/.exec(name)?.[1];
+    if (!pid) continue;
+    const list = path.join(tmp, name);
+    try {
+      if (fs.statSync(list).uid !== process.getuid?.()) continue;
+      process.kill(Number(pid), 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ESRCH') removeDirs(list);
+    }
+  }
 }
 
 function removeSession(name: string) {

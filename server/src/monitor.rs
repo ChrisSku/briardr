@@ -599,11 +599,22 @@ mod tests {
         mon: Monitor,
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("briardr-monitor-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+    /// A scratch directory under the system temp dir, removed on drop.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("briardr-monitor-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            Scratch(dir)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     fn setup(file: PathBuf, debounce_ms: u64) -> Setup {
@@ -687,7 +698,8 @@ mod tests {
 
     #[tokio::test]
     async fn states_that_exist_at_start_are_skipped() {
-        let s = setup(temp_dir("baseline").join("monitor.json"), 60);
+        let dir = Scratch::new("baseline");
+        let s = setup(dir.0.join("monitor.json"), 60);
         s.reader.set(vec![
             stream("a", AgentState::Blocked, 1),
             stream("b", AgentState::Done, 1),
@@ -702,7 +714,8 @@ mod tests {
 
     #[tokio::test]
     async fn alerts_after_the_debounce_and_cancels_one_that_stops_being_true() {
-        let s = setup(temp_dir("debounce").join("monitor.json"), 60);
+        let dir = Scratch::new("debounce");
+        let s = setup(dir.0.join("monitor.json"), 60);
         s.reader.set(vec![stream("a", AgentState::Working, 1)]);
         s.mon.start();
         s.reader.move_to("a", AgentState::Blocked, 2);
@@ -719,7 +732,8 @@ mod tests {
 
     #[tokio::test]
     async fn deduplicates_across_monitor_restarts() {
-        let file = temp_dir("restart").join("monitor.json");
+        let dir = Scratch::new("restart");
+        let file = dir.0.join("monitor.json");
         let one = setup(file.clone(), 60);
         one.reader.set(vec![stream("a", AgentState::Working, 1)]);
         one.mon.start();
@@ -736,7 +750,8 @@ mod tests {
 
     #[tokio::test]
     async fn payloads_never_contain_terminal_text_and_names_can_be_removed() {
-        let s = setup(temp_dir("payload").join("monitor.json"), 60);
+        let dir = Scratch::new("payload");
+        let s = setup(dir.0.join("monitor.json"), 60);
         s.reader.set(vec![stream("a", AgentState::Working, 1)]);
         s.mon.start();
         s.reader.move_to("a", AgentState::Blocked, 9);
@@ -760,7 +775,8 @@ mod tests {
 
     #[tokio::test]
     async fn alerts_carry_how_many_agents_need_attention_now() {
-        let s = setup(temp_dir("attention").join("monitor.json"), 60);
+        let dir = Scratch::new("attention");
+        let s = setup(dir.0.join("monitor.json"), 60);
         s.reader.set(vec![
             stream("a", AgentState::Working, 1),
             stream("b", AgentState::Blocked, 1),
@@ -775,7 +791,8 @@ mod tests {
 
     #[tokio::test]
     async fn per_kind_settings_are_honoured() {
-        let s = setup(temp_dir("per-kind").join("monitor.json"), 60);
+        let dir = Scratch::new("per-kind");
+        let s = setup(dir.0.join("monitor.json"), 60);
         lock(&s.cfg).notifications.finished = false;
         s.reader.set(vec![stream("a", AgentState::Working, 1)]);
         s.mon.start();

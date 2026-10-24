@@ -64,8 +64,8 @@ mise run lint           # the GitHub workflows (actionlint) and the Linux setup 
 The integration suite builds a debug server with test hooks and the client (into
 `test-results/web-dist/test`, not `web/dist`), and starts throwaway instances on loopback ports below the
 ephemeral range, each with its own data and uploads directory. Each run starts its own Herdr session
-(`briardr-test-<pid>`) and removes it when it ends (a killed run's session goes at the next run), so runs in
-parallel don't collide and your sessions are never touched. To watch the tests in Herdr, run them in the
+(`briardr-test-<pid>`) and removes it and its temp folders when it ends (a killed run's go at the next run),
+so runs in parallel don't collide and your sessions are never touched. To watch the tests in Herdr, run them in the
 development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
 Python 3 on PATH.
 
