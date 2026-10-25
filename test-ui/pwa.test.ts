@@ -669,7 +669,11 @@ describe('offline readiness and local work', () => {
     assert.match((await page.locator('.notes-status').textContent()) || '', /couldn’t keep a copy/);
     await page.getByRole('button', { name: 'Copy text' }).click();
     assert.equal(await page.evaluate(() => (window as any).copied), 'only here');
-    assert.equal(await page.locator('textarea.notes-area[data-keeps-draft]').count(), 0, 'an update waits for this text');
+    // A build the service worker activates now waits for this text, typed in one go (one input event).
+    await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { t: 'shell', version: 'next' } })));
+    await page.locator('.update-bar').waitFor({ timeout: 5000 });
+    assert.match((await page.locator('.update-bar').textContent()) || '', /reloads once you’re done with the text you typed/);
+    assert.equal(await page.locator('textarea.notes-area').inputValue(), 'only here');
     const events = await page.evaluate(() => localStorage.getItem('briardr.diag.1') || '');
     assert.match(events, /"ev":"storage_write_failed"|"ev":"note_draft_stored"/);
     assert.ok(!events.includes('only here'), 'diagnostics never hold the text');
