@@ -115,6 +115,7 @@ fs.rmSync(packagesFile);
 
 const archive = path.join(out, `${name}.tar.gz`);
 fs.rmSync(archive, { force: true });
-// COPYFILE_DISABLE: macOS's tar would add ._ files with each file's extended attributes.
-run(['tar', '-czf', archive, '-C', out, path.basename(stage)], { COPYFILE_DISABLE: '1' });
+// No extended attributes: macOS gives files ones like com.apple.provenance, which its tar would add to
+// the archive (also as ._ files, without COPYFILE_DISABLE), and GNU tar warns about when unpacking.
+run(['tar', '--no-xattrs', '-czf', archive, '-C', out, path.basename(stage)], { COPYFILE_DISABLE: '1' });
 console.log(`packaged Briardr ${version} for ${target}: ${path.relative(root, archive)} (${(fs.statSync(archive).size / 1e6).toFixed(1)} MB)`);
