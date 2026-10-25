@@ -593,9 +593,13 @@ describe('offline readiness and local work', () => {
     await page.goto(proxy.base + '/settings/install');
     await page.locator('#set-install').getByText('Briardr can’t open offline yet').waitFor();
     serve(build);
-    await page.goto(proxy.base + '/settings/diagnostics');
-    await page.getByRole('button', { name: 'Repair offline app' }).click();
-    await readiness(page).getByText('Ready.').waitFor({ timeout: 30_000 });
+    // Repair from a new page: this one, on the broken build, may reload into the good one by itself (the
+    // service worker installs it and tells the page), which would interrupt navigating it.
+    await page.close();
+    const fresh = await ctx.newPage();
+    await fresh.goto(proxy.base + '/settings/diagnostics');
+    await fresh.getByRole('button', { name: 'Repair offline app' }).click();
+    await readiness(fresh).getByText('Ready.').waitFor({ timeout: 30_000 });
   });
 
   test('cached terminal screens are kept for recent streams only (30 days, at most 100)', async () => {
@@ -661,6 +665,7 @@ describe('offline readiness and local work', () => {
     });
     const id = await targetId(page);
     await page.goto(proxy.base + `/stream/${encodeURIComponent(id)}/notes`);
+    const loads = navigations(page); // a reload would lose the text: there must be none
     await page.getByRole('button', { name: /New note/ }).click();
     await proxy.set('down'); // the host can't save it either
     onTestFinished(() => proxy.set('pass'));
@@ -668,8 +673,14 @@ describe('offline readiness and local work', () => {
     await page.getByRole('alert').filter({ hasText: 'couldn’t keep a copy' }).waitFor({ timeout: 10_000 });
     assert.match((await page.locator('.notes-status').textContent()) || '', /couldn’t keep a copy/);
     await page.getByRole('button', { name: 'Copy text' }).click();
+    assert.equal(loads(), 0, 'the page reloaded and lost the text');
     assert.equal(await page.evaluate(() => (window as any).copied), 'only here');
-    assert.equal(await page.locator('textarea.notes-area[data-keeps-draft]').count(), 0, 'an update waits for this text');
+    // A build the service worker activates now waits for this text, typed in one go (one input event).
+    await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { t: 'shell', version: 'next' } })));
+    await page.locator('.update-bar').waitFor();
+    assert.match((await page.locator('.update-bar').textContent()) || '', /reloads once you’re done with the text you typed/);
+    assert.equal(await page.locator('textarea.notes-area').inputValue(), 'only here');
+    assert.equal(loads(), 0, 'the page reloaded for the update');
     const events = await page.evaluate(() => localStorage.getItem('briardr.diag.1') || '');
     assert.match(events, /"ev":"storage_write_failed"|"ev":"note_draft_stored"/);
     assert.ok(!events.includes('only here'), 'diagnostics never hold the text');

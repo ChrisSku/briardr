@@ -522,11 +522,10 @@ fn parse_reset_credits(r: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     use super::*;
-    use crate::scratch::Scratch;
+    use crate::scratch::{write_executable, Scratch};
 
     const FIXTURE: &str =
         include_str!("../../fixtures/usage/parseCodex.primary-and-secondary.json");
@@ -559,9 +558,7 @@ done
                 .replace("__LOG__", &log.to_string_lossy())
                 .replace("__REPLY__", reply);
             let path = dir.join("codex");
-            std::fs::write(&path, body).expect("test script");
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                .expect("test script mode");
+            write_executable(&path, &body);
             FakeCodex {
                 _dir: dir,
                 path: path.to_string_lossy().into_owned(),

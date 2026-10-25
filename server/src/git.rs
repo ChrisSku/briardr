@@ -709,7 +709,7 @@ pub fn file_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
+    use crate::scratch::{write_executable, Scratch};
 
     fn strs(argv: &[String]) -> Vec<&str> {
         argv.iter().map(String::as_str).collect()
@@ -948,11 +948,7 @@ mod tests {
     fn slow_git_is_killed_at_the_timeout() {
         let scratch = Scratch::new("git-slow");
         let script = scratch.join("fake-git");
-        fs::write(&script, "#!/bin/sh\nsleep 5\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        write_executable(&script, "#!/bin/sh\nsleep 5\n");
         let started = Instant::now();
         let err = run_git(
             scratch.path(),
@@ -970,11 +966,7 @@ mod tests {
     fn output_past_the_cap_is_killed_and_returned_as_partial_success() {
         let scratch = Scratch::new("git-overflow");
         let script = scratch.join("fake-git");
-        fs::write(&script, "#!/bin/sh\nhead -c 40000000 /dev/zero\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        write_executable(&script, "#!/bin/sh\nhead -c 40000000 /dev/zero\n");
         let res = run_git(
             scratch.path(),
             &["status"],

@@ -43,20 +43,22 @@ export function holdUpdates(reason: string): () => void {
 
 // Text typed into a field that doesn't keep its own draft (marked data-keeps-draft, like a note) is lost
 // by a reload. The terminal's own input field doesn't count; recent typing there is checked separately.
+// The mark is read when an update comes, not while typing: a note learns that it couldn't keep its draft
+// only after the input event that changed it.
 const edited = new Set<HTMLInputElement | HTMLTextAreaElement>();
 document.addEventListener(
   'input',
   (e) => {
     const t = e.target;
     if (!(t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && /^(text|search|url|email)$/.test(t.type)))) return;
-    if (!t.closest('[data-keeps-draft], .xterm')) edited.add(t);
+    if (!t.closest('.xterm')) edited.add(t);
   },
   true,
 );
 deferUpdatesWhile(() => {
   for (const f of edited) {
     if (!f.isConnected || !f.value) edited.delete(f);
-    else return 'you’re done with the text you typed';
+    else if (!f.closest('[data-keeps-draft]')) return 'you’re done with the text you typed';
   }
   return null;
 });

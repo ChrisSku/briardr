@@ -214,14 +214,13 @@ pub async fn transcribe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::Scratch;
+    use crate::scratch::{write_executable, Scratch};
     use std::os::unix::fs::PermissionsExt;
 
     /// Writes an executable `sh` helper whose body runs with the audio path as `$1`.
     fn fake_helper(scratch: &Scratch, body: &str) -> PathBuf {
         let path = scratch.path().join("briardr-transcribe");
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, &format!("#!/bin/sh\n{body}\n"));
         path
     }
 
