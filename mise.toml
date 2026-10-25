@@ -20,6 +20,10 @@ run = "bun scripts/build.ts"
 description = "Build the server (release, no test hooks) into server/target/release/briardr"
 run = "cargo build --manifest-path server/Cargo.toml --release"
 
+[tasks.package]
+description = "Package a release for this computer (or --target <Rust target>) into dist/briardr-<os>-<arch>.tar.gz"
+run = "bun scripts/package.ts"
+
 [tasks."build:test-server"]
 description = "Build the server with the loopback test hooks (debug, for the test suites only)"
 run = "cargo build --manifest-path server/Cargo.toml --features test-hooks"

@@ -183,6 +183,29 @@ fn build_command(env: &Env, which: Option<&str>) -> Result<i32, String> {
     Ok(if failed > 0 { 1 } else { 0 })
 }
 
+/// Plugins are made and built with the checkout's toolchain (scripts/, plugins/template, skills/ and
+/// Bun); a release (scripts/package.ts) has none.
+pub(super) fn toolchain(env: &Env) -> Result<(), String> {
+    if env.root.join("scripts/plugin-build.ts").is_file() {
+        return Ok(());
+    }
+    Err(format!(
+        "Making and building plugins needs Briardr’s checkout and its tools, and {} is a release without them. \
+         Clone the version you run (git clone --branch v{} https://github.com/ChrisSku/briardr.git), run \
+         `mise install && mise run install` in it, and run plugin commands with BRIARDR_PROJECT_ROOT set to it.",
+        env.root.display(),
+        crate::app::VERSION
+    ))
+}
+
+/// One of the toolchain's scripts (scripts/<name>), run with Bun.
+fn script(env: &Env, name: &str) -> Result<Command, String> {
+    toolchain(env)?;
+    let mut cmd = bun(&env.root);
+    cmd.arg(env.root.join("scripts").join(name));
+    Ok(cmd)
+}
+
 /// `bun`: from PATH, else the one the checkout's mise.toml pins (installed by `mise install`).
 pub(super) fn bun(root: &Path) -> Command {
     let on_path = std::env::var_os("PATH")
@@ -204,8 +227,7 @@ pub(super) fn bun(root: &Path) -> Command {
 }
 
 pub(super) fn build(env: &Env, dir: &Path) -> Result<(), String> {
-    let status = bun(&env.root)
-        .arg(env.root.join("scripts/plugin-build.ts"))
+    let status = script(env, "plugin-build.ts")?
         .arg(dir)
         .status()
         .map_err(|e| {
@@ -234,8 +256,7 @@ fn check(env: &Env, folder: Option<&str>) -> Result<i32, String> {
             dir.display()
         ));
     }
-    let status = bun(&env.root)
-        .arg(env.root.join("scripts/plugin-check.ts"))
+    let status = script(env, "plugin-check.ts")?
         .arg(&dir)
         .status()
         .map_err(|e| format!("Couldn’t run bun ({e})."))?;
@@ -302,8 +323,7 @@ fn dev(env: &Env, folder: Option<&str>) -> Result<i32, String> {
         return Ok(1);
     }
     println!("Open a stream in Briardr to see {id}. Changes rebuild and reload on every device.");
-    let status = bun(&env.root)
-        .arg(env.root.join("scripts/plugin-build.ts"))
+    let status = script(env, "plugin-build.ts")?
         .arg(&dir)
         .arg("--watch")
         .stdin(Stdio::null())

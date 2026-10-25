@@ -18,15 +18,17 @@ Briardr provides remote views and actions around them.
 | `plugins/` | Built-in plugins (Files, Changes, Preview, Docs, Notes, Usage), made like any installed plugin; `plugins/template` is what `briardr create plugin` starts from. |
 | `server/src/plugins/` | Installed plugins: manifests, enablement, files, and backends (approved commands speaking JSON over stdin/stdout). |
 | `native/transcribe.swift` | Optional macOS on-device speech transcription helper. |
-| `scripts/` | Bun build tooling, Linux installation, deployment smoke tests, and optional Mac power setup. |
+| `scripts/` | Bun build tooling, release packaging, Linux installation, deployment smoke tests, and optional Mac power setup. |
 | `deploy/linux/` | Installer version and checksum pins. |
 | `test/`, `test-ui/`, `server/tests/` | Integration, WebKit UI, and Rust fixture tests. Rust unit tests also live beside implementation modules. |
 | `bench/` | Performance and comparison tooling. |
 | `site/` | The [briardr.dev](https://briardr.dev) website, published by the Pages workflow. |
 
 The Rust binary is built to `server/target/release/briardr`. The browser build is served from
-`web/dist`, so a binary copied by itself is not a complete installation. The Linux installer keeps
-its Cargo build outside the checkout and configures the service with the right project paths.
+`web/dist`, so a binary copied by itself is not a complete installation. A
+[release archive](development.md#release-archives) has the same shape, `bin/briardr` next to `web/dist`,
+and the server finds its files in both (`project_root` in `server/src/main.rs`). The Linux installer
+keeps its Cargo build outside the checkout and configures the service with the right project paths.
 
 ## Boundaries to preserve
 
