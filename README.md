@@ -49,10 +49,9 @@ last saw, labeled stale, adapts to phone, tablet and desktop layouts, and has li
 
 ## Get started
 
-You need **Herdr running on the same host as Briardr**, Git, and the tools pinned in
-[`mise.toml`](mise.toml) (Bun and Rust, installed by [mise](https://mise.jdx.dev)). The Linux helper
-installs its pinned Herdr version; on macOS, install Herdr first with its
-[installation guide](https://herdr.dev/docs/install/).
+You need **Herdr running on the same host as Briardr**. On a Mac, the installer offers to install the
+Herdr version Briardr is tested with; the Linux helper installs it. To run Briardr from a checkout
+instead, see [development](docs/development.md).
 
 Choose a host and how your devices will reach it:
 
@@ -66,26 +65,24 @@ Choose a host and how your devices will reach it:
 
 ### Quick start on macOS with Tailscale
 
-Install mise, Herdr and Tailscale first, and connect the Mac and your device to the same tailnet.
-Enable [Tailscale HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates)
-and check that `tailscale status --json` works in your terminal.
+Install Tailscale first, and connect the Mac and your device to the same tailnet. Enable
+[Tailscale HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates) and check
+that `tailscale status --json` works in your terminal.
 
 ```sh
-git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git
-cd briardr
-mise trust
-mise install
-mise run install
-mise run build:server
-./server/target/release/briardr configure --mode tailscale --listen tailscale
-mise run serve
+curl -fsSL https://briardr.dev/install.sh | sh   # Briardr, then `briardr setup`: Herdr and what's next
+briardr configure --mode tailscale --listen tailscale
+briardr serve
 ```
 
-Keep that terminal running. In another terminal in the checkout:
+The installer checks the download against the release's checksums, puts Briardr in
+`~/.local/lib/briardr` and `briardr` in `~/.local/bin`, and offers to install Herdr if it's missing.
+Start Herdr (`herdr` in a terminal) if it isn't running. Keep the Briardr terminal running. In another
+terminal:
 
 ```sh
-mise run pair            # one-time code for a new device (also: Settings → Devices → Add a device)
-mise run install-agent   # optional: start Briardr at login (prints the launchctl command to run)
+briardr pair             # one-time code for a new device (also: Settings → Devices → Add a device)
+briardr install-agent    # optional: start Briardr at login (prints the launchctl command to run)
 ```
 
 Open the HTTPS URL it prints on your device and enter the code. On iPhone and iPad, **add Briardr to
@@ -97,7 +94,7 @@ the Home Screen first and pair inside the installed app**, then turn on notifica
 As a non-root user with sudo, on Ubuntu 24.04 or 26.04 LTS (x86_64 or aarch64):
 
 ```sh
-git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.0 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex
@@ -148,11 +145,12 @@ tab in every stream, a tab of its own or a Settings section, optionally with cod
 host):
 
 ```sh
-mise run install-cli     # once: puts `briardr` on your PATH (~/.local/bin)
 briardr create plugin    # asks what it should do, then hands the job to Claude Code or Codex
 ```
 
-`briardr plugin list|link|build|check|enable|disable|dev` manage plugins on the host.
+`briardr plugin list|link|build|check|enable|disable|dev` manage plugins on the host. Making and building
+plugins uses a checkout's tools ([docs/PLUGINS.md](docs/PLUGINS.md) says how, when Briardr runs from a
+release).
 [docs/PLUGINS.md](docs/PLUGINS.md) explains how they work; plugin authors (and their agents) use the
 `briardr-plugins` skill that `briardr create plugin` installs (`briardr skill install` installs it alone).
 

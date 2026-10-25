@@ -7,6 +7,19 @@ shellcheck = "0.11.0"
 
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
+# Git tells a hook's commands which repository it runs for (in a worktree, GIT_DIR is that worktree's), and
+# git run with these variables uses that repository whatever folder it runs in. The test suites make their
+# own repositories and the servers they start read them, so with these set (a push from a worktree, or
+# `git rebase --exec`), their commits went into the branch being pushed. Every task runs in the checkout,
+# where git finds it without them. (`git rev-parse --local-env-vars` lists them.)
+GIT_DIR = false
+GIT_WORK_TREE = false
+GIT_COMMON_DIR = false
+GIT_INDEX_FILE = false
+GIT_OBJECT_DIRECTORY = false
+GIT_ALTERNATE_OBJECT_DIRECTORIES = false
+GIT_IMPLICIT_WORK_TREE = false
+GIT_PREFIX = false
 
 [tasks.install]
 description = "Install dependencies"
@@ -19,6 +32,10 @@ run = "bun scripts/build.ts"
 [tasks."build:server"]
 description = "Build the server (release, no test hooks) into server/target/release/briardr"
 run = "cargo build --manifest-path server/Cargo.toml --release"
+
+[tasks.package]
+description = "Package a release for this computer (or --target <Rust target>) into dist/briardr-<os>-<arch>.tar.gz"
+run = "bun scripts/package.ts"
 
 [tasks."build:test-server"]
 description = "Build the server with the loopback test hooks (debug, for the test suites only)"
@@ -85,8 +102,8 @@ description = "Check that this branch brings a changeset (the pre-push hook and 
 run = "bun scripts/release.ts changeset"
 
 [tasks.lint]
-description = "Lint the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)"
-run = ["actionlint", "shellcheck -s bash -S error scripts/setup-linux.sh"]
+description = "Lint the GitHub workflows (actionlint), the Linux setup helper and the installer (shellcheck)"
+run = ["actionlint", "shellcheck -s bash -S error scripts/setup-linux.sh", "shellcheck -s sh site/install.sh"]
 
 [tasks."install-agent"]
 description = "Write the LaunchAgent so Briardr starts at login"

@@ -16,7 +16,7 @@ use crate::auth::Auth;
 use crate::config::{load_config, validate_config, BriardrConfig, ConfigError, Paths};
 use crate::diag::Diagnostics;
 use crate::dictation::ensure_helper;
-use crate::herdr::rpc::HerdrTarget;
+use crate::herdr::rpc::{herdr_status, HerdrTarget};
 use crate::herdr::state::{HerdrReader, HerdrState};
 use crate::listener::{self, CertResolver, Handler};
 use crate::monitor::{AlertSink, Monitor};
@@ -157,11 +157,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             .unwrap_or(std::env::consts::OS),
     ));
     let proxy_mode = cfg.tls.mode == "proxy";
-    // BRIARDR_WEB_DIST serves another build (benchmarks, experiments) without touching web/dist.
-    let web_dir = match env.get("BRIARDR_WEB_DIST").filter(|v| !v.is_empty()) {
-        Some(d) => std::path::absolute(d).unwrap_or_else(|_| PathBuf::from(d)),
-        None => crate::project_root().join("web").join("dist"),
-    };
+    let web_dir = crate::web_dist(&env);
     let diag = Arc::new(
         Diagnostics::new(paths.logs(), paths.secrets().join("diag-salt"))
             .map_err(|e| ServeError::Other(e.to_string()))?,
@@ -258,14 +254,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
     )));
 
     let auth = Arc::new(Auth::new(paths.devices(), paths.pairing()));
-    let herdr = HerdrState::new(
-        HerdrTarget {
-            herdr_path: cfg.herdr_path.clone(),
-            session: cfg.herdr_session.clone(),
-            timeout: Duration::from_millis(cfg.herdr_timeout_ms),
-        },
-        diag.clone(),
-    );
+    let herdr = HerdrState::new(HerdrTarget::of(&cfg), diag.clone());
     let host = the_host(&caps);
     let actions = Arc::new(Actions::new(herdr.clone(), host.clone()));
     let hub = Arc::new(TerminalHub::new(herdr.clone(), diag.clone(), host.clone()));
@@ -513,9 +502,12 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             format!(" (session {})", cfg.herdr_session)
         };
         let state = if herdr.health().ok {
-            "connected"
+            "connected".to_string()
         } else {
-            "not reachable yet"
+            match herdr_status(&HerdrTarget::of(&cfg)).await.problem {
+                Some(problem) => crate::setup::herdr_hint(&problem, &cfg.herdr_session),
+                None => "running, connecting".to_string(),
+            }
         };
         println!("  Herdr: {}{session} — {state}", cfg.herdr_path);
         match &tls {

@@ -232,15 +232,20 @@ fn is_executable(path: &Path) -> bool {
 }
 
 /// Defaults; `env` supplies PATH for locating herdr and codex, `home` the home directory.
+/// Where Briardr looks for Herdr when it isn't on the PATH (`briardr setup` installs it in the last one).
+pub fn herdr_fallbacks(home: &Path) -> [PathBuf; 3] {
+    [
+        PathBuf::from("/opt/homebrew/bin/herdr"),
+        PathBuf::from("/usr/local/bin/herdr"),
+        home.join(".local").join("bin").join("herdr"),
+    ]
+}
+
 pub fn default_config(
     env: &std::collections::HashMap<String, String>,
     home: &Path,
 ) -> BriardrConfig {
-    let herdr_fallbacks = [
-        PathBuf::from("/opt/homebrew/bin/herdr"),
-        PathBuf::from("/usr/local/bin/herdr"),
-        home.join(".local").join("bin").join("herdr"),
-    ];
+    let herdr_fallbacks = herdr_fallbacks(home);
     let codex_fallbacks = [
         PathBuf::from("/opt/homebrew/bin/codex"),
         PathBuf::from("/usr/local/bin/codex"),

@@ -3,11 +3,13 @@
 #   `changeset version` sets it in package.json and writes their CHANGELOG.md section, scripts/release.ts
 #   copies it to the other files, and the release GitHub App pushes that to main as "Version X.Y.Z" (the
 #   main ruleset lets the App push without a pull request).
-# - The same run releases it right away, since the install instructions it pushed clone the tag: the
-#   commit is tagged vX.Y.Z, and the notes are the version's CHANGELOG.md section. The Linux checks run
-#   on that commit afterwards; it only changes the version.
+# - The same run releases it: the commit is tagged vX.Y.Z right away, since the install instructions it
+#   pushed clone the tag; then the archives that run Briardr without a checkout (scripts/package.ts) are
+#   built on each platform, and the release is published with them, its notes the version's CHANGELOG.md
+#   section. The Linux checks run on that commit afterwards; it only changes the version.
 # - Every run first releases the version on main if it has no release yet (its run failed after the
-#   push), at its "Version X.Y.Z" commit, so a newer version never skips it.
+#   push), at its "Version X.Y.Z" commit, so a newer version never skips it. A version pushed by that same
+#   run is tagged, and released by the run for its own commit.
 # A merge with only empty changesets releases nothing; they're removed with the next version.
 # Actions are pinned to commits; the comment names the release each one is.
 name: release
@@ -27,16 +29,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  version:
     # Pushes only: a pull request from a fork's branch named main must not release anything.
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write # to tag the commit and create the release
+      contents: write # to tag the commit
+    outputs: # what this run releases: main's unreleased version, else the one it pushed
+      version: ${{ steps.unreleased.outputs.version || steps.pushed.outputs.version }}
+      commit: ${{ steps.unreleased.outputs.commit || steps.pushed.outputs.commit }}
     env:
       COMMIT: ${{ github.event.workflow_run.head_sha }}
       LEFTHOOK: 0 # no git hooks: the version commit has no changeset of its own (lefthook doesn't install on CI anyway)
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,10 +54,9 @@ jobs:
           install_args: bun
       - run: bun install --frozen-lockfile
 
-      - name: Release the version on main, if its run didn't
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bun scripts/release.ts publish
+      - name: The version on main, if its run didn't release it
+        id: unreleased
+        run: bun scripts/release.ts tag
 
       - name: Version the changesets
         id: version
@@ -93,8 +98,39 @@ jobs:
           git commit -m "Version $VERSION"
           git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" HEAD:refs/heads/main
 
-      - name: Release the version
+      - name: Tag the version
+        id: pushed
         if: steps.version.outputs.version
+        run: bun scripts/release.ts tag
+
+  build:
+    needs: version
+    if: needs.version.outputs.version
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: ${{ needs.version.outputs.commit }}
+      tag: v${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # to create the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+          persist-credentials: false
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          install_args: bun
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: briardr-*
+          path: dist
+          merge-multiple: true
+      - name: Release the version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bun scripts/release.ts publish
+        run: bun scripts/release.ts publish dist

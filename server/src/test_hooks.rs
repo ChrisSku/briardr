@@ -98,6 +98,7 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
         }
         (Method::POST, "/herdr/refresh") => json!({"ok": app.d.herdr.refresh().await.is_ok()}),
         (Method::GET, "/routes") => json!(app.list_routes()),
+        (Method::GET, "/hub/controllers") => json!(app.d.hub.controller_count()),
         (Method::GET, "/hub/sent") => {
             json!((0..app.d.hub.sent_count())
                 .map(|_| json!({}))

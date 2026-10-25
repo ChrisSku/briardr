@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -102,7 +102,7 @@ async function bytesSeen(): Promise<string[]> {
     .filter((l) => l.startsWith('BYTES '))
     .map((l) => l.slice(6).trim());
 }
-async function expectBytes(hex: string, ms = 3000) {
+async function expectBytes(hex: string, ms = WAIT) {
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
     if ((await bytesSeen()).join('').includes(hex)) return;
@@ -440,19 +440,23 @@ describe('ownership (two devices)', () => {
   });
 
   test('backgrounding releases control; returning resumes by itself, never taking over', async () => {
+    // A closed connection's control takes a moment to get back to Herdr; a device asking for control
+    // before that only watches. So each step waits until the server has given control back.
+    const released = (what: string) => waitUntil(what, () => s.run.hub.controllers === 0);
     const a = await device('iphone', 'phone-bg');
     await openTarget(a.page);
     await a.page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await sleep(800);
+    await released('the backgrounded phone’s control to go back');
     // The pane is free: another device can take control without a takeover.
     const b = await device('mac', 'mac-free');
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     await b.page.waitForSelector('[data-ownership=controlling]');
     await b.ctx.close();
+    await released('the closed Mac’s control to go back');
     await a.page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -464,7 +468,7 @@ describe('ownership (two devices)', () => {
       Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await sleep(800);
+    await released('the backgrounded phone’s control to go back');
     const c = await device('mac', 'mac-holds');
     await c.page.goto(s.base + '/workspaces');
     await c.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
@@ -498,7 +502,7 @@ describe('agents list, peek, banners and links', () => {
     const a = await device('iphone', 'phone-peek');
     await a.page.locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).click();
     await a.page.getByRole('menuitem', { name: /Peek/ }).click();
-    await a.page.getByText('Watching live · read-only').waitFor({ timeout: 8000 });
+    await a.page.getByText('Watching live · read-only').waitFor();
     assert.equal(herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows, rowsBefore);
     await a.page.getByRole('button', { name: 'Close' }).click();
     await a.ctx.close();
@@ -508,7 +512,7 @@ describe('agents list, peek, banners and links', () => {
     const a = await device('iphone', 'phone-banner');
     await a.page.waitForSelector('.count-strip');
     herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'blocked');
-    await a.page.locator('.banner-attention', { hasText: 'ui target needs you' }).waitFor({ timeout: 8000 });
+    await a.page.locator('.banner-attention', { hasText: 'ui target needs you' }).waitFor();
     await a.page.locator('.grp-attention .row-title', { hasText: 'ui target' }).waitFor();
     herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
     await a.ctx.close();
@@ -689,7 +693,7 @@ describe('agents list, peek, banners and links', () => {
       throw e;
     });
     const frame = a.page.frameLocator('.preview-frame');
-    await frame.getByText('dev /hello?x=1').waitFor({ timeout: 8000 });
+    await frame.getByText('dev /hello?x=1').waitFor();
     await a.ctx.close();
     dev.close();
   });
@@ -726,7 +730,7 @@ describe('workspaces and menus', () => {
     await a.page.keyboard.press('ArrowUp');
     assert.equal(await focused(), items.at(-1));
     await a.page.keyboard.press('Escape');
-    await menu.waitFor({ state: 'detached', timeout: 2000 });
+    await menu.waitFor({ state: 'detached' });
     await a.ctx.close();
   });
 
@@ -838,7 +842,7 @@ describe('notes', () => {
     await a.page.getByRole('button', { name: 'New note' }).click();
     const area = a.page.getByLabel('Note for ui target');
     await area.fill('Next: ask Claude to add retries\nCheck the flaky test');
-    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
     // A second device sees the same note as a card and opens it.
     const b = await device('mac', 'mac-notes');
     onTestFinished(() => b.ctx.close().catch(() => {}));
@@ -850,20 +854,20 @@ describe('notes', () => {
     // its draft is based on an older revision: Briardr must ask instead of overwriting.
     await a.ctx.setOffline(true);
     await area.fill('Phone version');
-    await a.page.getByText('Not saved yet').waitFor({ timeout: 5000 });
+    await a.page.getByText('Not saved yet').waitFor();
     await bArea.fill('Mac version');
-    await b.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await b.page.getByText(`Saved on the ${host.noun}`).waitFor();
     await a.ctx.setOffline(false);
     await a.page.getByText('Changed on another device').first().waitFor({ timeout: 10000 });
     assert.equal(await area.inputValue(), 'Phone version', 'the phone’s text is still there while you decide');
     await a.page.getByRole('button', { name: 'Keep mine' }).click();
-    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
     // After a reload the open note is still there.
     await a.page.reload(); // relaunch restores the Notes surface and the open note
     await a.page.waitForFunction(() => (document.querySelector('.notes-area') as HTMLTextAreaElement)?.value === 'Phone version');
     // Back in the list, the Mac's card picks up the phone's version.
     await b.page.getByRole('button', { name: 'All notes' }).click();
-    await b.page.locator('.note-card', { hasText: 'Phone version' }).waitFor({ timeout: 5000 });
+    await b.page.locator('.note-card', { hasText: 'Phone version' }).waitFor();
   });
 
   test('a pasted image is saved with the note and shown in Preview; only the editor scrolls', async () => {
@@ -873,7 +877,7 @@ describe('notes', () => {
     await a.page.getByRole('tab', { name: 'Notes' }).click();
     await a.page.getByRole('button', { name: 'New note' }).click();
     const area = a.page.getByLabel('Note for ui target');
-    await a.page.waitForFunction(() => document.activeElement?.classList.contains('notes-area'), null, { timeout: 2000 }); // a new note is ready to type
+    await a.page.waitForFunction(() => document.activeElement?.classList.contains('notes-area')); // a new note is ready to type
     await area.fill(Array.from({ length: 80 }, (_, i) => `line ${i}`).join('\n'));
     // iOS zooms the page when a focused field's text is under 16px.
     assert.ok(parseFloat(await area.evaluate((e) => getComputedStyle(e).fontSize)) >= 16);
@@ -895,7 +899,7 @@ describe('notes', () => {
       el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
     });
     await a.page.waitForFunction(() => /^!\[screenshot\]\(note:[a-f0-9]{24}\.png\)\n/.test((document.querySelector('.notes-area') as HTMLTextAreaElement).value));
-    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
     await a.page.getByRole('button', { name: 'Preview' }).click();
     const img = a.page.locator('.notes-preview img[alt="screenshot"]');
     await a.page.waitForFunction(() => (document.querySelector('.notes-preview img') as HTMLImageElement | null)?.naturalWidth === 40);
@@ -921,12 +925,12 @@ describe('notes', () => {
     await expectBytes(hex('\x1b[200~prompt from notes\x1b[201~'));
     await sleep(300);
     assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'no Enter');
-    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
     // A second note; both show as cards, newest first.
     await a.page.getByRole('button', { name: 'All notes' }).click();
     await a.page.getByRole('button', { name: 'New note' }).click();
     await a.page.getByLabel('Note for ui target').fill('second prompt');
-    await a.page.getByText(`Saved on the ${host.noun}`).waitFor({ timeout: 5000 });
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
     await a.page.getByRole('button', { name: 'All notes' }).click();
     const cards = a.page.locator('.note-card');
     await cards.filter({ hasText: 'second prompt' }).waitFor();
@@ -940,7 +944,7 @@ describe('notes', () => {
     // Delete asks first, then removes it from the Mac.
     await card.getByRole('button', { name: 'Delete note' }).click();
     await a.page.getByRole('button', { name: 'Delete', exact: true }).click();
-    await card.waitFor({ state: 'detached', timeout: 5000 });
+    await card.waitFor({ state: 'detached' });
     const left = await a.page.evaluate(async (p) => (await (await fetch(`/api/streams/${encodeURIComponent(p)}/notes`)).json()).notes.map((n: any) => n.text), ws.pane);
     assert.ok(!left.includes('prompt from notes') && left.includes('second prompt'), JSON.stringify(left));
   });

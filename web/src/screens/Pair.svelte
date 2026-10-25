@@ -85,7 +85,7 @@
     </form>
     <div class="pair-help">
       <p>
-        <strong>Get a code</strong> on {theHost()} with <code>mise run pair</code> in the Briardr folder{isMac() ? '' : ' (as the user Briardr runs as)'}, or from Settings → Devices → Add a device on a device that’s already signed in.
+        <strong>Get a code</strong> on {theHost()} with <code>briardr pair</code>{isMac() ? '' : ' (as the user Briardr runs as)'}, or from Settings → Devices → Add a device on a device that’s already signed in.
       </p>
       <p class="hint">This device stays signed in. You can revoke it any time from Settings on any signed-in device.</p>
     </div>

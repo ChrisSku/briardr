@@ -538,8 +538,7 @@ async fn next_line<R: AsyncRead + Unpin>(reader: &mut BufReader<R>, buf: &mut Ve
 
 #[cfg(test)]
 mod tests {
-    use crate::scratch::Scratch;
-    use std::os::unix::fs::PermissionsExt;
+    use crate::scratch::{write_executable, Scratch, WAIT};
     use std::path::Path;
 
     use super::*;
@@ -549,8 +548,7 @@ mod tests {
     /// Writes an executable `sh` script, a fake herdr, in `dir` and returns its path.
     fn script(dir: &Path, name: &str, body: &str) -> String {
         let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, &format!("#!/bin/sh\n{body}\n"));
         path.to_string_lossy().into_owned()
     }
 
@@ -567,7 +565,7 @@ mod tests {
     }
 
     async fn next(rx: &mut mpsc::UnboundedReceiver<SessionEvent>) -> SessionEvent {
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        tokio::time::timeout(WAIT, rx.recv())
             .await
             .expect("event timed out")
             .expect("event channel closed")
@@ -584,7 +582,7 @@ mod tests {
     }
 
     async fn wait_for_file(path: &std::path::Path) -> String {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(WAIT, async {
             loop {
                 if let Ok(text) = std::fs::read_to_string(path) {
                     if text.contains('\n') {

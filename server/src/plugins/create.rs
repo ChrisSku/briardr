@@ -42,6 +42,7 @@ pub fn run(env: &Env, args: &[String]) -> Result<i32, String> {
         println!("{HELP}");
         return Ok(0);
     }
+    cli::toolchain(env)?;
     let yes = args.iter().any(|a| a == "--yes");
     let ask = !yes && io::stdin().is_terminal();
     let flag = |name: &str| -> Option<String> {
@@ -405,6 +406,7 @@ fn skill_dirs(home: &Path) -> Vec<PathBuf> {
 }
 
 fn skill_files(env: &Env) -> Result<Vec<(PathBuf, String)>, String> {
+    cli::toolchain(env)?;
     let src = env.root.join("skills/briardr-plugins");
     let vars = [
         ("briardr", env.root.display().to_string()),
@@ -533,7 +535,27 @@ fn choose(question: &str, options: &[&str], default: usize) -> Result<usize, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Paths;
+    use crate::scratch::Scratch;
     use serde_json::json;
+
+    #[test]
+    fn plugin_commands_from_a_release_say_they_need_a_checkout() {
+        let release = Scratch::new("release");
+        let env = |root: &Path| Env {
+            paths: Paths::new(release.join("data")),
+            root: root.to_path_buf(),
+            web_dir: release.join("web/dist"),
+            home: release.join("home"),
+        };
+        let err = run(&env(&release), &["CI".into(), "--yes".into()]).unwrap_err();
+        assert!(err.contains("is a release without them"), "{err}");
+        let err = skill_command(&env(&release), &[]).unwrap_err();
+        assert!(err.contains("git clone --branch v"), "{err}");
+        assert!(!release.join("home").exists());
+        let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        assert!(cli::toolchain(&env(checkout)).is_ok());
+    }
 
     #[test]
     fn slugs_are_plugin_ids() {

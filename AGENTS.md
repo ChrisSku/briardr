@@ -27,10 +27,12 @@ setup and checks, [docs/architecture.md](docs/architecture.md) for the code map,
    **What changed, as one bold sentence.** Then the detail someone upgrading needs.
    ```
 
-   `patch` fixes something; `minor` adds something or changes setup or behavior. When nothing users
-   notice changes (docs, CI, tests), run `mise run changeset --empty`. The summary becomes the pull
-   request's `CHANGELOG.md` entry; see [.changeset/README.md](.changeset/README.md). Never set the
-   version or write a version's `CHANGELOG.md` section yourself, and never push tags: merging releases.
+   Until 1.0.0, `patch` is for fixes and new features and `minor` for breaking changes (an upgrade
+   that makes people change their setup, configuration or pairing); from 1.0.0, `patch` fixes, `minor`
+   adds and `major` breaks. When nothing users notice changes (docs, CI, tests), run
+   `mise run changeset --empty`. The summary becomes the pull request's `CHANGELOG.md` entry; see
+   [.changeset/README.md](.changeset/README.md). Never set the version or write a version's
+   `CHANGELOG.md` section yourself, and never push tags: merging releases.
 3. **Let the hooks run.** Before each commit they check Rust formatting. Before each push they check the
    changeset, the version, typecheck, clippy and workflow lint, and run the tests the pushed files need:
    `mise run test` (about 25 seconds) for code, and `mise run test:ui` (about 3 minutes) for the client

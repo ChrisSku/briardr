@@ -1,6 +1,7 @@
 # Linux checks: typecheck, the Rust checks, the integration suite and the browser checks (each builds the client
-# and runs against its own Herdr session), the workflows (actionlint), the setup helper (shellcheck) and the
-# generated deployment files (systemd units, Caddy site). Every change runs all of them.
+# and runs against its own Herdr session), the workflows (actionlint), the setup helper and the installer
+# (shellcheck), and the generated deployment files (systemd units, Caddy site). Every change runs all of them,
+# and packages the release archives for every platform, macOS ones on macOS (package.yml).
 # Mac-only integrations (power, dictation, Keychain) are covered by stubbed tests or skipped here.
 # When they pass on main, the release workflow versions and releases the changesets the merge brought.
 # Actions are pinned to commits; the comment names the release each one is.
@@ -29,16 +30,16 @@ jobs:
 
       - name: Herdr (the version and checksum pinned for servers)
         run: |
-          . deploy/linux/versions.env
+          . deploy/versions.env
           curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/herdr-linux-x86_64" -o herdr
-          echo "$HERDR_SHA256_X86_64  herdr" | sha256sum -c -
+          echo "$HERDR_SHA256_LINUX_X86_64  herdr" | sha256sum -c -
           install -D -m 0755 herdr "$HOME/.local/bin/herdr"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - run: mise run check
       - run: mise run test
 
-      - name: Workflows and setup helper
+      - name: Workflows, setup helper and installer
         run: mise run lint
 
       - name: Deployment files
@@ -52,10 +53,13 @@ jobs:
           BRIARDR_SERVICE_PATH="$HOME/.local/bin:/usr/bin:/bin" $briardr systemd-units "$out"
           systemd-analyze verify "$out/briardr-herdr.service" "$out/briardr.service"
           $briardr caddyfile > "$out/briardr.caddy"
-          . deploy/linux/versions.env # the Caddy version servers fall back to
+          . deploy/versions.env # the Caddy version servers fall back to
           docker run --rm -v "$out:/etc/caddy:ro" "caddy:$CADDY_VERSION" caddy validate --config /etc/caddy/briardr.caddy --adapter caddyfile
 
       - name: Browser checks (WebKit, with the system libraries it needs)
         run: |
           bun --bun playwright install --with-deps webkit
           mise run test:ui
+
+  package:
+    uses: ./.github/workflows/package.yml

@@ -342,13 +342,11 @@ fn open_log(dir: &Path, id: &str) -> Option<std::fs::File> {
 mod tests {
     use super::*;
     use crate::plugins::{BackendSpec, Contributes, Manifest};
-    use crate::scratch::Scratch;
-    use std::os::unix::fs::PermissionsExt;
+    use crate::scratch::{write_executable, Scratch};
 
     fn plugin(dir: &Path, script: &str) -> Plugin {
         let file = dir.join("backend.sh");
-        std::fs::write(&file, script).unwrap();
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&file, script);
         Plugin {
             id: "t".into(),
             builtin: false,

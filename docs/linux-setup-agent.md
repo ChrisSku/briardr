@@ -42,7 +42,7 @@ for me.
 3. **Install:** `scripts/setup-linux.sh install --domain <domain> [--agents claude,codex]` or
    `install --access wireguard [--agents claude,codex]`. It is safe to rerun after fixing something; it
    changes only what differs. Don't replace its steps with your own
-   commands, change pinned versions (`mise.toml`, `deploy/linux/versions.env`), regenerate
+   commands, change pinned versions (`mise.toml`, `deploy/versions.env`), regenerate
    `bun.lock`, or edit the generated units and Caddy site by hand.
 4. **Agent sign-in:** ask the user to run `claude` / `codex` once in a terminal on the server as this
    user. Never copy credentials, tokens or keys into files, logs or chat.

@@ -5,7 +5,7 @@
 Install Git, [mise](https://mise.jdx.dev/getting-started.html), a C compiler/toolchain, and
 [Herdr](https://herdr.dev/docs/install/). On macOS, install Apple's Command Line Tools. On Ubuntu,
 install `build-essential`. Herdr 0.9.3 is the deployment/test baseline pinned in
-[`deploy/linux/versions.env`](../deploy/linux/versions.env); newer versions need compatibility testing.
+[`deploy/versions.env`](../deploy/versions.env); newer versions need compatibility testing.
 
 ```sh
 git clone https://github.com/ChrisSku/briardr.git
@@ -58,15 +58,17 @@ mise run typecheck      # TypeScript and Svelte
 mise run build          # production web bundle
 mise run check          # cargo fmt and clippy, warnings are errors
 mise run test           # Rust unit/fixture tests, then Bun integration tests
-mise run lint           # the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)
+mise run lint           # the GitHub workflows (actionlint), the Linux setup helper and the installer (shellcheck)
 ```
 
 The integration suite builds a debug server with test hooks and the client (into
 `test-results/web-dist/test`, not `web/dist`), and starts throwaway instances on loopback ports below the
 ephemeral range, each with its own data and uploads directory. Each run starts its own Herdr session
 (`briardr-test-<pid>`) and removes it and its temp folders when it ends (a killed run's go at the next run),
-so runs in parallel don't collide and your sessions are never touched. To watch the tests in Herdr, run them in the
-development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
+so runs in parallel don't collide and your sessions are never touched. They ignore the variables git gives
+its hooks (`GIT_DIR` and the like, unset in `mise.toml`), so a push from a worktree can't send the suites'
+scratch commits into the branch. Its pane shells start without your zsh startup files, as in CI. To watch
+the tests in Herdr, run them in the development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
 Python 3 on PATH.
 
 For Rust-only changes, a narrower check is:
@@ -76,7 +78,8 @@ mise exec -- cargo test --manifest-path server/Cargo.toml --features test-hooks
 ```
 
 The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust server, integration
-suite, browser checks, shell helper, and generated deployment files, for every change. macOS
+suite, browser checks, shell helper, and generated deployment files, and packages the
+[release archives](#release-archives) for every platform, for every change. macOS
 integrations require Mac-specific testing.
 
 ## Browser checks
@@ -112,7 +115,9 @@ test that creates temporary state; use a deployment you control and understand t
 ## Releases
 
 Every pull request brings a [changeset](../.changeset/README.md): `mise run changeset` asks whether the
-change is a patch, minor or major one and for its changelog entry, and writes it to `.changeset/`. A pull
+change is a patch, minor or major one and for its changelog entry, and writes it to `.changeset/`. Until
+1.0.0, fixes and new features are patches and breaking changes are minor; from 1.0.0, a fix is a patch, a
+feature minor and a breaking change major. A pull
 request that changes nothing users notice (docs, CI, tests) adds an empty one with
 `mise run changeset --empty`. CI fails a pull request without one. Each pull request adds its own file,
 so several can be open at once without conflicting over the version or the changelog.
@@ -125,19 +130,47 @@ Merging releases it. When the Linux checks pass on `main`, the
    `scripts/release.ts sync`, which copies the version to `server/Cargo.toml`, `server/Cargo.lock` and
    the install instructions (they clone the release tag). The release GitHub App pushes that to `main` as
    "Version X.Y.Z".
-2. tags that commit `vX.Y.Z` and publishes the GitHub release with the changelog section as its notes,
-   in the same run, so the install instructions never name a tag that doesn't exist yet. The Linux
-   checks then run on the version commit too.
+2. tags that commit `vX.Y.Z` right away, so the install instructions never name a tag that doesn't
+   exist yet.
+3. builds the release archives on macOS and Linux runners, and publishes the GitHub release with them,
+   their `SHA256SUMS`, and the changelog section as its notes, in the same run. The Linux checks then
+   run on the version commit too.
 
 Merges that land close together can share a version, and empty changesets release nothing. If a check
 fails, nothing is versioned or published: the changesets wait on `main`, and the merge that fixes it
-releases them. If publishing fails after the push, the next run on `main` releases that version first,
-at its "Version X.Y.Z" commit, before it makes a newer one, so no version is skipped. Don't set the
-version by hand; `mise run release:check` checks that it agrees everywhere.
+releases them. If building or publishing fails after the push, the run for the version commit (or the
+next run on `main`) releases that version first, at its "Version X.Y.Z" commit, before it makes a newer
+one, so no version is skipped. Don't set the version by hand; `mise run release:check` checks that it
+agrees everywhere.
 
 The workflow needs the release GitHub App (Contents: read and write, installed on the repository, and in
 the `main` ruleset's bypass list): its client ID in the repository variable `RELEASE_APP_CLIENT_ID` and
 a private key in the secret `RELEASE_APP_PRIVATE_KEY`.
+
+### Release archives
+
+Each release has an archive per platform, `briardr-<os>-<arch>.tar.gz` for `macos` and `linux` on
+`aarch64` and `x86_64`, that runs Briardr without a checkout, Bun or Rust.
+[`scripts/package.ts`](../scripts/package.ts) makes it: the release server as `bin/briardr`, the web
+client in `web/dist` next to it (where the server looks when its executable is a release's
+`bin/briardr`), the dictation helper's source on macOS, `LICENSE`, and `THIRD-PARTY-NOTICES.txt` with the
+license texts of the Rust crates and npm packages built into them. The Linux archives are built on Ubuntu
+24.04 and need its glibc (2.39) or newer.
+
+[`site/install.sh`](../site/install.sh), published at `https://briardr.dev/install.sh`, installs the
+latest archive for the computer it runs on after checking it against `SHA256SUMS`, then runs
+`briardr setup` ([`server/src/setup.rs`](../server/src/setup.rs)), which installs the Herdr version in
+[`deploy/versions.env`](../deploy/versions.env) when Herdr is missing. To try it with your own build:
+`mise run package`, write `dist/SHA256SUMS` (`cd dist && shasum -a 256 *.tar.gz > SHA256SUMS`), then
+`BRIARDR_DOWNLOAD_URL=file://$PWD/dist sh site/install.sh` (with `HOME` set to a short temporary folder,
+to keep it away from your own installation).
+
+CI packages every change ([`package.yml`](../.github/workflows/package.yml)), so a version that doesn't
+build on some platform is never pushed, and each run keeps its archives as artifacts for a week.
+`mise run package` packages for your computer into `dist/` (`-- --target x86_64-apple-darwin` for another
+target, after `rustup target add` for it). It builds the server into `server/target/<target>` and the
+client into the archive's folder, so the checkout's `server/target/release/briardr` and `web/dist` stay
+as they are. Making and building plugins still needs a checkout: see [Plugins](PLUGINS.md).
 
 ## Useful starting points
 

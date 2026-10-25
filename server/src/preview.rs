@@ -788,6 +788,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::config::{default_config, Paths};
+    use crate::scratch::WAIT;
 
     type TestResult = Result<(), Box<dyn Error>>;
 
@@ -886,7 +887,7 @@ mod tests {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await?;
         stream.write_all(request.as_bytes()).await?;
         let mut out = Vec::new();
-        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut out)).await??;
+        tokio::time::timeout(WAIT, stream.read_to_end(&mut out)).await??;
         Ok(String::from_utf8_lossy(&out).into_owned())
     }
 
@@ -973,7 +974,7 @@ mod tests {
         assert!(reply.ends_with("ok"), "{reply}");
         assert!(!reply.to_ascii_lowercase().contains("x-frame-options"));
         assert!(!reply.to_ascii_lowercase().contains("frame-ancestors"));
-        let head = tokio::time::timeout(Duration::from_secs(5), heads_rx.recv())
+        let head = tokio::time::timeout(WAIT, heads_rx.recv())
             .await?
             .ok_or("no upstream request")?;
         let lower = head.to_ascii_lowercase();

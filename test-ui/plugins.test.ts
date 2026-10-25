@@ -120,7 +120,7 @@ test('an installed plugin loads at runtime, shares Briardr’s Svelte and SDK, a
     const tab = path.join(dir, 'src', 'Tab.svelte');
     fs.writeFileSync(tab, fs.readFileSync(tab, 'utf8').replace('Clicked {count}', 'Pressed {count}'));
     buildPlugin(dir);
-    await page.getByRole('button', { name: /Pressed 0, doubled 0/ }).waitFor({ timeout: 8000 });
+    await page.getByRole('button', { name: /Pressed 0, doubled 0/ }).waitFor();
     assert.deepEqual(errors, []);
   } finally {
     await ctx.close();

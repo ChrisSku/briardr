@@ -68,7 +68,7 @@
     </span>
   </label>
   {#if ka?.setupNeeded}
-    <p class="note" role="status">Staying awake with the lid closed needs a one-time setup on the Mac: run <code>mise run install-power</code> in the Briardr folder.</p>
+    <p class="note" role="status">Staying awake with the lid closed needs a one-time setup on the Mac: run <code>briardr install-power</code> on it.</p>
   {/if}
   <label class="switch-row">
     <input type="checkbox" role="switch" checked={prefs.value.lowBatteryInApp} onchange={(e) => (prefs.value = { ...prefs.value, lowBatteryInApp: e.currentTarget.checked })} />

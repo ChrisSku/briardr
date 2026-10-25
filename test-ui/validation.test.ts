@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
 import { devices, webkit, type Browser, type Page } from 'playwright';
-import { closeWorkspace, herdr, sleep, startServer, testPane, tmpDir, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, sleep, startServer, testPane, tmpDir, waitUntil, type TestServer } from '../test/helpers.ts';
 
 const build = path.resolve(process.env.BRIARDR_WEB_DIST || 'web/dist');
 const update = process.env.BRIARDR_UPDATE_DIST ? path.resolve(process.env.BRIARDR_UPDATE_DIST) : null;
@@ -120,12 +120,9 @@ describe('service worker', () => {
       serve(build);
     });
     const cacheNames = () => a.page.evaluate(async () => (await caches.keys()).filter((k) => k.startsWith('briardr-shell-')).sort());
-    const until = async (what: string, ok: () => Promise<boolean>, ms = 20_000) => {
-      for (const t0 = Date.now(); !(await ok()); await sleep(200)) if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}`);
-    };
     const v1 = versionOf(build);
     await a.page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 15_000 });
-    await until('the first shell cache', async () => JSON.stringify(await cacheNames()) === JSON.stringify([`briardr-shell-${v1}`]));
+    await waitUntil('the first shell cache', async () => JSON.stringify(await cacheNames()) === JSON.stringify([`briardr-shell-${v1}`]));
     // Publish the next build in place of the current one.
     let v2: string;
     if (update) {
@@ -146,7 +143,7 @@ describe('service worker', () => {
     await reloaded;
     await a.page.waitForSelector('.count-strip');
     // The previous shell stays (pages still on it load their code from it) until the next build.
-    await until('the new shell', async () => JSON.stringify(await cacheNames()) === JSON.stringify([`briardr-shell-${v1}`, `briardr-shell-${v2}`].sort()));
+    await waitUntil('the new shell', async () => JSON.stringify(await cacheNames()) === JSON.stringify([`briardr-shell-${v1}`, `briardr-shell-${v2}`].sort()));
     assert.equal(await a.page.evaluate(() => document.querySelector('meta[name="briardr-version"]')?.getAttribute('content')), v2);
     // Offline launch: the new shell comes from the cache and shows the last known state.
     await a.ctx.setOffline(true);
@@ -154,7 +151,7 @@ describe('service worker', () => {
     await a.page.waitForSelector('.count-strip', { timeout: 10_000 });
     assert.equal(await a.page.evaluate(() => document.querySelector('meta[name="briardr-version"]')?.getAttribute('content')), v2);
     await a.page.locator('nav[aria-label="Main"] button', { hasText: 'Workspaces' }).click();
-    await a.page.locator('.tree-streams .row-main', { hasText: 'validation target' }).waitFor({ timeout: 5000 });
+    await a.page.locator('.tree-streams .row-main', { hasText: 'validation target' }).waitFor();
     // (Playwright's offline mode doesn't cut WebKit's loopback WebSocket; test-ui/recovery covers the
     // offline banner by stopping the server.)
     await a.ctx.setOffline(false);

@@ -64,6 +64,20 @@ async function localSubscription(): Promise<PushSubscription | null> {
   return Promise.race([reg.pushManager.getSubscription(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))]);
 }
 
+/** How long turning notifications on waits for the offline app to finish installing. */
+const INSTALL_WAIT = 10_000;
+
+/** The registration with an active worker, which subscribing needs. A first launch may still be installing
+ *  the offline app (waited for, briefly); one that failed to install has none (null). The registration's
+ *  own worker is checked too, not only `ready`. */
+async function activeRegistration(): Promise<ServiceWorkerRegistration | null> {
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), INSTALL_WAIT));
+  const ready = await Promise.race([navigator.serviceWorker.ready, timeout]);
+  if (ready) return ready;
+  const reg = await registration();
+  return reg?.active ? reg : null;
+}
+
 async function register(sub: PushSubscription) {
   await api('POST', '/api/notifications/subscribe', { subscription: sub.toJSON() });
 }
@@ -122,15 +136,20 @@ async function reconcile() {
   set({ state: 'on' });
 }
 
-/** Turns notifications on, or repairs them: asks for permission if needed, then subscribes afresh. */
-export async function enablePush(): Promise<'on' | 'denied' | 'failed'> {
+/** Turns notifications on, or repairs them: asks for permission if needed, then subscribes afresh.
+ *  `not_installed`: the offline app isn't installed on this device, and push needs its service worker. */
+export async function enablePush(): Promise<'on' | 'denied' | 'not_installed' | 'failed'> {
   try {
     const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
     if (p !== 'granted') {
       await checkPush();
       return 'denied';
     }
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await activeRegistration();
+    if (!reg) {
+      await checkPush();
+      return 'not_installed';
+    }
     if (!publicKey) publicKey = (await api<{ publicKey: string }>('GET', '/api/notifications')).publicKey;
     // A subscription for another key (or one the host lost) is replaced by a new one.
     const old = await reg.pushManager.getSubscription();

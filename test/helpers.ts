@@ -61,7 +61,11 @@ export function ensureSession(): void {
   if (!started && OWN_SESSION) removeStaleSessions();
   started = true;
   if (running()) return;
-  const child = spawn('herdr', ['--session', SESSION, 'server'], { env: scrubbed(), stdio: 'ignore', detached: true });
+  // Pane shells start without your zsh startup files (an empty ZDOTDIR), as in CI. Yours can run commands in
+  // other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
+  // reports that folder as the pane's.
+  const env = { ...scrubbed(), ZDOTDIR: tmpDir('briardr-zdotdir-') };
+  const child = spawn('herdr', ['--session', SESSION, 'server'], { env, stdio: 'ignore', detached: true });
   child.unref();
   const until = Date.now() + 10_000;
   while (!running()) {
@@ -163,7 +167,7 @@ export interface Running {
   herdr: { refresh(): Promise<unknown> };
   app: { listRoutes(): { method: string; pattern: string; public: boolean }[]; d: { previews: { open(device: string, port: number): Promise<any> } } };
   push: { sendImpl: (sub: unknown, body: string, opts: object) => unknown; readonly subject: string };
-  hub: { readonly sent: unknown[] };
+  hub: { readonly sent: unknown[]; readonly controllers: number };
   readonly urls: string[];
 }
 
@@ -293,6 +297,10 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
       get sent() {
         return hook('GET', '/hub/sent');
       },
+      /** Control connections open, or closed but not yet given back to Herdr. */
+      get controllers() {
+        return hook('GET', '/hub/controllers');
+      },
     },
     get urls(): string[] {
       return hook('GET', '/urls');
@@ -377,8 +385,17 @@ export function opened(sock: WebSocket): Promise<void> {
   });
 }
 
+/** How long a check waits for something that should happen at once. It only bounds a failing check, so it's
+ *  long: on a busy machine (both suites and a browser at once), a few seconds have run out before. */
+export const WAIT = 30_000;
+
+/** Polls `ok` until it holds, for something that has no event to wait on; fails after `ms`. */
+export async function waitUntil(what: string, ok: () => boolean | Promise<boolean>, ms = WAIT): Promise<void> {
+  for (const t0 = Date.now(); !(await ok()); await sleep(200)) if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`);
+}
+
 /** Collect JSON messages from a socket until predicate matches (or timeout). */
-export function until(sock: WebSocket, pred: (m: any) => boolean, ms = 8000): Promise<any[]> {
+export function until(sock: WebSocket, pred: (m: any) => boolean, ms = WAIT): Promise<any[]> {
   const seen: any[] = [];
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => {
@@ -410,7 +427,7 @@ export function until(sock: WebSocket, pred: (m: any) => boolean, ms = 8000): Pr
 }
 
 /** Resolves with the close code once the socket has closed. */
-export function closed(sock: WebSocket, ms = 8000): Promise<number> {
+export function closed(sock: WebSocket, ms = WAIT): Promise<number> {
   return new Promise((resolve, reject) => {
     if (sock.readyState === WebSocket.CLOSED) return resolve(-1);
     const t = setTimeout(() => reject(new Error('socket did not close')), ms);

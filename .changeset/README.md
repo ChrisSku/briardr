@@ -10,14 +10,16 @@ it by hand under any name, like `.changeset/pinned-streams.md`:
 
 ```md
 ---
-"briardr": minor
+"briardr": patch
 ---
 
 **Streams can be pinned.** Pin a stream to keep it at the top of Workspaces, on every device.
 ```
 
-- `patch` fixes something; `minor` adds something, or changes setup or behavior, which before 1.0 is
-  also a minor change; `major` is for 1.0 and later.
+- Until 1.0.0, `patch` is for fixes and new features alike, and `minor` for breaking changes: an
+  upgrade that makes people change something (their setup or configuration, a command or option that's
+  gone, devices that must pair again). From 1.0.0, `patch` fixes something, `minor` adds something, and
+  `major` breaks something. Before then, a `major` changeset means going to 1.0.0, a decision of its own.
 - Write the summary for someone upgrading, like the entries in `CHANGELOG.md`: a bold first sentence that
   says what changed, then the detail, wrapped at about 105 columns. It becomes one bullet in the
   version's section, with a link to the pull request.

@@ -32,7 +32,7 @@ pre-push:
       glob: ["server/**", "mise.toml"]
       run: mise run check
     - name: lint
-      glob: [".github/workflows/*", "scripts/setup-linux.sh", "mise.toml"]
+      glob: [".github/workflows/*", "scripts/setup-linux.sh", "site/install.sh", "mise.toml"]
       run: mise run lint
     # About 25 seconds once the test server is built. mise.toml sets the Bun and Rust versions and the tasks.
     - name: test

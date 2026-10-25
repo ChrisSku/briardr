@@ -1,0 +1,55 @@
+# Builds the release archives (scripts/package.ts) on each platform and keeps them as artifacts. The
+# Linux checks run it for every change, so a version can't be pushed that doesn't package (and every
+# change's archives can be downloaded from its run); the release workflow runs it for the version it
+# releases, and publishes what it built.
+# Actions are pinned to commits; the comment names the release each one is.
+name: package
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to package (the one the caller runs for, by default)
+        type: string
+        default: ''
+      tag:
+        description: The release's tag, for the client's Settings → About (tagged in the build's checkout only)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, runner: macos-15 }
+          - { target: x86_64-apple-darwin, runner: macos-15 } # cross-compiled on Apple silicon
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          install_args: bun rust
+      - run: bun install --frozen-lockfile
+      - run: rustup target add ${{ matrix.target }}
+      - name: Package
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$TAG" ]; then git tag "$TAG"; fi
+          bun scripts/package.ts --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: briardr-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7

@@ -28,11 +28,17 @@ app (in chunks of their own, loaded when needed or in idle time), so they work o
 offline; they're on until turned off; their manifests are compiled into the server; and their server
 side is Briardr's own API (`/api/streams/<id>/files`, `…/notes`, …) rather than a plugin backend.
 
-To make one, run `briardr create plugin` on the computer that runs Briardr (after `mise run install-cli`
-puts `briardr` on the PATH). It asks what the plugin should do, makes it in `~/briardr-plugins/<id>`,
-installs and turns it on, installs the `briardr-plugins` skill for Claude Code and Codex, and starts the
-agent there with the job. The skill (`skills/briardr-plugins/`) is the plugin author's guide; this page
+To make one, run `briardr create plugin` on the computer that runs Briardr (from a checkout, after
+`mise run install-cli` puts `briardr` on the PATH). It asks what the plugin should do, makes it in
+`~/briardr-plugins/<id>`, installs and turns it on, installs the `briardr-plugins` skill for Claude Code
+and Codex, and starts the agent there with the job. The skill (`skills/briardr-plugins/`) is the plugin author's guide; this page
 is how plugins work inside Briardr.
+
+Plugins are made and built with the checkout's tools (`scripts/plugin-build.ts`, the template, the skill
+and Bun), which a [release archive](development.md#release-archives) doesn't have. When Briardr runs from
+one, clone the same version (`git clone --branch vX.Y.Z https://github.com/ChrisSku/briardr.git`), run
+`mise install && mise run install` in it, and run the plugin commands with `BRIARDR_PROJECT_ROOT` set to
+that folder.
 
 ## What a plugin is
 
