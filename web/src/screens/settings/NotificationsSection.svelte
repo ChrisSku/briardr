@@ -31,6 +31,7 @@
     busy = false;
     if (r === 'on') toast('Notifications are on for this device');
     else if (r === 'denied') toast('Notifications weren’t allowed. You can change this in system Settings.');
+    else if (r === 'not_installed') toast('Briardr isn’t saved on this device yet, which notifications need. Try again in a moment, or use Repair offline app in Settings → Diagnostics.');
     else toast('Couldn’t turn on notifications on this device.');
   }
 
