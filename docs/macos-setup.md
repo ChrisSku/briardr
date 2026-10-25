@@ -5,26 +5,31 @@ the Mac. Your phone, tablet, or other computer connects to Briardr over HTTPS.
 
 ## Before you start
 
-- Install [Herdr](https://herdr.dev/docs/install/) and start it. Check `herdr status`.
-- Install [mise](https://mise.jdx.dev/getting-started.html), Git, and Apple's Command Line Tools
-  (`xcode-select --install` if you do not already have them).
 - Pick a network path: Tailscale below, or [an existing WireGuard VPN](networking.md#wireguard-through-an-existing-lan).
 - For Tailscale, connect the Mac and clients to the same tailnet. Ensure the `tailscale` CLI is on
   your PATH and `tailscale status --json` succeeds as the user who runs Briardr.
 
 The core app does not require dictation. Optional on-device dictation needs macOS 26, the Swift
-toolchain, and an available speech model for the selected language.
+toolchain (`xcode-select --install`), and an available speech model for the selected language.
 
-## Build and configure
+## Install
 
 ```sh
-git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git
-cd briardr
-mise trust
-mise install
-mise run install
-mise run build:server
+curl -fsSL https://briardr.dev/install.sh | sh
 ```
+
+The installer downloads the latest release for your Mac (Apple silicon or Intel), checks it against
+the release's `SHA256SUMS`, puts it in `~/.local/lib/briardr`, and links `briardr` into `~/.local/bin`;
+add that folder to your PATH if it says so. Then it runs `briardr setup`, which checks for
+[Herdr](https://herdr.dev) and, when it's missing, offers to install the version this Briardr is tested
+with into `~/.local/bin`. A Herdr you already have stays as it is, even another version: replacing Herdr
+can restart live agents. Setup also reports Git (for the Changes tab), Tailscale and Swift, and says
+what's next. Run `briardr setup` again any time.
+
+Herdr must be running for Briardr to show anything: start it in a terminal with `herdr`, and check it
+with `herdr status`.
+
+## Configure and start
 
 For Tailscale HTTPS, enable MagicDNS and HTTPS certificates using
 [Tailscale's instructions](https://tailscale.com/docs/how-to/set-up-https-certificates). The Briardr
@@ -32,16 +37,16 @@ user must be able to run `tailscale cert`; use Tailscale's documented permission
 Then:
 
 ```sh
-./server/target/release/briardr configure --mode tailscale --listen tailscale
-mise run serve
+briardr configure --mode tailscale --listen tailscale
+briardr serve
 ```
 
-Briardr builds the web app, starts on port 7443, and obtains a certificate for the Mac's tailnet DNS
-name. Without Tailscale HTTPS, skip the `configure` step: Briardr then uses its own local CA, which
-each device has to [trust once](devices.md#trust-briardrs-local-ca). Leave this terminal running. In another terminal in the same checkout:
+Briardr starts on port 7443 and obtains a certificate for the Mac's tailnet DNS name. Without
+Tailscale HTTPS, skip the `configure` step: Briardr then uses its own local CA, which each device has to
+[trust once](devices.md#trust-briardrs-local-ca). Leave this terminal running. In another terminal:
 
 ```sh
-mise run pair
+briardr pair
 ```
 
 Open the URL it prints. On an iPhone or iPad, [install the Home Screen app](devices.md#iphone-and-ipad)
@@ -50,7 +55,7 @@ before entering the code. Codes work once and expire after ten minutes.
 If Herdr is installed outside PATH, configure its absolute path and restart Briardr:
 
 ```sh
-./server/target/release/briardr configure --herdr-path /absolute/path/to/herdr
+briardr configure --herdr-path /absolute/path/to/herdr
 ```
 
 ## Start at login
@@ -58,21 +63,21 @@ If Herdr is installed outside PATH, configure its absolute path and restart Bria
 Stop the foreground Briardr server with Ctrl-C, then:
 
 ```sh
-mise run install-agent
+briardr install-agent
 ```
 
 This writes `~/Library/LaunchAgents/app.briardr.server.plist` and prints the `launchctl bootstrap`
 command to start it. Run the printed command. It uses the current binary's path and captures your
-PATH, so keep the checkout in a permanent location and install from a shell where `herdr` and
-`tailscale` work. Herdr must also be running; this LaunchAgent starts Briardr only.
+PATH, so run it from a shell where `herdr` and `tailscale` work. Herdr must also be running; this
+LaunchAgent starts Briardr only.
 
 For status, pairing, and device management:
 
 ```sh
-./server/target/release/briardr status
-./server/target/release/briardr pair
-./server/target/release/briardr devices
-./server/target/release/briardr revoke DEVICE_ID
+briardr status
+briardr pair
+briardr devices
+briardr revoke DEVICE_ID
 ```
 
 To stop the LaunchAgent, use
@@ -85,10 +90,10 @@ Settings → Mac power → **Always on** holds idle sleep with `caffeinate`. Kee
 from sleeping also needs the narrow sudoers rule installed by:
 
 ```sh
-mise run install-power
+briardr install-power
 ```
 
-Review [`scripts/install-power.sh`](../scripts/install-power.sh) before running it: it requests sudo
+Review [`scripts/install-power.sh`](../scripts/install-power.sh), which it runs, first: it requests sudo
 and writes `/etc/sudoers.d/briardr-power` for `pmset disablesleep`. This is optional. Keep the laptop
 ventilated and avoid running another keep-awake tool alongside it.
 
@@ -103,21 +108,35 @@ Data is in `~/Library/Application Support/Briardr`, including `config.json`, own
 See [configuration](configuration.md) for overrides.
 
 Before updating, read the [release notes](https://github.com/ChrisSku/briardr/releases) and back up
-your data. With a clean checkout, switch to the new release's tag and rebuild:
+your data. Then run the installer again: it replaces `~/.local/lib/briardr` with the latest release
+(`BRIARDR_VERSION=0.2.0` picks one). If running as a LaunchAgent, restart Briardr with
+`launchctl kickstart -k gui/$(id -u)/app.briardr.server`. Restarting Briardr leaves Herdr running.
+
+## From source
+
+To run a checkout instead (to work on Briardr, or to make plugins), install
+[mise](https://mise.jdx.dev/getting-started.html), Git and Apple's Command Line Tools, then:
 
 ```sh
-git fetch --tags
-git checkout v0.2.0   # the release you want
-mise install && mise run install && mise run build && mise run build:server
+git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git
+cd briardr
+mise trust
+mise install
+mise run install
+mise run build          # the web client, into web/dist
+mise run build:server
+mise run install-cli    # links ~/.local/bin/briardr to this checkout's build
 ```
 
-If running as a LaunchAgent, restart Briardr with
-`launchctl kickstart -k gui/$(id -u)/app.briardr.server`. Restarting Briardr leaves Herdr running.
+`briardr` then runs the checkout's build, and the steps above are the same. To update, switch to the new release's tag and rebuild:
+`git fetch --tags && git checkout vX.Y.Z && mise install && mise run install && mise run build && mise run build:server`.
+See [development](development.md) for the rest.
 
 - **No remote URL:** check `tailscale status --json`, tailnet membership, and `briardr status`.
 - **Certificate failure:** check the TLS mode, Tailscale HTTPS settings, and the CLI's permissions.
   Access the tailnet DNS name printed by pairing, rather than its IP, for a Tailscale certificate.
-- **Herdr unavailable:** check `herdr status`, `herdrPath`, and the configured Herdr session.
+- **Herdr unavailable:** `briardr setup` says what's wrong; check `herdr status`, `herdrPath`, and the
+  configured Herdr session.
 - **Cannot reach previews:** allow the client to reach ports 7444–7459 over the chosen private
   network, and ensure any local CA is trusted. See [networking](networking.md).
 - **Alerts missing:** follow the [notification checks](devices.md#test-notifications).

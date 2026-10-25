@@ -5,7 +5,7 @@
 Install Git, [mise](https://mise.jdx.dev/getting-started.html), a C compiler/toolchain, and
 [Herdr](https://herdr.dev/docs/install/). On macOS, install Apple's Command Line Tools. On Ubuntu,
 install `build-essential`. Herdr 0.9.3 is the deployment/test baseline pinned in
-[`deploy/linux/versions.env`](../deploy/linux/versions.env); newer versions need compatibility testing.
+[`deploy/versions.env`](../deploy/versions.env); newer versions need compatibility testing.
 
 ```sh
 git clone https://github.com/ChrisSku/briardr.git
@@ -58,7 +58,7 @@ mise run typecheck      # TypeScript and Svelte
 mise run build          # production web bundle
 mise run check          # cargo fmt and clippy, warnings are errors
 mise run test           # Rust unit/fixture tests, then Bun integration tests
-mise run lint           # the GitHub workflows (actionlint) and the Linux setup helper (shellcheck)
+mise run lint           # the GitHub workflows (actionlint), the Linux setup helper and the installer (shellcheck)
 ```
 
 The integration suite builds a debug server with test hooks and the client (into
@@ -154,6 +154,14 @@ client in `web/dist` next to it (where the server looks when its executable is a
 `bin/briardr`), the dictation helper's source on macOS, `LICENSE`, and `THIRD-PARTY-NOTICES.txt` with the
 license texts of the Rust crates and npm packages built into them. The Linux archives are built on Ubuntu
 24.04 and need its glibc (2.39) or newer.
+
+[`site/install.sh`](../site/install.sh), published at `https://briardr.dev/install.sh`, installs the
+latest archive for the computer it runs on after checking it against `SHA256SUMS`, then runs
+`briardr setup` ([`server/src/setup.rs`](../server/src/setup.rs)), which installs the Herdr version in
+[`deploy/versions.env`](../deploy/versions.env) when Herdr is missing. To try it with your own build:
+`mise run package`, write `dist/SHA256SUMS` (`cd dist && shasum -a 256 *.tar.gz > SHA256SUMS`), then
+`BRIARDR_DOWNLOAD_URL=file://$PWD/dist sh site/install.sh` (with `HOME` set to a short temporary folder,
+to keep it away from your own installation).
 
 CI packages every change ([`package.yml`](../.github/workflows/package.yml)), so a version that doesn't
 build on some platform is never pushed, and each run keeps its archives as artifacts for a week.

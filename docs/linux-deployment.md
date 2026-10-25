@@ -76,9 +76,9 @@ differs, and keeps paired devices, notes, keys and agent sign-ins):
 | --- | --- |
 | Preflight | OS, CPU, systemd, sudo, user, disk, ports 80/443, DNS vs. public IP, existing services and versions. Stops on blockers. |
 | Packages | `git curl openssl jq unzip gnupg ca-certificates` via apt, if missing. |
-| Caddy | From Caddy's apt repository; if that isn't reachable, the release `.deb` pinned in `deploy/linux/versions.env` (checksum-verified). |
+| Caddy | From Caddy's apt repository; if that isn't reachable, the release `.deb` pinned in `deploy/versions.env` (checksum-verified). |
 | mise, Bun, Rust | mise per user (`~/.local/bin`), Bun and Rust at the versions pinned in `mise.toml`, `build-essential` for the C compiler, the server build (`cargo build --release --locked` into `~/.local/state/briardr-setup/cargo-target/release/briardr`, outside the checkout), `bun install --frozen-lockfile`, client build. Never changes a pin or a lockfile. |
-| Herdr | The version pinned in `deploy/linux/versions.env` from Herdr's GitHub release, checksum-verified, into `~/.local/bin`. An existing Herdr of another version is left alone and reported. |
+| Herdr | The version pinned in `deploy/versions.env` from Herdr's GitHub release, checksum-verified, into `~/.local/bin`. An existing Herdr of another version is left alone and reported. |
 | Agent CLIs | `--agents claude,codex`: Claude Code's native installer; Codex with npm (Node from mise). It never signs them in. |
 | Briardr config | `briardr configure --mode proxy --public-origin https://D --preview-origin https://p{n}.D --herdr-path …`, validated first; the previous file is kept as `config.json.bak`. |
 | systemd | `briardr-herdr.service` and `briardr.service`, generated with absolute paths, explicit HOME/PATH, the same user; verified with `systemd-analyze` before they're installed. |

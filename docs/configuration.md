@@ -15,11 +15,9 @@ terminal attachments are temporary and separate from notes; see the [Linux stora
 
 ## Change deployment settings
 
-From a built source checkout:
-
 ```sh
-./server/target/release/briardr configure --help
-./server/target/release/briardr status
+briardr configure --help
+briardr status
 ```
 
 `configure` validates changes before saving and keeps the previous configuration in `config.json.bak`.

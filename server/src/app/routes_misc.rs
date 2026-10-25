@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::http::Method;
 use serde_json::{json, Value};
@@ -69,14 +68,6 @@ fn preview_json(p: &PreviewInfo) -> Value {
         }
     }
     v
-}
-
-fn herdr_target(cfg_path: &str, session: &str, timeout_ms: u64) -> HerdrTarget {
-    HerdrTarget {
-        herdr_path: cfg_path.to_string(),
-        session: session.to_string(),
-        timeout: Duration::from_millis(timeout_ms),
-    }
 }
 
 pub(super) fn register(r: &mut Routes) {
@@ -405,12 +396,7 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, _ctx: Ctx| async move {
             let cfg = app.cfg();
-            let target = herdr_target(
-                &cfg.herdr_path,
-                &cfg.herdr_session,
-                cfg.herdr_timeout_ms,
-            );
-            let st = herdr_status(&target).await;
+            let st = herdr_status(&HerdrTarget::of(&cfg)).await;
             let (wanted, effective) = app
                 .d
                 .tls_mode
@@ -460,7 +446,10 @@ pub(super) fn register(r: &mut Routes) {
                         "Use the full path to the herdr executable.",
                     ));
                 }
-                let target = herdr_target(&path, &cfg.herdr_session, cfg.herdr_timeout_ms);
+                let target = HerdrTarget {
+                    herdr_path: path.clone(),
+                    ..HerdrTarget::of(&cfg)
+                };
                 let st = herdr_status(&target).await;
                 if st.problem.as_deref() == Some("not_found") {
                     return Err(action_err(400, "not_found", "No executable at that path."));
