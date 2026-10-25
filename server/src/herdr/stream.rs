@@ -538,8 +538,7 @@ async fn next_line<R: AsyncRead + Unpin>(reader: &mut BufReader<R>, buf: &mut Ve
 
 #[cfg(test)]
 mod tests {
-    use crate::scratch::Scratch;
-    use std::os::unix::fs::PermissionsExt;
+    use crate::scratch::{write_executable, Scratch};
     use std::path::Path;
 
     use super::*;
@@ -549,8 +548,7 @@ mod tests {
     /// Writes an executable `sh` script, a fake herdr, in `dir` and returns its path.
     fn script(dir: &Path, name: &str, body: &str) -> String {
         let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&path, &format!("#!/bin/sh\n{body}\n"));
         path.to_string_lossy().into_owned()
     }
 
