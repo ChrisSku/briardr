@@ -157,11 +157,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             .unwrap_or(std::env::consts::OS),
     ));
     let proxy_mode = cfg.tls.mode == "proxy";
-    // BRIARDR_WEB_DIST serves another build (benchmarks, experiments) without touching web/dist.
-    let web_dir = match env.get("BRIARDR_WEB_DIST").filter(|v| !v.is_empty()) {
-        Some(d) => std::path::absolute(d).unwrap_or_else(|_| PathBuf::from(d)),
-        None => crate::project_root().join("web").join("dist"),
-    };
+    let web_dir = crate::web_dist(&env);
     let diag = Arc::new(
         Diagnostics::new(paths.logs(), paths.secrets().join("diag-salt"))
             .map_err(|e| ServeError::Other(e.to_string()))?,

@@ -339,7 +339,7 @@ async fn status(ctx: &Ctx) -> CliResult {
             .collect();
         missing_local_addresses(&ips)
     };
-    let web_built = tokio::fs::metadata(project_root().join("web").join("dist").join("index.html"))
+    let web_built = tokio::fs::metadata(web_dist(&ctx.env).join("index.html"))
         .await
         .is_ok();
     let doc = json!({
@@ -573,31 +573,42 @@ fn host_platform_name(env: &HashMap<String, String>) -> String {
     })
 }
 
-fn web_dist(env: &HashMap<String, String>) -> PathBuf {
+/// The web client to serve: `BRIARDR_WEB_DIST` (another build, for benchmarks and experiments, without
+/// touching web/dist), else web/dist in the project root.
+pub fn web_dist(env: &HashMap<String, String>) -> PathBuf {
     match env_value(env, "BRIARDR_WEB_DIST") {
         Some(dir) => std::path::absolute(&dir).unwrap_or_else(|_| PathBuf::from(dir)),
         None => project_root().join("web").join("dist"),
     }
 }
 
-/// The Briardr checkout: `BRIARDR_PROJECT_ROOT`, else the directory above `server/target` (of the real
-/// executable), else the current directory.
+/// The Briardr checkout or release: `BRIARDR_PROJECT_ROOT`, else where the real executable is (see
+/// `project_root_from_exe`), else the current directory.
 pub fn project_root() -> PathBuf {
     if let Some(root) = std::env::var_os("BRIARDR_PROJECT_ROOT").filter(|r| !r.is_empty()) {
         return PathBuf::from(root);
     }
     // Through the link `briardr install-cli` makes, too.
     if let Ok(exe) = std::env::current_exe().and_then(std::fs::canonicalize) {
-        if let Some(root) = project_root_from_exe(&exe.to_string_lossy()) {
+        if let Some(root) = project_root_from_exe(&exe) {
             return root;
         }
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn project_root_from_exe(exe: &str) -> Option<PathBuf> {
-    exe.rfind("/server/target/")
-        .map(|i| PathBuf::from(&exe[..i]))
+/// A checkout's executable is in its `server/target`; a release's (scripts/package.ts) is `bin/briardr`,
+/// next to the client in `web/dist`.
+fn project_root_from_exe(exe: &Path) -> Option<PathBuf> {
+    let text = exe.to_string_lossy();
+    if let Some(i) = text.rfind("/server/target/") {
+        return Some(PathBuf::from(&text[..i]));
+    }
+    let root = exe.parent().filter(|dir| dir.ends_with("bin"))?.parent()?;
+    root.join("web")
+        .join("dist")
+        .is_dir()
+        .then(|| root.to_path_buf())
 }
 
 fn is_ipv4_literal(s: &str) -> bool {
@@ -821,6 +832,7 @@ async fn group_name(user: &str) -> String {
 mod main_tests {
     use super::*;
     use crate::config::default_config;
+    use crate::scratch::Scratch;
 
     const ORIGIN: &str = "https://briardr.example.com";
     const PREVIEW: &str = "https://p{n}.briardr.example.com";
@@ -995,10 +1007,23 @@ mod main_tests {
     #[test]
     fn project_root_is_the_checkout_above_the_cargo_target_dir() {
         assert_eq!(
-            project_root_from_exe("/home/u/briardr-app/server/target/debug/briardr"),
+            project_root_from_exe(Path::new("/home/u/briardr-app/server/target/debug/briardr")),
             Some(PathBuf::from("/home/u/briardr-app"))
         );
-        assert_eq!(project_root_from_exe("/usr/local/bin/briardr"), None);
+        assert_eq!(
+            project_root_from_exe(Path::new("/usr/local/bin/briardr")),
+            None
+        );
+    }
+
+    #[test]
+    fn project_root_is_the_release_with_bin_next_to_the_client() {
+        let release = Scratch::new("release");
+        let exe = release.join("bin").join("briardr");
+        assert_eq!(project_root_from_exe(&exe), None);
+        std::fs::create_dir_all(release.join("web").join("dist")).unwrap();
+        assert_eq!(project_root_from_exe(&exe), Some(release.to_path_buf()));
+        assert_eq!(project_root_from_exe(&release.join("briardr")), None);
     }
 
     #[test]

@@ -15,6 +15,12 @@ const web = path.join(root, 'web');
 // BRIARDR_WEB_DIST builds somewhere else, e.g. so experiments don't replace what a running server serves.
 const dist = process.env.BRIARDR_WEB_DIST ? path.resolve(process.env.BRIARDR_WEB_DIST) : path.join(web, 'dist');
 const watch = process.argv.includes('--watch');
+// --packages <file> also writes the npm packages bundled into the client there, for a release's
+// third-party notices (scripts/package.ts).
+const packagesAt = process.argv.indexOf('--packages');
+const packagesFile = packagesAt > 0 && process.argv[packagesAt + 1] ? path.resolve(process.argv[packagesAt + 1]) : null;
+/** Every file the bundles were made from (with --packages). */
+const inputs = new Set<string>();
 
 /** The git branch (or release tag) and commit the build comes from, shown in Settings → About ("unknown" outside git). */
 function gitInfo(): { branch: string; commit: string } {
@@ -42,9 +48,21 @@ const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').rep
 const shipped = (name: string) => !name.startsWith('.');
 
 async function bundle(config: Bun.BuildConfig): Promise<Bun.BuildArtifact[]> {
-  const result = await Bun.build({ target: 'browser', minify: !watch, tsconfig: path.join(web, 'tsconfig.json'), ...config, throw: false });
+  const result = await Bun.build({ target: 'browser', minify: !watch, tsconfig: path.join(web, 'tsconfig.json'), metafile: !!packagesFile, ...config, throw: false });
   if (!result.success) throw new AggregateError(result.logs, result.logs.map(String).join('\n'));
+  for (const input of Object.keys(result.metafile?.inputs ?? {})) inputs.add(path.resolve(input));
   return result.outputs;
+}
+
+/** The npm packages the bundles were made from: the folder after the last node_modules in each input's path. */
+function bundledPackages(): { name: string; version: string; dir: string }[] {
+  const dirs = new Set([...inputs].map((f) => f.match(/^.*[/\\]node_modules[/\\](?:@[^/\\]+[/\\])?[^/\\]+/)?.[0]).filter((d): d is string => !!d));
+  return [...dirs]
+    .map((dir) => {
+      const { name, version } = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      return { name, version, dir };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Data directories that may have plugins: this build's server's, the default one, and the dev server's. */
@@ -209,6 +227,7 @@ async function build() {
       if (gz.length < raw.length) fs.writeFileSync(file + '.gz', gz);
     }
   if (!watch) await rebuildPlugins();
+  if (packagesFile) fs.writeFileSync(packagesFile, JSON.stringify(bundledPackages(), null, 2) + '\n');
   for (const w of warnings) console.warn(`svelte: ${w.file}${w.line ? ':' + w.line : ''} ${w.code}: ${w.message}`);
   console.log(`built ${js}${css ? ' + ' + css : ''} (version ${version}, ${source.branch} at ${source.commit})`);
 }

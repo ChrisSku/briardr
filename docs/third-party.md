@@ -15,9 +15,11 @@ dependencies, tools, or separately installed software.
 | Caddy, WireGuard, and Tailscale | Optional deployment and network access | [Caddy](https://github.com/caddyserver/caddy), [WireGuard](https://www.wireguard.com/), [Tailscale](https://github.com/tailscale/tailscale) |
 
 This is a project map, not a complete dependency notice bundle. Exact resolved versions are recorded
-in `bun.lock` and `server/Cargo.lock`. Before distributing compiled binaries, bundled web assets,
-or images, inspect the resolved dependency licenses and include the notices required by those
-licenses. Keep any applicable copyright, license, and NOTICE files with the distribution.
+in `bun.lock` and `server/Cargo.lock`. The [release archives](development.md#release-archives) carry
+`THIRD-PARTY-NOTICES.txt`: the license, copyright and NOTICE files of every Rust crate built into the
+server and every npm package bundled into the web client, collected by `scripts/package.ts`. Before
+distributing compiled binaries, bundled web assets, or images any other way, inspect the resolved
+dependency licenses and include the notices required by those licenses.
 
 Names and trademarks remain with their owners. Briardr is an independent project and does not imply
 endorsement by Herdr or the providers of supported agent tools.

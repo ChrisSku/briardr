@@ -2,11 +2,13 @@
 // release workflow versions the changesets a merge brought to main; server/Cargo.toml (the server reads it
 // when it's compiled), server/Cargo.lock, CHANGELOG.md and the install instructions, which clone the
 // release tag, must agree with it. CI runs `check`; the release workflow runs `sync` after
-// `changeset version`, and `publish` before versioning and after pushing a new version.
+// `changeset version`, `tag` before versioning and after pushing a new version, and `publish` once the
+// tagged version's archives are built (scripts/package.ts).
 //   bun scripts/release.ts version          the current version
 //   bun scripts/release.ts check [vX.Y.Z]   everything agrees, and with the tag when one is given
 //   bun scripts/release.ts sync             copy package.json's version everywhere and tidy its CHANGELOG.md section
-//   bun scripts/release.ts publish          the current version's GitHub release, unless it has one (needs gh and GH_TOKEN)
+//   bun scripts/release.ts tag              tag the current version, unless it's released, and say which commit (needs gh and GH_TOKEN)
+//   bun scripts/release.ts publish <dir>    the current version's GitHub release with the archives in <dir>, unless it has one
 //   bun scripts/release.ts changeset [base]  the branch brings a changeset (base defaults to origin/main)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -99,26 +101,62 @@ function sync() {
   console.log(`version ${v} copied to Cargo.toml, Cargo.lock and the install instructions`);
 }
 
-/** The current version's GitHub release, unless it has one: the tag goes on the commit that set the version
- *  (its "Version X.Y.Z" commit, also when main has moved on since), and the notes are its CHANGELOG.md
- *  section. The release workflow runs it after pushing a new version, and before versioning more
- *  changesets: a version whose release failed is released then, so a newer one never skips it. */
-function publish() {
+/** Whether `tag` has a GitHub release, or only a draft (left by an upload that didn't finish). */
+function releaseState(tag: string): 'released' | 'draft' | 'none' {
+  const view = Bun.spawnSync(['gh', 'release', 'view', tag, '--json', 'isDraft', '--jq', '.isDraft'], { cwd: root });
+  if (view.exitCode !== 0) return 'none';
+  return view.stdout.toString().trim() === 'true' ? 'draft' : 'released';
+}
+
+/** The current version, unless it's released: its tag goes on the commit that set the version (its "Version
+ *  X.Y.Z" commit, also when main has moved on since) right away, since the install instructions clone it,
+ *  and its version and commit go to the workflow ($GITHUB_OUTPUT), which builds its archives and publishes
+ *  it. The release workflow runs it after pushing a new version, and before versioning more changesets: a
+ *  version whose release failed is released then, so a newer one never skips it. */
+function tag() {
   const v = version();
   const tag = `v${v}`;
-  if (Bun.spawnSync(['gh', 'release', 'view', tag], { cwd: root }).exitCode === 0) return console.log(`${tag} is already released`);
+  if (releaseState(tag) === 'released') return console.log(`${tag} is already released`);
   check(tag);
   const log = Bun.spawnSync(['git', 'log', '-1', '--format=%H', `-S"version": "${v}"`, '--', 'package.json'], { cwd: root });
   const commit = log.stdout.toString().trim();
   if (log.exitCode !== 0 || !commit) fail(`no commit in the history sets package.json's version to ${v}`);
+  const ref = Bun.spawnSync(['gh', 'api', `repos/{owner}/{repo}/git/ref/tags/${tag}`, '--jq', '.object.sha'], { cwd: root });
+  const tagged = ref.stdout.toString().trim();
+  if (ref.exitCode === 0 && tagged !== commit) fail(`${tag} is on ${tagged}, not on ${commit}, which set the version`);
+  if (ref.exitCode !== 0) {
+    if (!ref.stderr.toString().includes('HTTP 404')) fail(`couldn't look up ${tag}:\n${ref.stderr}`);
+    // A lightweight tag: `git clone --branch` of an annotated one warns that it "is not a commit".
+    const create = Bun.spawnSync(['gh', 'api', 'repos/{owner}/{repo}/git/refs', '-f', `ref=refs/tags/${tag}`, '-f', `sha=${commit}`, '--silent'], { cwd: root, stderr: 'inherit' });
+    if (create.exitCode !== 0) fail(`couldn't create the tag ${tag}`);
+  }
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${v}\ncommit=${commit}\n`);
+  console.log(`${tag} is tagged at ${commit}, to be released`);
+}
+
+/** The current version's GitHub release, unless it has one, from a checkout of its tag: the notes are its
+ *  CHANGELOG.md section, and the assets the archives in `dir` and their SHA256SUMS. */
+function publish(dir: string) {
+  const v = version();
+  const tag = `v${v}`;
+  const state = releaseState(tag);
+  if (state === 'released') return console.log(`${tag} is already released`);
+  check(tag);
+  const archives = fs.readdirSync(dir).filter((f) => f.endsWith('.tar.gz')).sort();
+  if (!archives.length) fail(`${dir} has no archives to release`);
+  const sha256 = (f: string) => new Bun.CryptoHasher('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex');
+  fs.writeFileSync(path.join(dir, 'SHA256SUMS'), archives.map((f) => `${sha256(f)}  ${f}\n`).join(''));
+  if (state === 'draft' && Bun.spawnSync(['gh', 'release', 'delete', tag, '--yes'], { cwd: root, stderr: 'inherit' }).exitCode !== 0) fail(`couldn't delete the draft of ${tag}`);
   const notesText = unwrap(notes(v) ?? fail(`CHANGELOG.md has no notes for ${v}`));
-  const create = Bun.spawnSync(['gh', 'release', 'create', tag, '--target', commit, '--title', `Briardr ${v}`, '--notes', notesText], {
+  // gh uploads the assets to a draft and publishes it after, so the release never shows without them.
+  const assets = [...archives, 'SHA256SUMS'].map((f) => path.join(dir, f));
+  const create = Bun.spawnSync(['gh', 'release', 'create', tag, '--verify-tag', '--title', `Briardr ${v}`, '--notes', notesText, ...assets], {
     cwd: root,
     stdout: 'inherit',
     stderr: 'inherit',
   });
   if (create.exitCode !== 0) fail(`gh release create ${tag} failed`);
-  console.log(`released ${tag} at ${commit}`);
+  console.log(`released ${tag} with ${archives.join(', ')}`);
 }
 
 /** The branch brings a changeset compared with `base` (the pre-push hook and CI). Changesets' own message
@@ -146,6 +184,7 @@ const [command, arg] = process.argv.slice(2);
 if (command === 'version') console.log(version());
 else if (command === 'check') check(arg);
 else if (command === 'sync') sync();
-else if (command === 'publish') publish();
+else if (command === 'tag') tag();
+else if (command === 'publish') publish(arg ?? fail('which folder has the archives? bun scripts/release.ts publish <dir>'));
 else if (command === 'changeset') changeset(arg ?? 'origin/main');
-else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | sync | publish | changeset [base]');
+else fail('usage: bun scripts/release.ts version | check [vX.Y.Z] | sync | tag | publish <dir> | changeset [base]');

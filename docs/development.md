@@ -78,7 +78,8 @@ mise exec -- cargo test --manifest-path server/Cargo.toml --features test-hooks
 ```
 
 The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust server, integration
-suite, browser checks, shell helper, and generated deployment files, for every change. macOS
+suite, browser checks, shell helper, and generated deployment files, and packages the
+[release archives](#release-archives) for every platform, for every change. macOS
 integrations require Mac-specific testing.
 
 ## Browser checks
@@ -127,19 +128,39 @@ Merging releases it. When the Linux checks pass on `main`, the
    `scripts/release.ts sync`, which copies the version to `server/Cargo.toml`, `server/Cargo.lock` and
    the install instructions (they clone the release tag). The release GitHub App pushes that to `main` as
    "Version X.Y.Z".
-2. tags that commit `vX.Y.Z` and publishes the GitHub release with the changelog section as its notes,
-   in the same run, so the install instructions never name a tag that doesn't exist yet. The Linux
-   checks then run on the version commit too.
+2. tags that commit `vX.Y.Z` right away, so the install instructions never name a tag that doesn't
+   exist yet.
+3. builds the release archives on macOS and Linux runners, and publishes the GitHub release with them,
+   their `SHA256SUMS`, and the changelog section as its notes, in the same run. The Linux checks then
+   run on the version commit too.
 
 Merges that land close together can share a version, and empty changesets release nothing. If a check
 fails, nothing is versioned or published: the changesets wait on `main`, and the merge that fixes it
-releases them. If publishing fails after the push, the next run on `main` releases that version first,
-at its "Version X.Y.Z" commit, before it makes a newer one, so no version is skipped. Don't set the
-version by hand; `mise run release:check` checks that it agrees everywhere.
+releases them. If building or publishing fails after the push, the run for the version commit (or the
+next run on `main`) releases that version first, at its "Version X.Y.Z" commit, before it makes a newer
+one, so no version is skipped. Don't set the version by hand; `mise run release:check` checks that it
+agrees everywhere.
 
 The workflow needs the release GitHub App (Contents: read and write, installed on the repository, and in
 the `main` ruleset's bypass list): its client ID in the repository variable `RELEASE_APP_CLIENT_ID` and
 a private key in the secret `RELEASE_APP_PRIVATE_KEY`.
+
+### Release archives
+
+Each release has an archive per platform, `briardr-<os>-<arch>.tar.gz` for `macos` and `linux` on
+`aarch64` and `x86_64`, that runs Briardr without a checkout, Bun or Rust.
+[`scripts/package.ts`](../scripts/package.ts) makes it: the release server as `bin/briardr`, the web
+client in `web/dist` next to it (where the server looks when its executable is a release's
+`bin/briardr`), the dictation helper's source on macOS, `LICENSE`, and `THIRD-PARTY-NOTICES.txt` with the
+license texts of the Rust crates and npm packages built into them. The Linux archives are built on Ubuntu
+24.04 and need its glibc (2.39) or newer.
+
+CI packages every change ([`package.yml`](../.github/workflows/package.yml)), so a version that doesn't
+build on some platform is never pushed, and each run keeps its archives as artifacts for a week.
+`mise run package` packages for your computer into `dist/` (`-- --target x86_64-apple-darwin` for another
+target, after `rustup target add` for it). It builds the server into `server/target/<target>` and the
+client into the archive's folder, so the checkout's `server/target/release/briardr` and `web/dist` stay
+as they are. Making and building plugins still needs a checkout: see [Plugins](PLUGINS.md).
 
 ## Useful starting points
 

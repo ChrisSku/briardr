@@ -11,6 +11,7 @@ bench/screens-full/
 bench/worktrees/
 bench/results/
 server/target/
+/dist/
 web/src/sdk/runtime/
 test/fixtures/plugins/*/dist/
 
