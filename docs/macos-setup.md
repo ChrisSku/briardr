@@ -21,13 +21,14 @@ curl -fsSL https://briardr.dev/install.sh | sh
 The installer downloads the latest release for your Mac (Apple silicon or Intel), checks it against
 the release's `SHA256SUMS`, puts it in `~/.local/lib/briardr`, and links `briardr` into `~/.local/bin`;
 add that folder to your PATH if it says so. Then it runs `briardr setup`, which checks for
-[Herdr](https://herdr.dev) and, when it's missing, offers to install the version this Briardr is tested
-with into `~/.local/bin`. A Herdr you already have stays as it is, even another version: replacing Herdr
-can restart live agents. Setup also reports Git (for the Changes tab), Tailscale and Swift, and says
-what's next. Run `briardr setup` again any time.
+[Herdr](https://herdr.dev) and, when it's missing, offers to install Herdr 0.9.5 into `~/.local/bin`.
+Briardr is tested with Herdr 0.9.3 to 0.9.5. A Herdr you already have stays as it is, and setup warns
+when it's another version: replacing Herdr can restart live agents. Setup also reports Git (for the
+Changes tab), Tailscale and Swift, and says what's next. Run `briardr setup` again any time.
 
 Herdr must be running for Briardr to show anything: start it in a terminal with `herdr`, and check it
-with `herdr status`.
+with `herdr status`. With Herdr 0.9.4 or newer, its server and agents keep running when you close that
+terminal; with Herdr 0.9.3, closing it can stop them, so keep it open or upgrade Herdr.
 
 ## Configure and start
 

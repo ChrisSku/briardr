@@ -55,6 +55,13 @@ pub fn herdr_release(os: &str, arch: &str) -> Option<HerdrRelease> {
     })
 }
 
+/// The Herdr versions this Briardr is tested with (`HERDR_TESTED`, space-separated and quoted).
+fn herdr_tested() -> Vec<&'static str> {
+    pin("HERDR_TESTED")
+        .map(|v| v.trim_matches('"').split_whitespace().collect())
+        .unwrap_or_default()
+}
+
 /// How to start Herdr for a session.
 fn start_herdr(session: &str) -> String {
     if session.is_empty() {
@@ -210,7 +217,7 @@ pub async fn herdr(cfg: &BriardrConfig, home: &Path, yes: bool) -> Result<HerdrO
     let out = out();
     out.step("Herdr");
     let release = herdr_release(std::env::consts::OS, std::env::consts::ARCH);
-    let tested = release.as_ref().map_or("", |r| r.version);
+    let pinned = release.as_ref().map_or("", |r| r.version);
     let mut target = HerdrTarget::of(cfg);
     let mut status = herdr_status(&target).await;
     let mut installed = None;
@@ -288,11 +295,13 @@ pub async fn herdr(cfg: &BriardrConfig, home: &Path, yes: bool) -> Result<HerdrO
     } else {
         let version = herdr_version(&target.herdr_path).unwrap_or_else(|| "?".to_string());
         let found = format!("Herdr {version} at {}", target.herdr_path);
-        if version == tested || tested.is_empty() {
+        let tested = herdr_tested();
+        if tested.is_empty() || tested.contains(&version.as_str()) {
             out.ok(&found);
         } else {
             out.warn(&format!(
-                "{found}; this Briardr is tested with {tested}. Left as it is: replacing Herdr can restart live agents."
+                "{found}; this Briardr is tested with Herdr {}. Left as it is: replacing Herdr can restart live agents.",
+                tested.join(", ")
             ));
         }
     }
@@ -309,7 +318,7 @@ pub async fn herdr(cfg: &BriardrConfig, home: &Path, yes: bool) -> Result<HerdrO
         )),
         Some("incompatible") => {
             out.fail(&format!(
-                "This Herdr doesn’t work with this Briardr. Install Herdr {tested} (https://github.com/herdrdev/herdr/releases/tag/v{tested}) when no agents are running: replacing Herdr restarts them."
+                "This Herdr doesn’t work with this Briardr. Install Herdr {pinned} (https://github.com/herdrdev/herdr/releases/tag/v{pinned}) when no agents are running: replacing Herdr restarts them."
             ));
             return Ok(HerdrOutcome {
                 installed,
@@ -440,6 +449,16 @@ mod tests {
         );
         assert_eq!(herdr_release("windows", "x86_64"), None);
         assert_eq!(herdr_release("linux", "riscv64"), None);
+    }
+
+    #[test]
+    fn the_pinned_herdr_is_a_tested_one() {
+        let tested = herdr_tested();
+        assert!(tested.contains(&pin("HERDR_VERSION").unwrap()));
+        assert!(
+            tested.iter().all(|v| v.split('.').count() == 3),
+            "{tested:?}"
+        );
     }
 
     #[test]
