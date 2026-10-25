@@ -1,6 +1,6 @@
 // Link handling for terminal text: soft-wrapped URLs are joined, OSC 8 hyperlinks keep their real
 // destination, localhost links open in Preview, other web links open in the system browser.
-import type { IBufferLine, Terminal } from '@xterm/xterm';
+import type { Terminal } from '@xterm/xterm';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}]/g;
 
@@ -68,20 +68,12 @@ export function linksInLogicalLine(l: LogicalLine): FoundLink[] {
   return out;
 }
 
-/** OSC 8 hyperlink at a cell, via xterm internals (guarded: returns null if unavailable). */
+/** OSC 8 hyperlink at a cell, via xterm internals (guarded: returns null if unavailable). Only the cell
+ *  says whether it has a link: its line's extended attributes keep one after new text overwrites it. */
 export function osc8At(term: Terminal, col: number, row: number): string | null {
   try {
-    const core = (term as any)._core;
-    const line: IBufferLine | undefined = term.buffer.active.getLine(row);
-    const cell: any = line?.getCell(col);
-    const id = cell?.extended?.urlId ?? (cell as any)?._cell?.extended?.urlId;
-    if (!id) {
-      const bl = core.buffer.lines.get(row);
-      const ext = bl?._extendedAttrs?.[col];
-      if (ext?.urlId) return core._oscLinkService.getLinkData(ext.urlId)?.uri ?? null;
-      return null;
-    }
-    return core._oscLinkService.getLinkData(id)?.uri ?? null;
+    const id = (term.buffer.active.getLine(row)?.getCell(col) as any)?.extended?.urlId;
+    return id ? ((term as any)._core._oscLinkService.getLinkData(id)?.uri ?? null) : null;
   } catch {
     return null;
   }
