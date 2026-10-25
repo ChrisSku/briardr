@@ -65,9 +65,10 @@ The integration suite builds a debug server with test hooks and the client (into
 `test-results/web-dist/test`, not `web/dist`), and starts throwaway instances on loopback ports below the
 ephemeral range, each with its own data and uploads directory. Each run starts its own Herdr session
 (`briardr-test-<pid>`) and removes it and its temp folders when it ends (a killed run's go at the next run),
-so runs in parallel don't collide and your sessions are never touched. Its pane shells start without your zsh
-startup files, as in CI. To watch the tests in Herdr, run them in the
-development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
+so runs in parallel don't collide and your sessions are never touched. They ignore the variables git gives
+its hooks (`GIT_DIR` and the like, unset in `mise.toml`), so a push from a worktree can't send the suites'
+scratch commits into the branch. Its pane shells start without your zsh startup files, as in CI. To watch
+the tests in Herdr, run them in the development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
 Python 3 on PATH.
 
 For Rust-only changes, a narrower check is:
