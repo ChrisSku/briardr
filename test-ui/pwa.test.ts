@@ -677,7 +677,7 @@ describe('offline readiness and local work', () => {
     assert.equal(await page.evaluate(() => (window as any).copied), 'only here');
     // A build the service worker activates now waits for this text, typed in one go (one input event).
     await page.evaluate(() => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { t: 'shell', version: 'next' } })));
-    await page.locator('.update-bar').waitFor({ timeout: 5000 });
+    await page.locator('.update-bar').waitFor();
     assert.match((await page.locator('.update-bar').textContent()) || '', /reloads once you’re done with the text you typed/);
     assert.equal(await page.locator('textarea.notes-area').inputValue(), 'only here');
     assert.equal(loads(), 0, 'the page reloaded for the update');

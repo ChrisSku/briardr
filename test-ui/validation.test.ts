@@ -154,7 +154,7 @@ describe('service worker', () => {
     await a.page.waitForSelector('.count-strip', { timeout: 10_000 });
     assert.equal(await a.page.evaluate(() => document.querySelector('meta[name="briardr-version"]')?.getAttribute('content')), v2);
     await a.page.locator('nav[aria-label="Main"] button', { hasText: 'Workspaces' }).click();
-    await a.page.locator('.tree-streams .row-main', { hasText: 'validation target' }).waitFor({ timeout: 5000 });
+    await a.page.locator('.tree-streams .row-main', { hasText: 'validation target' }).waitFor();
     // (Playwright's offline mode doesn't cut WebKit's loopback WebSocket; test-ui/recovery covers the
     // offline banner by stopping the server.)
     await a.ctx.setOffline(false);

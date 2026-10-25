@@ -538,7 +538,7 @@ async fn next_line<R: AsyncRead + Unpin>(reader: &mut BufReader<R>, buf: &mut Ve
 
 #[cfg(test)]
 mod tests {
-    use crate::scratch::{write_executable, Scratch};
+    use crate::scratch::{write_executable, Scratch, WAIT};
     use std::path::Path;
 
     use super::*;
@@ -565,7 +565,7 @@ mod tests {
     }
 
     async fn next(rx: &mut mpsc::UnboundedReceiver<SessionEvent>) -> SessionEvent {
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+        tokio::time::timeout(WAIT, rx.recv())
             .await
             .expect("event timed out")
             .expect("event channel closed")
@@ -582,7 +582,7 @@ mod tests {
     }
 
     async fn wait_for_file(path: &std::path::Path) -> String {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::time::timeout(WAIT, async {
             loop {
                 if let Ok(text) = std::fs::read_to_string(path) {
                     if text.contains('\n') {
