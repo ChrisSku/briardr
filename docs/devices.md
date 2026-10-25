@@ -17,7 +17,7 @@ device to that server. No native Briardr client is required.
 2. Choose **Share → Add to Home Screen** and add Briardr.
 3. Open Briardr from the Home Screen. Pair here: the installed app may have a separate sign-in from
    Safari, so a Safari pairing may not carry over.
-4. On the host, run `mise run pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
+4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
 5. Enter the one-time code and a device name in Briardr. The code expires after ten minutes.
 6. Enable and test notifications in Briardr Settings → Notifications.
 

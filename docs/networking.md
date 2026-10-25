@@ -23,24 +23,25 @@ tailnet's access policy. Enable MagicDNS and
 [HTTPS certificates](https://tailscale.com/docs/how-to/set-up-https-certificates). Certificate names
 appear in public certificate transparency logs; choose your machine and tailnet names accordingly.
 
-From a built checkout:
+After [installing Briardr](macos-setup.md#install) (or building a checkout):
 
 ```sh
-./server/target/release/briardr configure --mode tailscale --listen tailscale
-./server/target/release/briardr serve
+briardr configure --mode tailscale --listen tailscale
+briardr serve
 ```
 
 Briardr invokes `tailscale cert` as its own user and renews certificates. That command must work
 without an interactive sudo prompt. Connect using the tailnet DNS name and port 7443 printed by
 `briardr pair`, and pair every client device.
 
-For a Mac, use the [macOS guide](macos-setup.md) for installation and startup. For Linux, install
-Herdr, Git, a C compiler/toolchain, and mise; then run `mise trust`, `mise install`,
-`mise run install`, `mise run build`, and `mise run build:server`. Run Briardr and Herdr as the same
+For a Mac, use the [macOS guide](macos-setup.md) for installation and startup. On Linux, the same
+installer works on glibc 2.39 or newer (Ubuntu 24.04 and later), and `briardr setup` installs Herdr;
+or build a checkout (Herdr, Git, a C compiler/toolchain and mise; then `mise trust`, `mise install`,
+`mise run install`, `mise run build` and `mise run build:server`). Run Briardr and Herdr as the same
 non-root user. To generate service files for a manual deployment:
 
 ```sh
-./server/target/release/briardr systemd-units /tmp/briardr-units
+briardr systemd-units /tmp/briardr-units
 ```
 
 Review the generated units, their absolute executable paths, user, HOME, and PATH before installing
@@ -76,7 +77,7 @@ permit forwarding from the tunnel to the LAN on the router.
 For example, for a host at `192.168.1.50`, with client source addresses on `192.168.1.0/24`:
 
 ```sh
-./server/target/release/briardr configure \
+briardr configure \
   --mode local-ca \
   --listen 192.168.1.50 \
   --allowed-networks 192.168.1.0/24 \

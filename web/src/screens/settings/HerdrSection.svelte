@@ -29,5 +29,10 @@
       <button class="btn" disabled={!s || path === s.herdrPath}>Save</button>
     </div>
   </form>
+  {#if s?.herdr.problem === 'not_found'}
+    <p class="hint">To install the Herdr this Briardr is tested with, run <code>briardr setup</code> on {theHost()}.</p>
+  {:else if s && !s.herdr.running}
+    <p class="hint">Start it on {theHost()} with <code>{s.herdrSession ? `herdr --session ${s.herdrSession}` : 'herdr'}</code>; Briardr connects when it’s up.</p>
+  {/if}
   <p class="hint">Briardr talks to Herdr only on {theHost()}. Herdr’s control socket is never exposed to the network.</p>
 </Section>

@@ -19,7 +19,7 @@ Briardr provides remote views and actions around them.
 | `server/src/plugins/` | Installed plugins: manifests, enablement, files, and backends (approved commands speaking JSON over stdin/stdout). |
 | `native/transcribe.swift` | Optional macOS on-device speech transcription helper. |
 | `scripts/` | Bun build tooling, release packaging, Linux installation, deployment smoke tests, and optional Mac power setup. |
-| `deploy/linux/` | Installer version and checksum pins. |
+| `deploy/versions.env` | The Herdr, Caddy and Ubuntu versions Briardr installs, with checksums. |
 | `test/`, `test-ui/`, `server/tests/` | Integration, WebKit UI, and Rust fixture tests. Rust unit tests also live beside implementation modules. |
 | `bench/` | Performance and comparison tooling. |
 | `site/` | The [briardr.dev](https://briardr.dev) website, published by the Pages workflow. |

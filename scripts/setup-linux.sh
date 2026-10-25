@@ -40,8 +40,8 @@
 set -Eeuo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=../deploy/linux/versions.env
-. "$REPO/deploy/linux/versions.env"
+# shellcheck source=../deploy/versions.env
+. "$REPO/deploy/versions.env"
 SETUP_FORMAT=1
 STATE_DIR=${XDG_STATE_HOME:-$HOME/.local/state}/briardr-setup
 # The server builds outside the checkout: older commits don't ignore a target directory, and untracked
@@ -586,7 +586,7 @@ install_herdr() {
     return
   fi
   local arch sum
-  case $(uname -m) in x86_64) arch=x86_64 sum=$HERDR_SHA256_X86_64 ;; aarch64) arch=aarch64 sum=$HERDR_SHA256_AARCH64 ;; esac
+  case $(uname -m) in x86_64) arch=x86_64 sum=$HERDR_SHA256_LINUX_X86_64 ;; aarch64) arch=aarch64 sum=$HERDR_SHA256_LINUX_AARCH64 ;; esac
   local tmp; tmp=$(mktemp -d)
   curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v$HERDR_VERSION/herdr-linux-$arch" -o "$tmp/herdr"
   echo "$sum  $tmp/herdr" | sha256sum -c --quiet - || die "the downloaded Herdr doesn't match its pinned checksum"

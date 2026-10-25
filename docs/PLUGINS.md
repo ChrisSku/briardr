@@ -28,10 +28,10 @@ app (in chunks of their own, loaded when needed or in idle time), so they work o
 offline; they're on until turned off; their manifests are compiled into the server; and their server
 side is Briardr's own API (`/api/streams/<id>/files`, `…/notes`, …) rather than a plugin backend.
 
-To make one, run `briardr create plugin` on the computer that runs Briardr (after `mise run install-cli`
-puts `briardr` on the PATH). It asks what the plugin should do, makes it in `~/briardr-plugins/<id>`,
-installs and turns it on, installs the `briardr-plugins` skill for Claude Code and Codex, and starts the
-agent there with the job. The skill (`skills/briardr-plugins/`) is the plugin author's guide; this page
+To make one, run `briardr create plugin` on the computer that runs Briardr (from a checkout, after
+`mise run install-cli` puts `briardr` on the PATH). It asks what the plugin should do, makes it in
+`~/briardr-plugins/<id>`, installs and turns it on, installs the `briardr-plugins` skill for Claude Code
+and Codex, and starts the agent there with the job. The skill (`skills/briardr-plugins/`) is the plugin author's guide; this page
 is how plugins work inside Briardr.
 
 Plugins are made and built with the checkout's tools (`scripts/plugin-build.ts`, the template, the skill

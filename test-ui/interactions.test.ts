@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -412,19 +412,23 @@ describe('ownership (two devices)', () => {
   });
 
   test('backgrounding releases control; returning resumes by itself, never taking over', async () => {
+    // A closed connection's control takes a moment to get back to Herdr; a device asking for control
+    // before that only watches. So each step waits until the server has given control back.
+    const released = (what: string) => waitUntil(what, () => s.run.hub.controllers === 0);
     const a = await device('iphone', 'phone-bg');
     await openTarget(a.page);
     await a.page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await sleep(800);
+    await released('the backgrounded phone’s control to go back');
     // The pane is free: another device can take control without a takeover.
     const b = await device('mac', 'mac-free');
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     await b.page.waitForSelector('[data-ownership=controlling]');
     await b.ctx.close();
+    await released('the closed Mac’s control to go back');
     await a.page.evaluate(() => {
       Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
@@ -436,7 +440,7 @@ describe('ownership (two devices)', () => {
       Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    await sleep(800);
+    await released('the backgrounded phone’s control to go back');
     const c = await device('mac', 'mac-holds');
     await c.page.goto(s.base + '/workspaces');
     await c.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();

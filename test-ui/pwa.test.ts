@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
 import { devices, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
-import { closeWorkspace, herdr, sleep, startServer, testPane, tmpDir, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, sleep, startServer, testPane, tmpDir, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 import { startProxy, type Proxy } from './proxy.ts';
 
 const build = path.resolve(process.env.BRIARDR_WEB_DIST || 'web/dist');
@@ -90,9 +90,8 @@ afterAll(async () => {
   fs.rmSync(served, { recursive: true, force: true });
 });
 
-const until = async (what: string, ok: () => Promise<boolean>, ms = 20_000) => {
-  for (const t0 = Date.now(); !(await ok()); await sleep(200)) if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}`);
-};
+/** Waits until the page is controlled by the service worker: the offline app is installed. */
+const controlled = (page: Page) => page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: WAIT });
 const shells = (page: Page) => page.evaluate(async () => (await caches.keys()).filter((k) => k.startsWith('briardr-shell-')));
 const pageVersion = (page: Page) => page.evaluate(() => document.querySelector('meta[name="briardr-version"]')?.getAttribute('content'));
 
@@ -107,9 +106,9 @@ async function installed(name: string): Promise<{ ctx: BrowserContext; page: Pag
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   await page.goto(proxy.base + '/agents');
   await page.waitForSelector('.count-strip');
-  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, null, { timeout: 15_000 });
+  await controlled(page);
   const v = versionOf(served);
-  await until('the shell cache', async () => (await shells(page)).includes(`briardr-shell-${v}`));
+  await waitUntil('the shell cache', async () => (await shells(page)).includes(`briardr-shell-${v}`));
   return { ctx, page };
 }
 
@@ -203,7 +202,7 @@ describe('launch on a poor connection', () => {
     await page.getByRole('button', { name: 'Try again' }).click();
     await page.waitForSelector('.count-strip', { timeout: 15_000 });
     // The online launch saved the shell again, so the next offline launch works.
-    await until('the shell to be saved again', async () => (await shells(page)).includes(`briardr-shell-${versionOf(served)}`));
+    await waitUntil('the shell to be saved again', async () => (await shells(page)).includes(`briardr-shell-${versionOf(served)}`));
     await proxy.set('down');
     await page.reload();
     await page.waitForSelector('.count-strip', { timeout: 10_000 });
@@ -229,7 +228,7 @@ describe('updates', () => {
     await proxy.set('down');
     await sleep(500);
     await proxy.set('pass');
-    await until('A to reload into the new build', async () => (await pageVersion(a.page).catch(() => null)) === v2, 40_000);
+    await waitUntil('A to reload into the new build', async () => (await pageVersion(a.page).catch(() => null)) === v2, 40_000);
     await a.page.waitForSelector('.count-strip');
     await b.page.locator('.update-bar').waitFor({ timeout: 20_000 });
     assert.match((await b.page.locator('.update-bar').textContent()) || '', /update is ready.*reloads once you’re done with the text you typed/s);
@@ -247,7 +246,7 @@ describe('updates', () => {
 
     // Done with the text: B reloads by itself.
     await b.page.keyboard.press('Escape');
-    await until('B to reload into the new build', async () => (await pageVersion(b.page).catch(() => null)) === v2, 20_000);
+    await waitUntil('B to reload into the new build', async () => (await pageVersion(b.page).catch(() => null)) === v2, 20_000);
     await b.page.waitForSelector('.count-strip');
     await sleep(3000);
     assert.equal(navA(), 1, 'A reloaded once');
@@ -258,8 +257,8 @@ describe('updates', () => {
     await proxy.set('down');
     await sleep(500);
     await proxy.set('pass');
-    await until('both to reload into the third build', async () => (await pageVersion(a.page).catch(() => null)) === v3 && (await pageVersion(b.page).catch(() => null)) === v3, 40_000);
-    await until('the oldest shell to be deleted', async () => JSON.stringify((await shells(a.page)).sort()) === JSON.stringify([`briardr-shell-${v2}`, `briardr-shell-${v3}`].sort()));
+    await waitUntil('both to reload into the third build', async () => (await pageVersion(a.page).catch(() => null)) === v3 && (await pageVersion(b.page).catch(() => null)) === v3, 40_000);
+    await waitUntil('the oldest shell to be deleted', async () => JSON.stringify((await shells(a.page)).sort()) === JSON.stringify([`briardr-shell-${v2}`, `briardr-shell-${v3}`].sort()));
   });
 
   test('a window opened during a deployment installs the new build; an older, busy page keeps its own build’s code until it reloads', async () => {
@@ -285,7 +284,7 @@ describe('updates', () => {
     });
     assert.ok(loaded.length && loaded.every((p) => oldAssets.includes(p)), `the plugin runtime is the page's own build's (${loaded.join(', ')})`);
     await a.page.keyboard.press('Escape');
-    await until('A to reload into the new build', async () => (await pageVersion(a.page).catch(() => null)) === v2, 20_000);
+    await waitUntil('A to reload into the new build', async () => (await pageVersion(a.page).catch(() => null)) === v2, 20_000);
   });
 
   test('a build whose shell fails to install leaves the current one in use, online and offline', async () => {
@@ -402,8 +401,8 @@ describe('notifications', () => {
    * A Home Screen app whose push layer is fake (automated browsers have no push service): permission and
    * this browser's subscription live in localStorage['fake.push'], calls are logged. The host is real.
    */
-  async function homeScreenApp(name: string, fake: { permission: string; sub: { endpoint: string; key?: number[] } | null; wanted?: boolean }) {
-    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers: 'allow' });
+  async function homeScreenApp(name: string, fake: { permission: string; sub: { endpoint: string; key?: number[] } | null; wanted?: boolean }, serviceWorkers: 'allow' | 'block' = 'allow') {
+    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers });
     onTestFinished(() => ctx.close());
     await ctx.addInitScript(() => {
       Object.defineProperty(navigator, 'standalone', { value: true });
@@ -436,6 +435,7 @@ describe('notifications', () => {
     const p = s.run.auth.pair(s.run.auth.createPairingCode().code, name);
     await ctx.addCookies([{ name: '__Host-briardr', value: p.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
     const page = await ctx.newPage();
+    page.on('pageerror', (e) => console.log('pageerror', e.message));
     // Seed this origin's storage before the app runs.
     await page.goto(proxy.base + '/manifest.webmanifest');
     await page.evaluate(([f, w]) => {
@@ -457,7 +457,7 @@ describe('notifications', () => {
     const { page } = await homeScreenApp('push repair', { permission: 'granted', sub: { endpoint: 'https://push.example/kept' }, wanted: true });
     await page.goto(proxy.base + '/agents');
     await page.waitForSelector('.count-strip');
-    await until('the host to have the subscription', async () => (await hostHas(page)).endpoint === 'https://push.example/kept');
+    await waitUntil('the host to have the subscription', async () => (await hostHas(page)).endpoint === 'https://push.example/kept');
     assert.deepEqual((await fake(page)).calls, [], 'no permission prompt, no new subscription');
     await page.goto(proxy.base + '/settings/notifications');
     await step(page).getByText('On.').waitFor();
@@ -466,6 +466,8 @@ describe('notifications', () => {
   test('settings never say On when the device disagrees; permission changes show on return; Repair and Turn off work', async () => {
     const { page } = await homeScreenApp('push health', { permission: 'granted', sub: { endpoint: 'https://push.example/a' }, wanted: true });
     await page.goto(proxy.base + '/settings/notifications');
+    // A Home Screen app has its offline app installed, and subscribing needs its service worker.
+    await controlled(page);
     await step(page).getByText('On.').waitFor();
     // Blocked in Settings while away: shown on return, without a reload.
     await setFake(page, { permission: 'denied' });
@@ -496,6 +498,16 @@ describe('notifications', () => {
     await page.reload();
     await step(page).getByRole('button', { name: 'Allow notifications' }).waitFor();
     assert.equal((await hostHas(page)).subscribed, false);
+  });
+
+  test('without the offline app installed, Repair says so instead of waiting for it forever', async () => {
+    const { page } = await homeScreenApp('push not installed', { permission: 'granted', sub: null, wanted: true }, 'block');
+    await page.goto(proxy.base + '/settings/notifications');
+    await step(page).getByText('subscription expired or was removed').waitFor();
+    await step(page).getByRole('button', { name: 'Repair' }).click();
+    await page.getByText('Briardr isn’t saved on this device yet').waitFor();
+    assert.deepEqual((await fake(page)).calls, [], 'nothing subscribed');
+    assert.equal(await step(page).getByRole('button', { name: 'Repair' }).isDisabled(), false, 'Repair can be tried again');
   });
 
   test('permission is only requested from the button', async () => {
@@ -627,7 +639,7 @@ describe('offline readiness and local work', () => {
     assert.equal((await screens('fill')).length, 111);
     await page.reload();
     await page.waitForSelector('.count-strip');
-    await until('old screens to be pruned', async () => (await screens('list')).length <= 100);
+    await waitUntil('old screens to be pruned', async () => (await screens('list')).length <= 100);
     const left = await screens('list');
     assert.ok(!left.includes('screen:old'), 'a month-old screen is gone');
     assert.ok(left.includes('screen:recent-0'), 'the most recent stays');

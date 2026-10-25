@@ -25,6 +25,17 @@ pub struct HerdrTarget {
     pub timeout: Duration,
 }
 
+impl HerdrTarget {
+    /// The Herdr a config names.
+    pub fn of(cfg: &crate::config::BriardrConfig) -> Self {
+        HerdrTarget {
+            herdr_path: cfg.herdr_path.clone(),
+            session: cfg.herdr_session.clone(),
+            timeout: Duration::from_millis(cfg.herdr_timeout_ms),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HerdrStatus {
     pub ok: bool,

@@ -20,6 +20,7 @@ pub mod power;
 pub mod preview;
 pub mod push;
 pub mod serve;
+pub mod setup;
 pub mod static_files;
 pub mod terminal_hub;
 pub mod tls;
@@ -35,7 +36,6 @@ mod scratch;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
@@ -53,7 +53,7 @@ use crate::net::{missing_local_addresses, tailscale_info, valid_network, Tailsca
 use crate::platform::{capabilities, host_platform};
 use crate::serve::ServeError;
 
-const USAGE: &str = "Usage: briardr [serve|pair|devices|revoke <id>|status|configure|caddyfile|systemd-units <dir>|install-agent|uninstall-agent|install-cli|plugin <command>|create plugin|skill [install|print]]";
+const USAGE: &str = "Usage: briardr [serve|setup|pair|devices|revoke <id>|status|configure|caddyfile|systemd-units <dir>|install-agent|uninstall-agent|install-power|install-cli|plugin <command>|create plugin|skill [install|print]|--version]";
 
 const CONFIGURE_HELP: &str = r#"Usage: briardr configure [options]
   --mode proxy|local-ca|tailscale|files   how HTTPS is provided (proxy: a reverse proxy on this host)
@@ -144,6 +144,13 @@ struct Ctx {
 }
 
 async fn cli(args: Vec<String>) -> CliResult {
+    if matches!(
+        args.first().map(String::as_str),
+        Some("--version" | "-V" | "version")
+    ) {
+        println!("briardr {}", crate::app::VERSION);
+        return Ok(0);
+    }
     let env: HashMap<String, String> = std::env::vars_os()
         .map(|(k, v)| {
             (
@@ -176,6 +183,7 @@ async fn cli(args: Vec<String>) -> CliResult {
     let rest = args.get(1..).unwrap_or_default();
     match cmd {
         "serve" => serve_command(&ctx).await,
+        "setup" => setup_command(&ctx, rest).await,
         "pair" => pair(&ctx).await,
         "devices" => devices(&ctx).await,
         "revoke" => revoke(&ctx, rest).await,
@@ -184,6 +192,7 @@ async fn cli(args: Vec<String>) -> CliResult {
         "caddyfile" => caddyfile_command(&ctx, rest).await,
         "systemd-units" => systemd_units_command(&ctx, rest).await,
         "install-agent" => install_agent(&ctx).await,
+        "install-power" => install_power().await,
         "uninstall-agent" => uninstall_agent(&ctx).await,
         "plugin" | "plugins" => plugin_command(&ctx, rest.to_vec()).await,
         // `briardr create plugin …` reads better than `briardr plugin create …`; both work.
@@ -300,12 +309,7 @@ async fn revoke(ctx: &Ctx, rest: &[String]) -> CliResult {
 async fn status(ctx: &Ctx) -> CliResult {
     let mut cfg = load_config_only(ctx).await?;
     let problem = validate_config(&mut cfg).err().map(config_message);
-    let st = herdr_status(&HerdrTarget {
-        herdr_path: cfg.herdr_path.clone(),
-        session: cfg.herdr_session.clone(),
-        timeout: Duration::from_millis(cfg.herdr_timeout_ms),
-    })
-    .await;
+    let st = herdr_status(&HerdrTarget::of(&cfg)).await;
     let proxy = cfg.tls.mode == "proxy";
     let ts = if proxy {
         TailscaleInfo::default()
@@ -406,6 +410,33 @@ async fn configure(ctx: &Ctx, rest: &[String]) -> CliResult {
     Ok(0)
 }
 
+async fn setup_command(ctx: &Ctx, rest: &[String]) -> CliResult {
+    if rest.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{}", setup::HELP);
+        return Ok(0);
+    }
+    let cfg = load_config_only(ctx).await?;
+    let configured = tokio::fs::try_exists(ctx.paths.config())
+        .await
+        .unwrap_or(false);
+    setup::intro();
+    let yes = rest.iter().any(|a| a == "--yes");
+    let herdr = setup::herdr(&cfg, &ctx.home, yes)
+        .await
+        .map_err(CliError::Other)?;
+    // Without a config, the default finds Herdr in ~/.local/bin.
+    if let Some(path) = herdr.installed.filter(|_| configured) {
+        configure(
+            ctx,
+            &["--herdr-path".to_string(), path.display().to_string()],
+        )
+        .await?;
+    }
+    setup::optional().await;
+    setup::next(configured);
+    Ok(i32::from(!herdr.usable))
+}
+
 async fn caddyfile_command(ctx: &Ctx, rest: &[String]) -> CliResult {
     let cfg = load_valid_config(ctx).await?;
     if cfg.tls.mode != "proxy" {
@@ -499,6 +530,21 @@ async fn install_agent(ctx: &Ctx) -> CliResult {
         dest.display()
     );
     Ok(0)
+}
+
+/// Lets Always on keep the Mac awake with the lid closed: scripts/install-power.sh (compiled in, so a
+/// release runs it too) installs a sudoers rule for `pmset disablesleep` and nothing else.
+async fn install_power() -> CliResult {
+    if !is_macos() {
+        return Err(CliError::Config(
+            "install-power is for Always on, on a Mac.".to_string(),
+        ));
+    }
+    let status = tokio::process::Command::new("/bin/sh")
+        .args(["-c", include_str!("../../scripts/install-power.sh")])
+        .status()
+        .await?;
+    Ok(status.code().unwrap_or(1))
 }
 
 async fn uninstall_agent(ctx: &Ctx) -> CliResult {

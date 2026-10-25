@@ -8,6 +8,7 @@
 //    which the UI sends only after the user confirmed Take Over.
 //  - Closing the socket (leaving, locking, backgrounding, network loss) releases control.
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -170,6 +171,8 @@ pub struct TerminalHub {
     /// "the Mac" or "the server", for the `released` reason.
     host: String,
     conns: Mutex<HashMap<String, Arc<Conn>>>,
+    /// Control connections whose socket closed and whose control Herdr doesn't have back yet.
+    releasing: AtomicUsize,
     /// One FIFO worker per pane: input to a pane runs in arrival order, across connections.
     queues: Mutex<HashMap<String, mpsc::UnboundedSender<Job>>>,
     /// Every input call made to Herdr, for tests.
@@ -194,6 +197,7 @@ impl TerminalHub {
             diag,
             host,
             conns: Mutex::new(HashMap::new()),
+            releasing: AtomicUsize::new(0),
             queues: Mutex::new(HashMap::new()),
             sent: Mutex::new(Vec::new()),
         }
@@ -213,11 +217,14 @@ impl TerminalHub {
         }
     }
 
+    /// Control connections open, or closed with their control still on its way back to Herdr: until
+    /// then, another client asking for control only gets to watch (the test hook's `hub.controllers`).
     pub fn controller_count(&self) -> usize {
-        lock(&self.conns)
+        let open = lock(&self.conns)
             .values()
             .filter(|c| c.mode == StreamMode::Control)
-            .count()
+            .count();
+        open + self.releasing.load(Ordering::SeqCst)
     }
 
     /// Number of input calls made to Herdr (the test hook's `hub.sent.length`).
@@ -389,6 +396,10 @@ impl TerminalHub {
             }
         }
         // The socket is gone: this connection generation ends and control goes back.
+        let control = mode == StreamMode::Control;
+        if control {
+            self.releasing.fetch_add(1, Ordering::SeqCst);
+        }
         {
             let mut conns = lock(&self.conns);
             if conns.get(&conn.id).is_some_and(|x| Arc::ptr_eq(x, &conn)) {
@@ -396,6 +407,9 @@ impl TerminalHub {
             }
         }
         conn.session.release().await;
+        if control {
+            self.releasing.fetch_sub(1, Ordering::SeqCst);
+        }
         self.event(
             "term_socket_closed",
             json!({"mode": mode.as_str(), "held_ms": now_ms().saturating_sub(t0)}),

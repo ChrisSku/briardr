@@ -24,7 +24,7 @@
       <p class="install-steps">{installSteps(p)}</p>
     {/if}
     <p class="hint">
-      Then {launchHint(p).replace(/^Open/, 'open')} The installed app may not share this browser’s sign-in: if it asks for a pairing code, get one here in Settings → Devices → Add a device, or with <code>mise run pair</code> on {theHost()}.
+      Then {launchHint(p).replace(/^Open/, 'open')} The installed app may not share this browser’s sign-in: if it asks for a pairing code, get one here in Settings → Devices → Add a device, or with <code>briardr pair</code> on {theHost()}.
     </p>
   {/if}
   <p class="hint offline-ready" role="status">
