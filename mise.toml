@@ -7,6 +7,19 @@ shellcheck = "0.11.0"
 
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
+# Git tells a hook's commands which repository it runs for (in a worktree, GIT_DIR is that worktree's), and
+# git run with these variables uses that repository whatever folder it runs in. The test suites make their
+# own repositories and the servers they start read them, so with these set (a push from a worktree, or
+# `git rebase --exec`), their commits went into the branch being pushed. Every task runs in the checkout,
+# where git finds it without them. (`git rev-parse --local-env-vars` lists them.)
+GIT_DIR = false
+GIT_WORK_TREE = false
+GIT_COMMON_DIR = false
+GIT_INDEX_FILE = false
+GIT_OBJECT_DIRECTORY = false
+GIT_ALTERNATE_OBJECT_DIRECTORIES = false
+GIT_IMPLICIT_WORK_TREE = false
+GIT_PREFIX = false
 
 [tasks.install]
 description = "Install dependencies"
