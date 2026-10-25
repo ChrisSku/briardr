@@ -94,7 +94,7 @@ the Home Screen first and pair inside the installed app**, then turn on notifica
 As a non-root user with sudo, on Ubuntu 24.04 or 26.04 LTS (x86_64 or aarch64):
 
 ```sh
-git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.0 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex

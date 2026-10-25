@@ -118,7 +118,7 @@ To run a checkout instead (to work on Briardr, or to make plugins), install
 [mise](https://mise.jdx.dev/getting-started.html), Git and Apple's Command Line Tools, then:
 
 ```sh
-git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git
+git clone --branch v0.3.0 https://github.com/ChrisSku/briardr.git
 cd briardr
 mise trust
 mise install
