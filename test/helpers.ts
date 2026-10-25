@@ -61,7 +61,11 @@ export function ensureSession(): void {
   if (!started && OWN_SESSION) removeStaleSessions();
   started = true;
   if (running()) return;
-  const child = spawn('herdr', ['--session', SESSION, 'server'], { env: scrubbed(), stdio: 'ignore', detached: true });
+  // Pane shells start without your zsh startup files (an empty ZDOTDIR), as in CI. Yours can run commands in
+  // other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
+  // reports that folder as the pane's.
+  const env = { ...scrubbed(), ZDOTDIR: tmpDir('briardr-zdotdir-') };
+  const child = spawn('herdr', ['--session', SESSION, 'server'], { env, stdio: 'ignore', detached: true });
   child.unref();
   const until = Date.now() + 10_000;
   while (!running()) {
