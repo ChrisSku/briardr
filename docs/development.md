@@ -115,7 +115,9 @@ test that creates temporary state; use a deployment you control and understand t
 ## Releases
 
 Every pull request brings a [changeset](../.changeset/README.md): `mise run changeset` asks whether the
-change is a patch, minor or major one and for its changelog entry, and writes it to `.changeset/`. A pull
+change is a patch, minor or major one and for its changelog entry, and writes it to `.changeset/`. Until
+1.0.0, fixes and new features are patches and breaking changes are minor; from 1.0.0, a fix is a patch, a
+feature minor and a breaking change major. A pull
 request that changes nothing users notice (docs, CI, tests) adds an empty one with
 `mise run changeset --empty`. CI fails a pull request without one. Each pull request adds its own file,
 so several can be open at once without conflicting over the version or the changelog.
