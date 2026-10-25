@@ -5,6 +5,17 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.2.0
+
+- **Releases come with archives that run Briardr without a checkout.** Each GitHub release now has
+  `briardr-<os>-<arch>.tar.gz` for macOS and Linux on aarch64 and x86_64, with a `SHA256SUMS` file: the
+  server as `bin/briardr`, the web client next to it, and the third-party license notices. Unpack it and run
+  `bin/briardr`; no Git checkout, Bun or Rust needed. The Linux archives need glibc 2.39 or newer (Ubuntu
+  24.04 and later). Making and building plugins still needs a checkout of the same version. ([#5](https://github.com/ChrisSku/briardr/pull/5))
+- **An update no longer reloads the page over a note this device couldn't keep a copy of.** When storage is
+  full, text pasted or dictated into a note in one go now holds the update until the note is saved, as
+  typing already did. ([#4](https://github.com/ChrisSku/briardr/pull/4))
+
 ## 0.1.2
 
 - **Sheets are no longer clipped in iOS Safari** when opened inside a scrolling screen; on Workspaces the

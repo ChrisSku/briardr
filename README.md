@@ -71,7 +71,7 @@ Enable [Tailscale HTTPS certificates](https://tailscale.com/docs/how-to/set-up-h
 and check that `tailscale status --json` works in your terminal.
 
 ```sh
-git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git
+git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git
 cd briardr
 mise trust
 mise install
@@ -97,7 +97,7 @@ the Home Screen first and pair inside the installed app**, then turn on notifica
 As a non-root user with sudo, on Ubuntu 24.04 or 26.04 LTS (x86_64 or aarch64):
 
 ```sh
-git clone --branch v0.1.2 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.2.0 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex
