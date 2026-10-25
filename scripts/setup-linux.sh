@@ -116,6 +116,7 @@ herdr_path() {
   if [ "$(basename "$(readlink -f "$p")")" = mise ]; then (cd "$HOME" && "$(mise_bin)" which herdr); else readlink -f "$p"; fi
 }
 herdr_version() { "$1" --version 2>/dev/null | awk '{print $2}'; }
+herdr_tested() { [ -n "$1" ] && [[ " $HERDR_TESTED " == *" $1 "* ]]; }
 herdr_running() { "$1" status 2>/dev/null | sed -n '/^server:/,/^$/p' | grep -q 'status: running'; }
 pkg_installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'; }
 sudo_ok() { sudo -n true 2>/dev/null; }
@@ -415,7 +416,7 @@ check() {
   if [ -z "$h" ]; then info "herdr $HERDR_VERSION: will be installed in $LOCAL_BIN"
   else
     local hv; hv=$(herdr_version "$h")
-    if [ "$hv" = "$HERDR_VERSION" ]; then ok "herdr $hv ($h)"; else warn "herdr $hv at $h; the tested version is $HERDR_VERSION. Left as it is."; fi
+    if herdr_tested "$hv"; then ok "herdr $hv ($h)"; else warn "herdr $hv at $h; tested: $HERDR_TESTED. Left as it is."; fi
     if herdr_running "$h"; then ok "Herdr server running"; else info "Herdr server not running (the briardr-herdr service starts it)"; fi
   fi
 
@@ -581,7 +582,7 @@ install_herdr() {
   local h; h=$(herdr_path)
   if [ -n "$h" ]; then
     local hv; hv=$(herdr_version "$h")
-    if [ "$hv" = "$HERDR_VERSION" ]; then ok "herdr $hv ($h)"; else warn "herdr $hv at $h (tested: $HERDR_VERSION). Not changed: upgrading Herdr can restart live agents."; fi
+    if herdr_tested "$hv"; then ok "herdr $hv ($h)"; else warn "herdr $hv at $h (tested: $HERDR_TESTED). Not changed: upgrading Herdr can restart live agents."; fi
     HERDR=$h
     return
   fi

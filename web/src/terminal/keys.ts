@@ -2,6 +2,7 @@
 // Herdr encodes named keys for the program's current mode (e.g. application cursor keys), so
 // arrows and chords are sent by name; Home/End/PageUp/PageDown/Delete/Insert use standard sequences.
 // Command is sent as Herdr's `super` modifier (the kitty keyboard protocol, e.g. ⌘A = CSI 97;9u).
+// Herdr 0.9.4 and newer drop it, like terminals do, for a program that turned on no keyboard protocol.
 import { state } from '../reactive.svelte.ts';
 
 export type Mod = 'ctrl' | 'alt' | 'shift' | 'super';

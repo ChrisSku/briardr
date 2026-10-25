@@ -66,9 +66,10 @@ async function openTarget(page: Page) {
   await page.waitForSelector('[data-ownership=controlling]', { timeout: 10_000 });
 }
 
-/** Start the byte-echo program in the pane (from the API side, not the UI under test). */
-async function startEcho() {
-  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho}`);
+/** Start the byte-echo program in the pane (from the API side, not the UI under test); `--kitty` turns
+ *  on the kitty keyboard protocol in it. */
+async function startEcho(mode: '' | '--kitty' = '') {
+  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho} ${mode}`);
   for (let i = 0; i < 30; i++) {
     if ((await paneText('recent', 10)).includes('READY')) return;
     await sleep(100);
@@ -141,7 +142,7 @@ describe('terminal input (iPhone)', () => {
     await ctx.close();
   });
   // Each test gets its own echo program, so no test depends on what an earlier one typed.
-  beforeEach(startEcho);
+  beforeEach(() => startEcho());
   // These tests share one page: close anything a test (or its failure) left open, so it can't block
   // the next one.
   afterEach(async () => {
@@ -173,13 +174,16 @@ describe('terminal input (iPhone)', () => {
   });
 
   test('Command reaches the program as a super chord', async () => {
+    // Herdr 0.9.4 and newer send super chords only to a program that turned on a keyboard protocol.
+    await stopEcho();
+    await startEcho('--kitty');
     await page.getByRole('button', { name: 'Command', exact: true }).click();
     await page.locator('.term-host').click();
     await page.keyboard.type('a');
     await expectBytes(hex('\x1b[97;9u')); // kitty protocol: a, modifiers 1 + super(8)
     await page.getByRole('button', { name: 'Command', exact: true }).click();
     await page.getByRole('button', { name: 'esc (Escape)', exact: true }).click();
-    await expectBytes(hex('\x1b[27;9;27~'));
+    await expectBytes(hex('\x1b[27;9u'));
   });
 
   test('Jump opens under the header, and its field stays put while the list shrinks', async () => {
