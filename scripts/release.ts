@@ -175,8 +175,9 @@ function changeset(base: string) {
   **What changed, as one bold sentence.** Then the detail someone upgrading needs, wrapped at about 105
   columns. It becomes this pull request's CHANGELOG.md entry.
 
-patch fixes something; minor adds something or changes setup or behavior. When nothing users notice
-changes (docs, CI, tests), add an empty one instead: mise run changeset --empty
+Until 1.0.0, patch is for fixes and new features, minor for breaking changes (an upgrade that makes people
+change their setup, configuration or pairing); from 1.0.0, patch fixes, minor adds, major breaks. When
+nothing users notice changes (docs, CI, tests), add an empty one instead: mise run changeset --empty
 More in .changeset/README.md. Don't run \`changeset add\` without --empty: it asks questions.`);
 }
 
