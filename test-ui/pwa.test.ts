@@ -593,9 +593,13 @@ describe('offline readiness and local work', () => {
     await page.goto(proxy.base + '/settings/install');
     await page.locator('#set-install').getByText('Briardr can’t open offline yet').waitFor();
     serve(build);
-    await page.goto(proxy.base + '/settings/diagnostics');
-    await page.getByRole('button', { name: 'Repair offline app' }).click();
-    await readiness(page).getByText('Ready.').waitFor({ timeout: 30_000 });
+    // Repair from a new page: this one, on the broken build, may reload into the good one by itself (the
+    // service worker installs it and tells the page), which would interrupt navigating it.
+    await page.close();
+    const fresh = await ctx.newPage();
+    await fresh.goto(proxy.base + '/settings/diagnostics');
+    await fresh.getByRole('button', { name: 'Repair offline app' }).click();
+    await readiness(fresh).getByText('Ready.').waitFor({ timeout: 30_000 });
   });
 
   test('cached terminal screens are kept for recent streams only (30 days, at most 100)', async () => {
