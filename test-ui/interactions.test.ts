@@ -256,6 +256,34 @@ describe('terminal input (iPhone)', () => {
     }
   });
 
+  test('the on-screen keyboard moves the terminal up only as far as its content needs', async () => {
+    // A cleared screen with the echo program's READY at the top: the keyboard covers only blank rows,
+    // so the prompt stays where it was.
+    const shift = page.locator('.term-shift');
+    const before = (await shift.boundingBox())!.y;
+    await showKeyboard(page, 300);
+    try {
+      await aboveKeyboard(page, 300, { 'key bar': page.locator('.keybar-wrap') });
+      assert.equal((await shift.boundingBox())!.y, before);
+      // Output that fills the screen leaves the shell's prompt on the last row: the screen sits on the
+      // key bar.
+      await stopEcho();
+      herdr('pane', 'run', ws.pane, 'clear; seq 1 200');
+      await page.waitForFunction(() => {
+        const screen = document.querySelector('.term-shift')!.getBoundingClientRect();
+        return Math.abs(screen.bottom - document.querySelector('.keybar-wrap')!.getBoundingClientRect().top) < 1;
+      }, undefined, { polling: 100 });
+      // A full screen with the cursor at the top (an editor on its first line): the cursor stays in
+      // view, so the screen moves up by a row at most, not by the keyboard's height. (No clear: an empty
+      // screen on the way would pass too.)
+      herdr('pane', 'run', ws.pane, `seq 1 200; printf '\\033[H'`);
+      await page.waitForFunction((y) => document.querySelector('.term-shift')!.getBoundingClientRect().top > y - 60, before, { polling: 100 });
+    } finally {
+      await showKeyboard(page, 0);
+      await startEcho(); // the shell has the pane; afterEach stops the echo program
+    }
+  });
+
   test('tapping the stream name, or the space after it, opens Jump', async () => {
     const isOpen = () => page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Search streams');
     const closed = () => page.locator('.sheet.jump').waitFor({ state: 'detached' });
