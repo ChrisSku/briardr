@@ -4,25 +4,42 @@
 # and packages the release archives for every platform, macOS ones on macOS (package.yml).
 # Mac-only integrations (power, dictation, Keychain) are covered by stubbed tests or skipped here.
 # When they pass on main, the release workflow versions and releases the changesets the merge brought.
+# The "Version X.Y.Z" commits it pushes only check the version (the version job): they change nothing
+# else, the merge before each one ran everything, and the release run packages them.
 # Actions are pinned to commits; the comment names the release each one is.
 name: linux
 
+# Each pull request runs once, as pull_request (its branch merged into main), not again for the push to
+# its branch; a branch without a pull request isn't checked until it has one. Pushes run on main only.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A newer push to a pull request cancels the run it replaces. Each commit on main runs in a group of its
+# own, so none of them is cancelled or held back: the release workflow reads every one.
+concurrency:
+  group: linux-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    if: github.actor != 'briardr-release[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1; Bun and Rust at the versions pinned in mise.toml
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2; the server's dependencies, built and saved on main
+        with:
+          workspaces: server
+          cache-bin: false # it only holds the rustup commands mise sets up
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: bun install --frozen-lockfile
       - run: bun scripts/release.ts check # the version agrees across Cargo, package.json, CHANGELOG.md and the install docs
@@ -62,4 +79,19 @@ jobs:
           mise run test:ui
 
   package:
+    if: github.actor != 'briardr-release[bot]'
     uses: ./.github/workflows/package.yml
+
+  # A run whose jobs are all skipped counts as skipped, not passed, and the release workflow only follows
+  # passed runs: it needs the one for a version commit to release that version if its own run failed.
+  version:
+    if: github.actor == 'briardr-release[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+        with:
+          install_args: bun
+      - run: bun install --frozen-lockfile
+      - run: bun scripts/release.ts check

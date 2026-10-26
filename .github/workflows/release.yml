@@ -6,7 +6,7 @@
 # - The same run releases it: the commit is tagged vX.Y.Z right away, since the install instructions it
 #   pushed clone the tag; then the archives that run Briardr without a checkout (scripts/package.ts) are
 #   built on each platform, and the release is published with them, its notes the version's CHANGELOG.md
-#   section. The Linux checks run on that commit afterwards; it only changes the version.
+#   section. The Linux checks on that commit afterwards only check the version, which is all it changes.
 # - Every run first releases the version on main if it has no release yet (its run failed after the
 #   push), at its "Version X.Y.Z" commit, so a newer version never skips it. A version pushed by that same
 #   run is tagged, and released by the run for its own commit.
