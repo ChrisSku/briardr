@@ -43,6 +43,18 @@ fn pair_message(error: &PairError, host: &str) -> String {
     }
 }
 
+/// The same authenticated startup data for an existing session and a newly paired device.
+async fn session_info(app: &Arc<App>, device: &crate::auth::Device) -> Result<Value, ApiError> {
+    Ok(json!({
+        "device": {"id": device.id, "name": device.name},
+        "version": VERSION,
+        "protocol": PROTOCOL,
+        "instanceId": app.instance_id,
+        "host": caps_json(&app.d.caps),
+        "plugins": super::routes_plugins::plugin_list(app).await?,
+    }))
+}
+
 pub(super) fn register(r: &mut Routes) {
     // --- session & pairing (public) ---
     // The host's kind (Mac or server) lets the pairing screen use the right words before sign-in.
@@ -65,15 +77,7 @@ pub(super) fn register(r: &mut Routes) {
                     &[],
                 ));
             };
-            let device = json!({"id": device.id, "name": device.name});
-            ok(json!({
-                "device": device,
-                "version": VERSION,
-                "protocol": PROTOCOL,
-                "instanceId": app.instance_id,
-                "host": caps_json(&app.d.caps),
-                "plugins": super::routes_plugins::plugin_list(&app).await?,
-            }))
+            ok(session_info(&app, device).await?)
         },
     );
 
@@ -119,7 +123,7 @@ pub(super) fn register(r: &mut Routes) {
             }
             Ok((device, cookie)) => Ok(send(
                 200,
-                &json!({"device": {"id": device.id, "name": device.name}}),
+                &session_info(&app, &device).await?,
                 &[("set-cookie", app.d.auth.set_cookie_header(&cookie))],
             )),
         }
@@ -133,7 +137,9 @@ pub(super) fn register(r: &mut Routes) {
             if let Some(device) = &ctx.device {
                 let id = device.id.clone();
                 let auth = app.d.auth.clone();
-                blocking(move || auth.revoke(&id)).await?;
+                blocking(move || auth.revoke(&id))
+                    .await?
+                    .map_err(|_| ApiError::Internal)?;
             }
             Ok(send(
                 200,
@@ -175,7 +181,9 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let id = ctx.param("id").to_string();
             let auth = app.d.auth.clone();
-            let removed = blocking(move || auth.revoke(&id)).await?;
+            let removed = blocking(move || auth.revoke(&id))
+                .await?
+                .map_err(|_| ApiError::Internal)?;
             Ok(send(
                 if removed { 200 } else { 404 },
                 &json!({"ok": removed}),

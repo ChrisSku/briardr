@@ -94,6 +94,8 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
             let (auth, id) = (app.d.auth.clone(), s("id"));
             json!(tokio::task::spawn_blocking(move || auth.revoke(&id))
                 .await
+                .ok()
+                .and_then(Result::ok)
                 .unwrap_or(false))
         }
         (Method::POST, "/herdr/refresh") => json!({"ok": app.d.herdr.refresh().await.is_ok()}),

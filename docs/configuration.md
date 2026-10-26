@@ -25,6 +25,9 @@ Use `--dry-run` to inspect a proposed change. Restart the server after deploymen
 Linux installations should use `scripts/setup-linux.sh` for access-mode changes so the services,
 firewall, and proxy agree with Briardr's configuration.
 
+Changes made through the app's Settings are saved one at a time, so simultaneous changes from different
+devices are kept. A failed save leaves the running configuration unchanged.
+
 | Setting | Purpose |
 | --- | --- |
 | `herdrPath`, `herdrSession` | Herdr executable and local session. An empty session uses Herdr's default. The path is also editable in Settings. |

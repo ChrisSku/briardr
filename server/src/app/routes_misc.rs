@@ -377,6 +377,7 @@ pub(super) fn register(r: &mut Routes) {
             }
             let b = json_body(&mut ctx, 4096).await?;
             let on = b.get("on").is_some_and(js_truthy);
+            let _change = app.d.cfg.lock_changes().await;
             let mut cfg = app.cfg();
             cfg.power.keep_awake = on;
             let cell = app.d.cfg.clone();
@@ -436,7 +437,9 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let _change = app.d.cfg.lock_changes().await;
             let mut cfg = app.cfg();
+            let mut retarget = None;
             if let Some(raw) = b.get("herdrPath").and_then(Value::as_str) {
                 let path = raw.trim().to_string();
                 if !Path::new(&path).is_absolute() {
@@ -455,7 +458,7 @@ pub(super) fn register(r: &mut Routes) {
                     return Err(action_err(400, "not_found", "No executable at that path."));
                 }
                 cfg.herdr_path = path;
-                app.d.herdr.retarget(target).await;
+                retarget = Some(target);
             }
             if let Some(n) = b.get("notifications").filter(|v| v.is_object()) {
                 if bool_field(n, "lowBattery") == Some(true) && !app.d.caps.battery {
@@ -491,6 +494,9 @@ pub(super) fn register(r: &mut Routes) {
             }
             let cell = app.d.cfg.clone();
             blocking(move || cell.set(cfg)).await??;
+            if let Some(target) = retarget {
+                app.d.herdr.retarget(target).await;
+            }
             ok(json!({"ok": true}))
         },
     );

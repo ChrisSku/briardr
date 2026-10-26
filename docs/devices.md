@@ -114,6 +114,8 @@ days (at most 100).
 Revoke a lost device in Settings → Devices, or run `briardr devices` followed by
 `briardr revoke DEVICE_ID` on the host. For managed WireGuard, also run
 `scripts/setup-linux.sh wg-remove NAME`. Deleting the Home Screen icon does not revoke the device.
+If Briardr cannot save the revocation, it reports an error and the device keeps access. Restore write
+access to the data directory (or free disk space), then retry the revocation.
 
 Changing the server's hostname, scheme, or port creates a different browser origin. Install again,
 pair again, and enable notifications there; remove the old installation and revoke unused devices.

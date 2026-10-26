@@ -5,7 +5,6 @@ use std::io::{self, Write};
 use std::net::IpAddr;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -525,12 +524,9 @@ pub fn write_file_atomic(file: &Path, data: &[u8], mode: u32) -> Result<(), Conf
     let name = file.file_name().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "config path has no file name")
     })?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+    let nonce = hex::encode(rand::random::<[u8; 16]>());
     let tmp = dir.join(format!(
-        ".{}.{}.{now}.tmp",
+        ".{}.{}.{nonce}.tmp",
         name.to_string_lossy(),
         std::process::id()
     ));
@@ -890,6 +886,29 @@ mod tests {
             .unwrap_or(0);
         assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn atomic_writes_to_the_same_file_do_not_collide_or_tear() {
+        let root = Scratch::new("atomic-concurrent");
+        let target = root.join("state.json");
+        let barrier = std::sync::Barrier::new(16);
+        std::thread::scope(|scope| {
+            for i in 0..16u8 {
+                let (target, barrier) = (&target, &barrier);
+                scope.spawn(move || {
+                    let data = vec![b'A' + i; 4096 + usize::from(i)];
+                    barrier.wait();
+                    for _ in 0..8 {
+                        write_file_atomic(target, &data, 0o600).unwrap();
+                    }
+                });
+            }
+        });
+        let data = fs::read(target).unwrap();
+        assert_eq!(data.len(), 4096 + usize::from(data[0] - b'A'));
+        assert!(data.iter().all(|b| *b == data[0]));
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
     }
 
     #[test]
