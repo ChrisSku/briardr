@@ -34,7 +34,7 @@ The name comes from the briard, a shaggy French herding dog. Briardr was called 
 | | In Briardr |
 | --- | --- |
 | **See who needs you** | Agents grouped by Needs you, Working and Finished across every workspace, with a badge on the app icon. Peek at a live terminal without taking control or resizing it. |
-| **Take the reins** | Open a terminal, answer approvals, send prompts, paste text, upload files and images, and use a touch-friendly key bar. Nothing you type is replayed after a reconnect. Create workspaces, projects, and Claude Code, Codex or shell streams. |
+| **Take the reins** | Open a terminal, answer approvals, send prompts, paste text, upload files and images, and use a touch-friendly key bar whose keys you choose, per app if you like. Nothing you type is replayed after a reconnect. Create workspaces, projects, and Claude Code, Codex or shell streams. |
 | **Explore the project** | Browse files, search paths, read highlighted code, and collect lines from several files into a question for the agent. Deleting files and folders asks first. |
 | **Review the work** | Read the Git diff of every stream and mark files as reviewed. Changes uses read-only Git commands and never takes Git's lock. |
 | **Keep context close** | Read the project's Markdown docs and keep notes with images next to a stream; send them to its terminal. |

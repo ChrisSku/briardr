@@ -32,7 +32,6 @@
     class={['pad', active && 'pad-' + active]}
     aria-hidden="true"
     onpointerdown={(e) => {
-      e.preventDefault();
       capture(e);
       start = { x: e.clientX, y: e.clientY };
     }}

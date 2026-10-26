@@ -27,6 +27,7 @@
   import { api, ApiError } from '../../api.ts';
   import { Recorder } from '../../media.ts';
   import { hardwareKeyboard, prefs, toast, topOverlay } from '../../store.ts';
+  import { appOf } from '../../terminal/barkeys.ts';
   import { logicalLineAt, wordAround } from '../../terminal/links.ts';
   import type { Outgoing } from '../../terminal/keys.ts';
   import type { Stream } from '../../types.ts';
@@ -371,9 +372,10 @@
     {/if}
   </div>
   {#if showKeyBar}
-    <div class="keybar-wrap" bind:this={wrap}>
+    <div class={['keybar-wrap', kb.current && 'is-on-keyboard']} bind:this={wrap}>
       <KeyBar
         enabled={controlling}
+        app={appOf(stream)}
         keyboardOpen={kb.current > 0}
         onKeyboard={() => (kb.current ? ctl.blur() : ctl.focus())}
         send={(o: Outgoing) => ctl.input(o)}

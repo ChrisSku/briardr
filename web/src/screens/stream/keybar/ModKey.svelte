@@ -15,7 +15,6 @@
   aria-pressed={state !== 'off'}
   aria-label="{name}{state === 'locked' ? ', locked' : state === 'once' ? ', next key' : state === 'held' ? ', held' : ''}"
   onpointerdown={(e) => {
-    e.preventDefault();
     capture(e);
     holdTimer = window.setTimeout(() => {
       holdTimer = null;

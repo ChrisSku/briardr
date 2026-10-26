@@ -26,7 +26,6 @@
   aria-label="Delete (Backspace). Hold to keep deleting."
   title="Delete (hold to keep deleting)"
   onpointerdown={(e) => {
-    e.preventDefault(); // keep the on-screen keyboard up
     capture(e);
     stop();
     onPress();

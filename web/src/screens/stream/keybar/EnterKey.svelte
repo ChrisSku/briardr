@@ -24,7 +24,6 @@
   title={canDictate ? 'Enter (hold to dictate)' : 'Enter'}
   style:--level={dictating ? String(Math.min(1, level * 3)) : undefined}
   onpointerdown={(e) => {
-    e.preventDefault();
     capture(e);
     holding = false;
     pressed = true;
