@@ -256,30 +256,30 @@ describe('terminal input (iPhone)', () => {
     }
   });
 
-  test('the on-screen keyboard moves the terminal up only as far as its content needs', async () => {
-    // A cleared screen with the echo program's READY at the top: the keyboard covers only blank rows,
-    // so the prompt stays where it was.
-    const shift = page.locator('.term-shift');
-    const before = (await shift.boundingBox())!.y;
+  test('the on-screen keyboard resizes the pane to the rows above it, so a full-screen program fits', async () => {
+    const size = () => page.evaluate(() => {
+      const { term } = (document.querySelector('.term-host') as any).briardrTerminal;
+      return { cols: term.cols as number, rows: term.rows as number };
+    });
+    const full = await size();
     await showKeyboard(page, 300);
     try {
       await aboveKeyboard(page, 300, { 'key bar': page.locator('.keybar-wrap') });
-      assert.equal((await shift.boundingBox())!.y, before);
-      // Output that fills the screen leaves the shell's prompt on the last row: the screen sits on the
-      // key bar.
+      await waitUntil('the pane to take the rows above the keyboard', async () => (await size()).rows < full.rows);
+      // All of it is in view: its top under the tabs, its bottom on the key bar.
+      const screen = (await page.locator('.term-shift').boundingBox())!;
+      const host = (await page.locator('.term-host').boundingBox())!;
+      const bar = (await page.locator('.keybar-wrap').boundingBox())!;
+      assert.ok(screen.y >= host.y, `the screen starts at ${screen.y}, above the terminal at ${host.y}`);
+      assert.ok(Math.abs(screen.y + screen.height - bar.y) < 4, `the screen ends at ${screen.y + screen.height}, the key bar starts at ${bar.y}`);
+      // The program sees the new size.
+      const { cols, rows } = await size();
       await stopEcho();
-      herdr('pane', 'run', ws.pane, 'clear; seq 1 200');
-      await page.waitForFunction(() => {
-        const screen = document.querySelector('.term-shift')!.getBoundingClientRect();
-        return Math.abs(screen.bottom - document.querySelector('.keybar-wrap')!.getBoundingClientRect().top) < 1;
-      }, undefined, { polling: 100 });
-      // A full screen with the cursor at the top (an editor on its first line): the cursor stays in
-      // view, so the screen moves up by a row at most, not by the keyboard's height. (No clear: an empty
-      // screen on the way would pass too.)
-      herdr('pane', 'run', ws.pane, `seq 1 200; printf '\\033[H'`);
-      await page.waitForFunction((y) => document.querySelector('.term-shift')!.getBoundingClientRect().top > y - 60, before, { polling: 100 });
+      herdr('pane', 'run', ws.pane, 'clear; stty size');
+      await waitUntil(`stty size to print ${rows} ${cols}`, async () => (await paneText('recent', 10)).includes(`${rows} ${cols}`), 10_000);
     } finally {
       await showKeyboard(page, 0);
+      await waitUntil('the pane to take its full size back', async () => (await size()).rows === full.rows);
       await startEcho(); // the shell has the pane; afterEach stops the echo program
     }
   });

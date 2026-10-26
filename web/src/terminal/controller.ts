@@ -174,7 +174,7 @@ export class TerminalController {
     return { w: this.opts.fontSize * 0.6, h: this.opts.fontSize * 1.12 * 1.2 };
   }
 
-  /** Columns and rows that fit the visible area (the on-screen keyboard is excluded on purpose). */
+  /** Columns and rows that fit the visible area (above the on-screen keyboard while it's up). */
   fit(): { cols: number; rows: number } {
     if (!this.host) return this.desired;
     const { w, h } = this.cell();
@@ -193,7 +193,7 @@ export class TerminalController {
       if (!r || r.width < 80 || r.height < 60) return;
       const want = this.fit();
       this.desired = want;
-      // Only send when the layout really changed (rotation, window resize), never for the keyboard.
+      // Rotation, a window resize, or the on-screen keyboard opening or closing.
       if (this.status.value.ownership === 'controlling') this.sendResize(want.cols, want.rows);
     }, RESIZE_DEBOUNCE);
   }
