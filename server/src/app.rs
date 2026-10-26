@@ -538,6 +538,7 @@ fn regex_source(pattern: &str) -> String {
 pub struct ConfigCell {
     cfg: RwLock<BriardrConfig>,
     paths: Paths,
+    changes: tokio::sync::Mutex<()>,
 }
 
 impl ConfigCell {
@@ -545,16 +546,22 @@ impl ConfigCell {
         ConfigCell {
             cfg: RwLock::new(cfg),
             paths,
+            changes: tokio::sync::Mutex::new(()),
         }
     }
     pub fn get(&self) -> BriardrConfig {
         self.cfg.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
-    /// Replaces and saves. A failed save still keeps the new config in memory;
-    /// the caller reports the error.
+    /// Serializes a complete read/validate/save transaction, including asynchronous validation.
+    pub async fn lock_changes(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.changes.lock().await
+    }
+    /// Saves before publishing, so a failed write leaves the current configuration intact.
     pub fn set(&self, c: BriardrConfig) -> Result<(), ApiError> {
-        *self.cfg.write().unwrap_or_else(|e| e.into_inner()) = c.clone();
-        save_config(&self.paths, &c).map_err(|_| ApiError::Internal)
+        let mut cfg = self.cfg.write().unwrap_or_else(|e| e.into_inner());
+        save_config(&self.paths, &c).map_err(|_| ApiError::Internal)?;
+        *cfg = c;
+        Ok(())
     }
     pub fn paths(&self) -> &Paths {
         &self.paths

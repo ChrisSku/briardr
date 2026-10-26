@@ -38,12 +38,15 @@
   let base = draft?.base ?? cached?.revision ?? 0;
   const createdAt = draft?.createdAt ?? cached?.createdAt ?? Date.now();
   let saving = false;
+  // A read belongs to the local state it started with. Typing, saving, and newer reads supersede it.
+  let refreshGeneration = 0;
   let timer: number | null = null;
   let area: HTMLTextAreaElement | undefined = $state();
   let picker: HTMLInputElement;
   const kb = keyboardInset(); // keep the editor above the on-screen keyboard
 
   function accept(n: Note) {
+    refreshGeneration++;
     server = n;
     cacheNote(sid, nid, n);
     base = n.revision;
@@ -105,6 +108,7 @@
   }
 
   function onInput(v: string) {
+    refreshGeneration++;
     text = v;
     keepDraft(v);
     if (status !== 'conflict') {
@@ -115,9 +119,11 @@
 
   // Load (or refresh) from the Mac. Never replaces unsaved local edits.
   async function refresh() {
+    const generation = ++refreshGeneration;
     const hasDraft = !!load(draftKey(sid, nid));
     try {
       const r = await briardr.core<{ note: Note }>('GET', path);
+      if (generation !== refreshGeneration || saving) return;
       if (!hasDraft) {
         accept(r.note);
         text = r.note.text;
@@ -130,6 +136,7 @@
         save();
       }
     } catch (e) {
+      if (generation !== refreshGeneration || saving) return;
       if (e instanceof ApiError && e.code === 'note_gone') {
         if (base === 0) {
           if (hasDraft) save(); // a new note written while offline
@@ -161,6 +168,7 @@
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('online', onOnline);
     return () => {
+      refreshGeneration++;
       off();
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('online', onOnline);
@@ -175,6 +183,7 @@
   });
 
   function resolve(keep: 'mine' | 'theirs') {
+    refreshGeneration++;
     if (keep === 'theirs') {
       dropDraft();
       if (!theirs) {

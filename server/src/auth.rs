@@ -189,19 +189,17 @@ impl Auth {
         let cookie = format!("{}.{}", device.id, token);
         Ok((device, cookie))
     }
-    pub fn revoke(&self, id: &str) -> bool {
+    pub fn revoke(&self, id: &str) -> Result<bool, ConfigError> {
         let mut devices = self.lock();
         let kept: Vec<Device> = devices.iter().filter(|d| d.id != id).cloned().collect();
         if kept.len() == devices.len() {
-            return false;
+            return Ok(false);
         }
         // Keep the device if the change can't be saved, so the file and memory still agree.
-        if save_devices(&self.devices_file, &kept).is_err() {
-            return false;
-        }
+        save_devices(&self.devices_file, &kept)?;
         *devices = kept;
         let _ = self.revoked.send(id.to_string());
-        true
+        Ok(true)
     }
     /// Device for the request's cookie, if any.
     pub fn authenticate(&self, cookie_header: Option<&str>) -> Option<Device> {
@@ -455,8 +453,8 @@ mod tests {
         assert_eq!(auth.list().len(), 1);
         assert_eq!(auth.list()[0].id, device.id);
 
-        assert!(auth.revoke(&device.id));
-        assert!(!auth.revoke(&device.id));
+        assert!(auth.revoke(&device.id).unwrap());
+        assert!(!auth.revoke(&device.id).unwrap());
         assert_eq!(auth.authenticate(Some(&header)), None);
         assert_eq!(revoked.try_recv().ok(), Some(device.id.clone()));
         let _ = fs::remove_dir_all(&dir);

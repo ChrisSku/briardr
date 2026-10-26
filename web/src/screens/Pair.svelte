@@ -3,12 +3,9 @@
   import { hostNoun, isMac, theHost } from '../host.ts';
   import { api, ApiError } from '../api.ts';
   import { record } from '../diag.ts';
-  import { showAttentionBadge } from '../badge.svelte.ts';
   import { installSuggestion, standalone } from '../install.ts';
-  import { watchPush } from '../push.ts';
-  import { liveConn } from '../live.ts';
   import { navigate } from '../router.ts';
-  import { host, mac, session } from '../store.ts';
+  import { acceptSession, startSession } from '../session.ts';
 
   let { reason }: { reason?: string } = $props();
 
@@ -33,16 +30,10 @@
       const r = await api('POST', '/api/pair', { code, name });
       record('paired', {});
       if (!standalone && installSuggestion.value !== 'dismissed') installSuggestion.value = 'pending';
-      session.value = { status: 'signed_in', device: r.device };
+      acceptSession(r);
       // Start the live session in place; no reload needed.
+      startSession();
       navigate({ name: 'agents' }, { replace: true });
-      liveConn.start();
-      watchPush();
-      showAttentionBadge();
-      api('GET', '/api/mac').then((m) => {
-        mac.value = m.mac;
-        if (m.host) host.value = m.host;
-      }, () => {});
     } catch (x) {
       error = x instanceof ApiError ? x.message : `Couldn’t reach ${theHost()}.`;
     } finally {

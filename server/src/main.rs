@@ -294,7 +294,8 @@ async fn devices(ctx: &Ctx) -> CliResult {
 async fn revoke(ctx: &Ctx, rest: &[String]) -> CliResult {
     let id = rest.first().cloned().unwrap_or_default();
     let paths = ctx.paths.clone();
-    let removed = blocking(move || Auth::new(paths.devices(), paths.pairing()).revoke(&id)).await?;
+    let removed =
+        blocking(move || Auth::new(paths.devices(), paths.pairing()).revoke(&id)).await??;
     println!(
         "{}",
         if removed {
