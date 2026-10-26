@@ -4,8 +4,9 @@
 
 Install Git, [mise](https://mise.jdx.dev/getting-started.html), a C compiler/toolchain, and
 [Herdr](https://herdr.dev/docs/install/). On macOS, install Apple's Command Line Tools. On Ubuntu,
-install `build-essential`. Herdr 0.9.3 is the deployment/test baseline pinned in
-[`deploy/versions.env`](../deploy/versions.env); newer versions need compatibility testing.
+install `build-essential`. Briardr is tested with Herdr 0.9.3, 0.9.4 and 0.9.5 (`HERDR_TESTED` in
+[`deploy/versions.env`](../deploy/versions.env)); `briardr setup`, the Linux helper and CI install the
+pinned `HERDR_VERSION`, 0.9.5. A newer Herdr needs [testing](#test-another-herdr-version) first.
 
 ```sh
 git clone https://github.com/ChrisSku/briardr.git
@@ -100,6 +101,27 @@ repository names, keys, or sign-in prompts for a public issue or README.
 The automated browser checks focus on WebKit at iPhone, iPad, and Mac sizes. They cannot prove
 physical-device keyboard behavior, OS certificate installation, or real Web Push delivery. Document
 the OS, browser, network mode, and result when doing device testing.
+
+## Test another Herdr version
+
+The suites run the `herdr` on PATH. To run them against another Herdr release without touching your
+own sessions or plugins, put that release first on PATH and give it its own config folder. Keep the
+folder's path short: Herdr's sockets live in it, and macOS limits socket paths to 104 bytes.
+
+```sh
+v=0.9.5; d=~/.cache/herdr-$v
+mkdir -p $d/bin
+# herdr-macos-aarch64, herdr-macos-x86_64, herdr-linux-aarch64 or herdr-linux-x86_64
+curl -fsSL https://github.com/herdrdev/herdr/releases/download/v$v/herdr-macos-aarch64 -o $d/bin/herdr
+chmod +x $d/bin/herdr
+PATH=$d/bin:$PATH XDG_CONFIG_HOME=$d mise run test
+PATH=$d/bin:$PATH XDG_CONFIG_HOME=$d mise run test:ui
+```
+
+When both pass, add the version to `HERDR_TESTED` in [`deploy/versions.env`](../deploy/versions.env).
+To install it too, set `HERDR_VERSION` and the four `HERDR_SHA256_*` checksums, which GitHub lists for
+each release file: `gh api repos/herdrdev/herdr/releases/tags/v$v --jq '.assets[] | .name + " " + .digest'`.
+CI then tests it on Linux.
 
 ## Test hooks and deployment smoke tests
 

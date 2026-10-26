@@ -66,9 +66,10 @@ async function openTarget(page: Page) {
   await page.waitForSelector('[data-ownership=controlling]', { timeout: 10_000 });
 }
 
-/** Start the byte-echo program in the pane (from the API side, not the UI under test). */
-async function startEcho() {
-  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho}`);
+/** Start the byte-echo program in the pane (from the API side, not the UI under test); `--kitty` turns
+ *  on the kitty keyboard protocol in it. */
+async function startEcho(mode: '' | '--kitty' = '') {
+  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho} ${mode}`);
   for (let i = 0; i < 30; i++) {
     if ((await paneText('recent', 10)).includes('READY')) return;
     await sleep(100);
@@ -112,6 +113,34 @@ async function expectBytes(hex: string, ms = WAIT) {
 }
 const hex = (s: string) => Buffer.from(s, 'latin1').toString('hex');
 
+/** The screen point `offset` cells into `needle` in the page's terminal, once it shows there; lines with the
+ *  typed command (`echo`, `printf`) don't count. Rendering is WebGL, so there's no text in the DOM. Run the
+ *  command after the page takes control: a resize after it makes zsh redraw a wrapped prompt over the line
+ *  above it. */
+async function cellOf(page: Page, needle: string, offset = 2): Promise<{ x: number; y: number }> {
+  let pt: { x: number; y: number } | null = null;
+  const find = () =>
+    page.evaluate(
+      ([needle, offset]) => {
+        const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
+        const buf = ctl.term.buffer.active;
+        for (let r = 0; r < ctl.term.rows; r++) {
+          const text = buf.getLine(buf.viewportY + r)?.translateToString(true) || '';
+          const c = text.indexOf(needle);
+          if (c >= 0 && !text.includes('echo') && !text.includes('printf')) {
+            const screen = document.querySelector('.xterm-screen')!.getBoundingClientRect();
+            const cell = ctl.cell();
+            return { x: screen.left + (c + offset) * cell.w, y: screen.top + (r + 0.5) * cell.h };
+          }
+        }
+        return null;
+      },
+      [needle, offset] as const,
+    );
+  await waitUntil(`${needle} in the terminal`, async () => !!(pt = await find()), 10_000);
+  return pt!;
+}
+
 /** Simulates the on-screen keyboard: the visual viewport loses `height` px at the bottom (0 hides it). */
 async function showKeyboard(page: Page, height: number) {
   await page.evaluate((h) => {
@@ -141,7 +170,7 @@ describe('terminal input (iPhone)', () => {
     await ctx.close();
   });
   // Each test gets its own echo program, so no test depends on what an earlier one typed.
-  beforeEach(startEcho);
+  beforeEach(() => startEcho());
   // These tests share one page: close anything a test (or its failure) left open, so it can't block
   // the next one.
   afterEach(async () => {
@@ -173,13 +202,16 @@ describe('terminal input (iPhone)', () => {
   });
 
   test('Command reaches the program as a super chord', async () => {
+    // Herdr 0.9.4 and newer send super chords only to a program that turned on a keyboard protocol.
+    await stopEcho();
+    await startEcho('--kitty');
     await page.getByRole('button', { name: 'Command', exact: true }).click();
     await page.locator('.term-host').click();
     await page.keyboard.type('a');
     await expectBytes(hex('\x1b[97;9u')); // kitty protocol: a, modifiers 1 + super(8)
     await page.getByRole('button', { name: 'Command', exact: true }).click();
     await page.getByRole('button', { name: 'esc (Escape)', exact: true }).click();
-    await expectBytes(hex('\x1b[27;9;27~'));
+    await expectBytes(hex('\x1b[27;9u'));
   });
 
   test('Jump opens under the header, and its field stays put while the list shrinks', async () => {
@@ -518,83 +550,54 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
-  test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined', async () => {
+  test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined; text in a link’s place isn’t one', async () => {
     const opened: string[] = [];
     const a = await device('mac', 'mac-osc8');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
     await a.page.exposeFunction('__briardrOpened', (u: string) => opened.push(u));
     await a.page.addInitScript(() => {
       window.open = ((u: string) => ((window as any).__briardrOpened(String(u)), null)) as any;
     });
     await a.page.reload();
     await a.page.waitForSelector('.count-strip');
-    const long = 'https://example.com/' + 'x'.repeat(150) + '/end';
-    herdr('pane', 'run', ws.pane, `clear; printf '\\e]8;;https://real.example.org/target\\e\\\\click-here\\e]8;;\\e\\\\\\n'; echo ${long}`);
     await openTarget(a.page);
     await a.page.evaluate(() => (window.open = ((u: string) => ((window as any).__briardrOpened(String(u)), null)) as any));
-    await sleep(800);
-    const find = (needle: string, nth = 0) =>
-      a.page.evaluate(
-        ([needle, nth]) => {
-          const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
-          const buf = ctl.term.buffer.active;
-          let seen = 0;
-          for (let r = 0; r < ctl.term.rows; r++) {
-            const text = buf.getLine(buf.viewportY + r)?.translateToString(true) || '';
-            const c = text.indexOf(needle as string);
-            if (c >= 0 && !text.includes('printf') && !text.includes('echo') && seen++ === nth) {
-              const screen = document.querySelector('.xterm-screen')!.getBoundingClientRect();
-              const cell = ctl.cell();
-              return { x: screen.left + (c + 2) * cell.w, y: screen.top + (r + 0.5) * cell.h };
-            }
-          }
-          return null;
-        },
-        [needle, nth] as const,
-      );
-    const p1 = await find('click-here');
-    assert.ok(p1, 'OSC 8 text on screen');
-    await a.page.mouse.move(p1!.x, p1!.y);
+    const long = 'https://example.com/' + 'x'.repeat(150) + '/end';
+    herdr('pane', 'run', ws.pane, `clear; printf '\\e]8;;https://real.example.org/target\\e\\\\click-here\\e]8;;\\e\\\\\\n'; echo ${long}`);
+    // The command's own line is gone once the output shows (it clears the screen first).
+    const p1 = await cellOf(a.page, 'click-here');
+    await a.page.mouse.move(p1.x, p1.y);
     await sleep(200);
-    await a.page.mouse.click(p1!.x, p1!.y);
+    await a.page.mouse.click(p1.x, p1.y);
     await sleep(400);
     assert.deepEqual(opened, ['https://real.example.org/target'], 'opened the hyperlink’s real destination');
     // Click on the wrapped continuation of the long URL: the whole URL opens.
-    const p2 = await find('xxxx/end');
-    assert.ok(p2, 'wrapped tail on screen');
-    await a.page.mouse.move(p2!.x, p2!.y);
+    const p2 = await cellOf(a.page, 'xxxx/end');
+    await a.page.mouse.move(p2.x, p2.y);
     await sleep(200);
-    await a.page.mouse.click(p2!.x, p2!.y);
+    await a.page.mouse.click(p2.x, p2.y);
     await sleep(400);
-    try {
-      assert.equal(opened[1], long);
-    } finally {
-      await a.ctx.close();
-    }
+    assert.equal(opened[1], long);
+    // Text that takes the link's place isn't a link (xterm keeps the old link data in the line).
+    herdr('pane', 'run', ws.pane, 'clear; echo plain words');
+    const p3 = await cellOf(a.page, 'plain');
+    await a.page.mouse.click(p3.x, p3.y, { button: 'right' });
+    await a.page.getByRole('menuitem', { name: 'Select Text…' }).waitFor();
+    assert.equal(await a.page.getByRole('menuitem', { name: 'Open Link' }).count(), 0);
+    await a.page.keyboard.press('Escape');
   });
 
   test('Select Text opens a frozen copy with the touched word selected, and sends nothing', async () => {
     herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
     await sleep(300);
-    herdr('pane', 'run', ws.pane, 'clear; echo alpha bravo charlie');
     const a = await device('mac', 'mac-select');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await openTarget(a.page);
-    await sleep(600);
-    const pt = await a.page.evaluate(() => {
-      const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
-      const buf = ctl.term.buffer.active;
-      for (let r = 0; r < ctl.term.rows; r++) {
-        const text = buf.getLine(buf.viewportY + r)?.translateToString(true) || '';
-        const c = text.indexOf('bravo');
-        if (c >= 0 && !text.includes('echo')) {
-          const screen = document.querySelector('.xterm-screen')!.getBoundingClientRect();
-          return { x: screen.left + (c + 2) * ctl.cell().w, y: screen.top + (r + 0.5) * ctl.cell().h };
-        }
-      }
-      return null;
-    });
+    herdr('pane', 'run', ws.pane, 'clear; echo alpha bravo charlie');
+    const pt = await cellOf(a.page, 'bravo');
+    await sleep(500); // the prompt after it
     const before = await paneText('recent', 5);
-    await a.page.mouse.click(pt!.x, pt!.y, { button: 'right' });
+    await a.page.mouse.click(pt.x, pt.y, { button: 'right' });
     await a.page.getByRole('menuitem', { name: 'Select Text…' }).click();
     const area = a.page.getByLabel('Screen text');
     await area.waitFor();
@@ -664,30 +667,14 @@ describe('agents list, peek, banners and links', () => {
       dev.close();
     });
     const port = (dev.address() as any).port;
-    herdr('pane', 'run', ws.pane, `clear; echo http://localhost:${port}/hello?x=1`);
     const a = await device('mac', 'mac-link');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await openTarget(a.page);
-    await sleep(800);
-    // Find the link's cell in the terminal buffer (rendering is WebGL, so there's no text in the DOM).
-    const pt = await a.page.evaluate((needle) => {
-      const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
-      const buf = ctl.term.buffer.active;
-      for (let r = 0; r < ctl.term.rows; r++) {
-        const text = buf.getLine(buf.viewportY + r)?.translateToString(true) || '';
-        const c = text.indexOf(needle);
-        if (c >= 0 && !text.includes('echo')) {
-          const screen = document.querySelector('.xterm-screen')!.getBoundingClientRect();
-          const cell = ctl.cell();
-          return { x: screen.left + (c + 4) * cell.w, y: screen.top + (r + 0.5) * cell.h };
-        }
-      }
-      return null;
-    }, `localhost:${port}`);
-    assert.ok(pt, 'link found on screen');
-    await a.page.mouse.move(pt!.x, pt!.y);
+    herdr('pane', 'run', ws.pane, `clear; echo http://localhost:${port}/hello?x=1`);
+    const pt = await cellOf(a.page, `localhost:${port}`, 4);
+    await a.page.mouse.move(pt.x, pt.y);
     await sleep(300);
-    await a.page.mouse.click(pt!.x, pt!.y);
+    await a.page.mouse.click(pt.x, pt.y);
     await a.page.waitForURL(/\/preview$/, { timeout: 8000 }).catch(async (e) => {
       await a.page.screenshot({ path: 'test-results/link-failure.png' });
       throw e;
