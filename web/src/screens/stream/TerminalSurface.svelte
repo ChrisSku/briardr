@@ -1,10 +1,10 @@
 <!--
   The live terminal surface.
-  Layout: the terminal is sized to the visible area without the on-screen keyboard. When the keyboard
-  opens, the key bar slides up onto it, and the terminal slides up only as far as its content needs:
-  the last line with text (an agent's input box, a prompt at the bottom) and the cursor stay in view,
-  while a shell prompt near the top stays put. The Mac's terminal is never resized for the keyboard.
-  If the Mac's screen is shorter than the view, it's aligned to the bottom.
+  Layout: the terminal is sized to the visible area. When the on-screen keyboard opens, the surface
+  ends on it: the key bar sits on the keyboard and, while controlling, the pane is resized to the rows
+  above it, so a full-screen program (an agent with its input box at the bottom) lays itself out to
+  fit. Until the new size arrives, the screen stays aligned to the bottom, keeping the input in view.
+  If the Mac's screen is shorter than the view (watching), it's aligned to the bottom too.
 -->
 <script module lang="ts">
   import { record } from '../../diag.ts';
@@ -52,8 +52,8 @@
   let shift: HTMLDivElement;
   let wrap: HTMLDivElement | undefined = $state();
   const kb = keyboardInset();
-  // The key bar's home-indicator padding isn't needed above the keyboard: let it slide behind it so
-  // the bar sits directly on the keyboard. The terminal moves by the same amount.
+  // The key bar's home-indicator padding isn't needed above the keyboard: the surface ends this far
+  // above the bottom, so the bar sits directly on the keyboard and the terminal gets the rest.
   const lift = $derived.by(() => {
     if (!kb.current) return 0;
     const safeBottom = wrap ? parseFloat(getComputedStyle(wrap).paddingBottom) || 0 : 0;
@@ -67,7 +67,6 @@
   const st = $derived(ctl.status.value);
   const controlling = $derived(st.ownership === 'controlling');
   let resized = $state(0); // bumped when the terminal takes a new size (e.g. the Mac's, while watching)
-  let drawn = $state(0); // bumped by output while the keyboard is up: how far the screen moves depends on it
 
   onMount(() => {
     ctl.mount(host, screen);
@@ -97,37 +96,14 @@
     };
   });
 
+  // While watching, the screen has the Mac's size (we never resize it); scale it down to fit.
   $effect(() => {
-    if (!kb.current) return;
-    const sub = ctl.term.onWriteParsed(() => drawn++);
-    return () => sub.dispose();
-  });
-
-  // Keep the content above the keyboard by pushing the top out of view, only as far as needed (see
-  // raise). While watching, the screen has the Mac's size (we never resize it); scale it down to fit.
-  $effect(() => {
-    void [st, visible, resized, drawn];
+    void [st, visible, resized];
     const inner = shift.querySelector<HTMLElement>('.xterm-screen');
     const scale = !controlling && inner && inner.offsetWidth > host.clientWidth ? host.clientWidth / inner.offsetWidth : 1;
-    const up = lift ? raise(lift, scale) : 0;
     shift.style.transformOrigin = 'bottom left';
-    shift.style.transform = [up ? `translateY(${-up}px)` : '', scale < 1 ? `scale(${scale})` : ''].join(' ').trim();
+    shift.style.transform = scale < 1 ? `scale(${scale})` : '';
   });
-
-  // How far the screen moves up when the key bar covers `lift` px of it. The screen is bottom-aligned
-  // in its host: the blank rows under the last line with text (or the cursor) may go under the key
-  // bar, and the screen never moves so far that the cursor leaves the top. So a shell prompt at the
-  // top of a cleared screen stays put, and an agent's input box at the bottom sits on the key bar.
-  function raise(lift: number, scale: number): number {
-    const buf = ctl.term.buffer.active;
-    const rows = ctl.term.rows;
-    const row = (shift.offsetHeight * scale) / rows;
-    let last = rows - 1;
-    while (last > buf.cursorY && !buf.getLine(buf.viewportY + last)?.translateToString().trim()) last--;
-    const blank = (rows - 1 - last) * row;
-    const above = host.clientHeight - parseFloat(getComputedStyle(host).paddingTop) - rows * row + buf.cursorY * row;
-    return Math.max(0, Math.min(lift - blank, above));
-  }
 
   // ---------- gestures ----------
   let g: { id: number; x: number; y: number; lastY: number; acc: number; cell: { col: number; row: number }; moved: boolean; t: number; long: number | null } | null = null;
@@ -383,7 +359,7 @@
   {/if}
 {/snippet}
 
-<div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible}>
+<div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onwheel} {oncontextmenu}>
@@ -395,7 +371,7 @@
     {/if}
   </div>
   {#if showKeyBar}
-    <div class="keybar-wrap" bind:this={wrap} style:transform={lift ? `translateY(${-lift}px)` : undefined}>
+    <div class="keybar-wrap" bind:this={wrap}>
       <KeyBar
         enabled={controlling}
         keyboardOpen={kb.current > 0}
