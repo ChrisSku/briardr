@@ -156,7 +156,8 @@ Merging releases it. When the Linux checks pass on `main`, the
    exist yet.
 3. builds the release archives on macOS and Linux runners, and publishes the GitHub release with them,
    their `SHA256SUMS`, and the changelog section as its notes, in the same run. The Linux checks then
-   run on the version commit too.
+   run on the version commit, but only check that the version agrees everywhere: the commit changes
+   nothing else, and the merge before it ran everything.
 
 Merges that land close together can share a version, and empty changesets release nothing. If a check
 fails, nothing is versioned or published: the changesets wait on `main`, and the merge that fixes it
