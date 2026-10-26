@@ -5,6 +5,13 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.3
+
+- **Note edits, settings changes and device sessions are preserved reliably.** Delayed note refreshes no
+  longer discard newer edits, concurrent settings saves keep each other's changes, and failed device
+  revocation reports an error. Newly paired devices load the current plugins and follow changes made on
+  other devices without a reload. ([#11](https://github.com/ChrisSku/briardr/pull/11))
+
 ## 0.3.2
 
 - **Opening the on-screen keyboard no longer pushes a shell prompt out of view.** The terminal moves up only
