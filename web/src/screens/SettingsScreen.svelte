@@ -1,5 +1,5 @@
 <!--
-  Settings: Herdr path, signed-in devices, terminal, installing the app, notifications, plugins and their settings (Usage),
+  Settings: Herdr path, signed-in devices, terminal, the key bar, installing the app, notifications, plugins and their settings (Usage),
   Mac power, diagnostics, certificates, and About.
 -->
 <script lang="ts">
@@ -12,6 +12,7 @@
   import DiagnosticsSection from './settings/DiagnosticsSection.svelte';
   import HerdrSection from './settings/HerdrSection.svelte';
   import InstallSection from './settings/InstallSection.svelte';
+  import KeyBarSection from './settings/KeyBarSection.svelte';
   import NotificationsSection from './settings/NotificationsSection.svelte';
   import PowerSection from './settings/PowerSection.svelte';
   import type { Settings } from './settings/settings.ts';
@@ -27,6 +28,7 @@
     ['herdr', 'Herdr'],
     ['devices', 'Devices'],
     ['terminal', 'Terminal'],
+    ['keybar', 'Key bar'],
     ['install', 'Install app'],
     ['notifications', 'Notifications'],
     ['plugins', 'Plugins'],
@@ -76,6 +78,7 @@
     <HerdrSection {s} {save} />
     <DevicesSection />
     <TerminalSection />
+    <KeyBarSection />
     <InstallSection />
     <NotificationsSection {s} {save} />
     <PluginsSection />

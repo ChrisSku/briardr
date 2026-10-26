@@ -265,6 +265,10 @@ describe('terminal input (iPhone)', () => {
     await showKeyboard(page, 300);
     try {
       await aboveKeyboard(page, 300, { 'key bar': page.locator('.keybar-wrap') });
+      // The keys sit on the keyboard, like a row of it.
+      const enter = (await page.locator('.key-enter').boundingBox())!;
+      const kbTop = page.viewportSize()!.height - 300;
+      assert.ok(kbTop - (enter.y + enter.height) <= 3, `Enter ends at ${enter.y + enter.height}, the keyboard starts at ${kbTop}`);
       await waitUntil('the pane to take the rows above the keyboard', async () => (await size()).rows < full.rows);
       // All of it is in view: its top under the tabs, its bottom on the key bar.
       const screen = (await page.locator('.term-shift').boundingBox())!;
@@ -338,6 +342,23 @@ describe('terminal input (iPhone)', () => {
     await expectBytes('04');
     await page.locator('.arrowpad button.sr-only', { hasText: 'Arrow up' }).dispatchEvent('click');
     await expectBytes(hex('\x1bOA')); // application cursor mode, as the program requested
+  });
+
+  test('a tap between the bar’s keys, or on its edge, leaves focus in the terminal (the keyboard stays up)', async () => {
+    await page.locator('.term-host').click();
+    const typing = () => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
+    assert.ok(await typing(), 'the terminal has focus');
+    const [a, b] = [(await page.locator('.keys-top .key').nth(0).boundingBox())!, (await page.locator('.keys-top .key').nth(1).boundingBox())!];
+    const main = (await page.locator('.keys-main .key').first().boundingBox())!;
+    const bar = (await page.locator('.keybar').boundingBox())!;
+    for (const [where, x, y] of [
+      ['between two keys', (a.x + a.width + b.x) / 2, a.y + a.height / 2],
+      ['between the rows', a.x + a.width / 2, (a.y + a.height + main.y) / 2],
+      ['on the bar’s edge', bar.x + 2, bar.y + 2],
+    ] as const) {
+      await page.mouse.click(x, y);
+      assert.ok(await typing(), `a tap ${where} took focus from the terminal`);
+    }
   });
 
   test('Delete sits above Enter, as wide; a tap deletes once, holding keeps deleting', async () => {
@@ -817,6 +838,43 @@ describe('settings', () => {
     assert.equal(values[1], branch);
     assert.ok(values[2].startsWith(commit!.replace(/-dirty$/, '')));
     await a.ctx.close();
+  });
+});
+
+describe('key bar settings', () => {
+  test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
+    const { ctx, page } = await device('iphone', 'phone-keybar');
+    onTestFinished(() => ctx.close().catch(() => {}));
+    await page.goto(s.base + '/settings/keybar');
+    const section = page.locator('#set-keybar');
+    // Default: drop |, add F5.
+    await section.getByRole('button', { name: '|, key 1 of 9' }).click(); // a key in the row opens its menu
+    await page.getByRole('menuitem', { name: 'Remove' }).click();
+    await section.getByRole('group', { name: 'Keys' }).getByRole('button', { name: 'F5', exact: true }).click();
+    // The shell gets a row of its own: ⌃R only.
+    await section.getByRole('button', { name: 'Add app…' }).click();
+    await page.getByRole('menuitem', { name: /^Shell/ }).click();
+    assert.equal(await section.getByRole('button', { name: 'Shell', exact: true }).getAttribute('aria-pressed'), 'true');
+    // It starts as a copy of the default row; tapping a key in the list below removes it too.
+    for (const label of await section.locator('.keybar-row .key').allInnerTexts())
+      await section.locator('.keybar-keys').getByText(label, { exact: true }).click();
+    await section.getByRole('group', { name: 'Control' }).getByRole('button', { name: 'Control-R', exact: true }).click();
+    assert.deepEqual(await section.locator('.keybar-row .key').allInnerTexts(), ['⌃R']);
+    // The shell's row while the shell runs…
+    await openTarget(page);
+    const top = page.locator('.keys-top');
+    await waitUntil('the shell’s keys', async () => (await top.locator('.key:not(.key-delete)').allInnerTexts()).join() === '⌃R', 10_000);
+    // …and the default row while another program runs.
+    await startEcho();
+    try {
+      await s.run.herdr.refresh();
+      await waitUntil('the default keys', async () => (await top.getByRole('button', { name: 'F5', exact: true }).count()) === 1, 15_000);
+      assert.equal(await top.getByRole('button', { name: '|', exact: true }).count(), 0);
+      await top.getByRole('button', { name: 'F5', exact: true }).click();
+      await expectBytes(hex('\x1b[15~'));
+    } finally {
+      await stopEcho();
+    }
   });
 });
 

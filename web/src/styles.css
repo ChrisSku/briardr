@@ -467,7 +467,9 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 
 /* key bar */
 .keybar-wrap { flex: none; background: var(--bg); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); z-index: 3; will-change: transform; }
-.keybar { display: flex; flex-direction: column; gap: 7px; padding: 7px 6px; }
+.keybar { display: flex; flex-direction: column; gap: 7px; padding: 7px 6px; touch-action: manipulation; }
+/* On the keyboard, the bar sits close to it, like a row of the keyboard. */
+.keybar-wrap.is-on-keyboard .keybar { padding-bottom: 2px; }
 .keybar.is-disabled .key:not(.key-live) { opacity: 0.45; }
 .keys-main, .keys-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* Every key in a row shares the width; +, the arrow pad and the keyboard key are wider. Enter and
@@ -735,6 +737,12 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .plugin-version { display: inline; }
 .set-body { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .set-body > .btn { align-self: flex-start; }
+.segmented.keybar-apps { flex-wrap: wrap; align-self: flex-start; }
+.segmented.keybar-apps > button { flex: none; }
+.keybar-row, .keybar-keys { display: flex; flex-wrap: wrap; gap: 6px; }
+.keybar-row { min-height: 52px; align-items: center; padding: 6px; border-radius: 12px; border: 1px dashed var(--line); }
+.keybar-catalog { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.keybar-keys .key.is-on { background: color-mix(in srgb, var(--accent) 22%, var(--bg-2)); border-color: var(--accent); }
 .steps { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 10px; line-height: 1.45; }
 .steps li.done::marker { color: var(--st-finished); }
 .test-result { display: block; margin-top: 6px; font-size: 0.88rem; }

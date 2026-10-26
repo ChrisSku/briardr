@@ -1,12 +1,14 @@
 <!--
-  The key bar: two rows of fixed keys that share the width, like an extra keyboard row:
-    | ~ / - ⌃C ⌃D ⌃S ⇤ ⇥ Delete
+  The key bar: two rows of keys that share the width, like an extra keyboard row:
+    (the keys chosen in Settings for this app; by default | ~ / - ⌃C ⌃D ⌃S ⇤ ⇥) Delete
     + esc ⌃ ⌥ ⇧ ⌘ (arrow pad) (keyboard) Enter
   Enter: hold to dictate. Delete (backspace) sits above Enter, as wide; hold to keep deleting.
   Modifiers: tap = next key only, double tap = lock, hold = chord while held.
+  No press on the bar, keys or the gaps between them, takes focus: the on-screen keyboard stays up.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { rowFor, type BarKey } from '../../../terminal/barkeys.ts';
   import { activeMods, applyModsToText, chord, consumeMods, type Outgoing } from '../../../terminal/keys.ts';
   import { Icon } from '../../../ui/icons/index.ts';
   import ArrowPad from './ArrowPad.svelte';
@@ -16,6 +18,8 @@
 
   interface Props {
     enabled: boolean;
+    /** The pane's app, which picks the top row's keys. */
+    app: string;
     /** The on-screen keyboard is showing. */
     keyboardOpen: boolean;
     onKeyboard: () => void;
@@ -28,8 +32,7 @@
   }
   let p: Props = $props();
 
-  const SYMBOLS = ['|', '~', '/', '-'];
-  const CTRL_KEYS = ['c', 'd', 's'];
+  const row = $derived(rowFor(p.app));
 
   function sendKey(base: string) {
     p.send({ keys: [chord(base, activeMods())] });
@@ -39,6 +42,12 @@
     p.send(applyModsToText(t, activeMods()));
     consumeMods();
   }
+  function press(k: BarKey) {
+    const s = k.send;
+    if ('text' in s) sendText(s.text);
+    else if ('named' in s) sendKey(s.named);
+    else p.send(s);
+  }
 </script>
 
 {#snippet key(aria: string, onPress: (el: HTMLElement) => void, content: Snippet | string, cls = '')}
@@ -46,7 +55,6 @@
     class="key {cls}"
     aria-label={aria}
     title={aria}
-    onpointerdown={(e) => e.preventDefault() /* keep the on-screen keyboard up */}
     onclick={(e) => onPress(e.currentTarget)}
   >
     {#if typeof content === 'string'}{content}{:else}{@render content()}{/if}
@@ -58,16 +66,18 @@
   {#if p.keyboardOpen}<Icon name="keyboard-down" size={22} />{:else}<Icon name="keyboard" size={22} />{/if}
 {/snippet}
 
-<div class={['keybar', !p.enabled && 'is-disabled']} role="toolbar" aria-label="Terminal keys">
+<!-- It only keeps focus where it is; the keys are the controls. -->
+<!-- svelte-ignore a11y_interactive_supports_focus -->
+<div
+  class={['keybar', !p.enabled && 'is-disabled']}
+  role="toolbar"
+  aria-label="Terminal keys"
+  onpointerdown={(e) => e.preventDefault() /* keep the on-screen keyboard up */}
+>
   <div class="keys-top" role="group" aria-label="Symbols and shortcuts">
-    {#each SYMBOLS as c}
-      {@render key(c === '-' ? 'Hyphen' : c, () => sendText(c), c === '-' ? '−' : c)}
+    {#each row as k (k.id)}
+      {@render key(k.name, () => press(k), k.label)}
     {/each}
-    {#each CTRL_KEYS as c}
-      {@render key(`Control-${c.toUpperCase()}`, () => p.send({ keys: [`ctrl+${c}`] }), `⌃${c.toUpperCase()}`)}
-    {/each}
-    {@render key('Shift-Tab', () => p.send({ keys: ['shift+tab'] }), '⇤')}
-    {@render key('tab (Tab)', () => sendKey('tab'), '⇥')}
     <DeleteKey onPress={() => sendKey('backspace')} />
   </div>
   <div class="keys-main">
