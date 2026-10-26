@@ -5,6 +5,13 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.2
+
+- **Opening the on-screen keyboard no longer pushes a shell prompt out of view.** The terminal moves up only
+  as far as its content needs: the last line with text and the cursor stay above the keyboard. What you
+  type at a prompt near the top of the screen stays visible, and an agent's input box at the bottom
+  still sits on the key bar. ([#3](https://github.com/ChrisSku/briardr/pull/3))
+
 ## 0.3.1
 
 - **`briardr setup` and the Linux helper install Herdr 0.9.5, and Briardr is tested with Herdr 0.9.3 to 0.9.5.** Setup no longer warns about a Herdr you already have when it is one of these versions. Upgrading isn't required, but newer Herdr helps Briardr: from 0.9.4, closing the terminal you started Herdr in no longer stops its agents, and Codex no longer stays unknown after a turn; 0.9.5 also shows Claude Code questions in custom-agent sessions (`claude --agent`) as needing you. From 0.9.4, the key bar's ⌘ reaches only programs that read it (those using the kitty keyboard protocol), and no longer types stray characters into plain shells. Replacing Herdr restarts the agents in it, so upgrade when none are working. ([#9](https://github.com/ChrisSku/briardr/pull/9))
