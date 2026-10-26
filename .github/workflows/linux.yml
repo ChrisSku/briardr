@@ -9,16 +9,18 @@
 # Actions are pinned to commits; the comment names the release each one is.
 name: linux
 
+# Each pull request runs once, as pull_request (its branch merged into main), not again for the push to
+# its branch; a branch without a pull request isn't checked until it has one. Pushes run on main only.
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
-# A newer push to a branch or pull request cancels the run it replaces. Each commit on main runs in a group
-# of its own, so none of them is cancelled or held back: the release workflow reads every one.
+# A newer push to a pull request cancels the run it replaces. Each commit on main runs in a group of its
+# own, so none of them is cancelled or held back: the release workflow reads every one.
 concurrency:
   group: linux-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: true

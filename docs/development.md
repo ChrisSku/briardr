@@ -80,8 +80,8 @@ mise exec -- cargo test --manifest-path server/Cargo.toml --features test-hooks
 
 The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust server, integration
 suite, browser checks, shell helper, and generated deployment files, and packages the
-[release archives](#release-archives) for every platform, for every change. macOS
-integrations require Mac-specific testing.
+[release archives](#release-archives) for every platform, for every pull request and every commit on
+`main` (a branch is checked once it has a pull request). macOS integrations require Mac-specific testing.
 
 ## Browser checks
 
