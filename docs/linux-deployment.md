@@ -63,7 +63,7 @@ adaptation.
 As the Briardr user:
 
 ```sh
-git clone --branch v0.3.3 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.4 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --domain briardr.example.com     # read-only: what's there, what's missing
 scripts/setup-linux.sh install --domain briardr.example.com --agents claude,codex
@@ -137,7 +137,7 @@ forwarding). Every Briardr rule from [Security model](#security-model) still app
 ### Install
 
 ```sh
-git clone --branch v0.3.3 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.4 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex
