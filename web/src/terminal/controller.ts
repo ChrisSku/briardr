@@ -52,13 +52,14 @@ const PING_EVERY = 10_000;
 const PONG_DEADLINE = 5_000;
 const RESIZE_DEBOUNCE = 250;
 
+/** xterm's colours: the --term-* tokens in styles.css (xterm needs the values themselves). */
 export function themeFor(dark: boolean): ITheme {
   return dark
-    ? { background: '#0b0b0c', foreground: '#e7e7ea', cursor: '#e7e7ea', cursorAccent: '#0b0b0c', selectionBackground: '#3a4a6b',
-        black: '#1c1c1e', red: '#ff6b61', green: '#4cd964', yellow: '#ffd60a', blue: '#5ea2ff', magenta: '#da8fff', cyan: '#64d2ff', white: '#d1d1d6',
+    ? { background: '#0a0a09', foreground: '#e7e3de', cursor: '#e7e3de', cursorAccent: '#0a0a09', selectionBackground: '#3a4a6b',
+        black: '#1c1c1e', red: '#ff6b61', green: '#6edc9a', yellow: '#f2c46b', blue: '#7ab2ff', magenta: '#d7a1f5', cyan: '#64d2ff', white: '#d1d1d6',
         brightBlack: '#6e6e73', brightRed: '#ff8a80', brightGreen: '#7ee787', brightYellow: '#ffe066', brightBlue: '#8cbcff', brightMagenta: '#e5aaff', brightCyan: '#8fe3ff', brightWhite: '#ffffff' }
-    : { background: '#ffffff', foreground: '#1d1d1f', cursor: '#1d1d1f', cursorAccent: '#ffffff', selectionBackground: '#b4d2ff',
-        black: '#1d1d1f', red: '#c9372c', green: '#1f7a35', yellow: '#946200', blue: '#1660d0', magenta: '#8a3fb8', cyan: '#0b7285', white: '#d1d1d6',
+    : { background: '#ffffff', foreground: '#1c1917', cursor: '#1c1917', cursorAccent: '#ffffff', selectionBackground: '#b4d2ff',
+        black: '#1c1917', red: '#c9372c', green: '#18794a', yellow: '#9a5800', blue: '#1d5fd1', magenta: '#8e3fb8', cyan: '#0b7285', white: '#d1d1d6',
         brightBlack: '#6e6e73', brightRed: '#e0453a', brightGreen: '#2a9d48', brightYellow: '#b07800', brightBlue: '#2f7bf0', brightMagenta: '#a352d6', brightCyan: '#1491a8', brightWhite: '#ffffff' };
 }
 
