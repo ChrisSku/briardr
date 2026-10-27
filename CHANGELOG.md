@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.8
+
+- **Scrolling with a Mac trackpad or mouse wheel scrolls the terminal again, instead of pressing Up and Down.** The terminal turned the wheel into arrow keys before Briardr saw it, which stepped through shell or prompt history; the wheel now scrolls through Herdr like a swipe on iPhone and iPad. ([#16](https://github.com/ChrisSku/briardr/pull/16))
+
 ## 0.3.7
 
 - **Briardr checks for new releases and updates itself.** Once a day the host asks GitHub whether a newer
