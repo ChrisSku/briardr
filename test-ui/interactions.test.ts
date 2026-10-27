@@ -476,7 +476,7 @@ describe('ownership (two devices)', () => {
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     await b.page.waitForSelector('[data-ownership=watching]');
-    await b.page.getByText('Another client is controlling this stream').waitFor();
+    await b.page.locator('.watch-banner', { hasText: 'Another device is in control' }).waitFor();
     // Cancel first: nothing changes.
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('button', { name: 'Cancel' }).click();
@@ -486,7 +486,7 @@ describe('ownership (two devices)', () => {
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('dialog').getByRole('button', { name: 'Take Over' }).click();
     await b.page.waitForSelector('[data-ownership=controlling]');
-    await a.page.getByText('Another client took control').waitFor();
+    await a.page.locator('.watch-banner', { hasText: 'Another device took control' }).waitFor();
     assert.equal(await a.page.locator('[data-ownership=watching]').count(), 1);
     await a.ctx.close();
     await b.ctx.close();
@@ -553,11 +553,39 @@ describe('agents list, peek, banners and links', () => {
     await sleep(500);
     const rowsBefore = herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows;
     const a = await device('iphone', 'phone-peek');
-    await a.page.locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).click();
+    // On a touch screen the row's "…" is out of sight but there for keyboards and VoiceOver.
+    const more = a.page.locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ });
+    await more.focus();
+    await a.page.keyboard.press('Enter');
     await a.page.getByRole('menuitem', { name: /Peek/ }).click();
     await a.page.getByText('Watching live · read-only').waitFor();
     assert.equal(herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows, rowsBefore);
     await a.page.getByRole('button', { name: 'Close' }).click();
+    await a.ctx.close();
+  });
+
+  test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
+    const a = await device('iphone', 'phone-swipe');
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    const box = (await row.boundingBox())!;
+    const y = box.y + box.height / 2;
+    const swipe = (x0: number, x1: number) =>
+      row.locator('.row-main').evaluate((el, [x0, x1, y]) => {
+        const at = (type: string, x: number) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: x, clientY: y }));
+        at('pointerdown', x0);
+        for (let i = 1; i <= 6; i++) at('pointermove', x0 + ((x1 - x0) * i) / 6);
+        at('pointerup', x1);
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x1, clientY: y }));
+      }, [x0, x1, y] as const);
+    await swipe(box.x + box.width - 20, box.x + box.width - 200);
+    await row.getByRole('button', { name: 'Peek', exact: true }).waitFor();
+    assert.equal(new URL(a.page.url()).pathname, '/agents', 'a swipe doesn’t open the stream');
+    await row.locator('.row-main').click();
+    await row.getByRole('button', { name: 'Peek', exact: true }).waitFor({ state: 'detached' });
+    assert.equal(new URL(a.page.url()).pathname, '/agents', 'the tap closed the actions instead');
+    await swipe(box.x + box.width - 20, box.x + box.width - 200);
+    await row.getByRole('button', { name: 'Peek', exact: true }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
     await a.ctx.close();
   });
 
@@ -813,7 +841,7 @@ describe('the on-screen keyboard (iPhone)', () => {
     if (!p.ok) throw new Error('pairing failed');
     await ctx.addCookies([{ name: '__Host-briardr', value: p.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
     const page = await ctx.newPage();
-    await page.goto(s.base + '/settings');
+    await page.goto(s.base + '/settings/herdr');
     const field = page.getByLabel(/^Path to the herdr executable/);
     await field.focus();
     const top = page.viewportSize()!.height - 160;
@@ -827,7 +855,7 @@ describe('the on-screen keyboard (iPhone)', () => {
 describe('settings', () => {
   test('About shows the build ID, branch and commit of the running page', async () => {
     const a = await device('mac', 'mac-settings');
-    await a.page.goto(s.base + '/settings');
+    await a.page.goto(s.base + '/settings/about');
     const meta = (name: string) => a.page.locator(`meta[name="${name}"]`).getAttribute('content');
     const [build, branch, commit] = [await meta('briardr-version'), await meta('briardr-branch'), await meta('briardr-commit')];
     assert.match(build!, /^[0-9a-f]{12}$/);

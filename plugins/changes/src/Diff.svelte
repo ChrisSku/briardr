@@ -20,7 +20,18 @@
   });
 
   const kind = (l: string) => (l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'dl-meta' : l.startsWith('@@') ? 'dl-hunk' : l.startsWith('+') ? 'dl-add' : l.startsWith('-') ? 'dl-del' : 'dl-ctx');
-  const lines = $derived(d ? d.text.split('\n').filter((l, i) => i > 0 || l) : []);
+  /** Each line with its number: the old file's for removed lines, the new file's otherwise (from the hunk headers). */
+  const lines = $derived.by(() => {
+    let a = 0;
+    let b = 0;
+    return (d ? d.text.split('\n').filter((l, i) => i > 0 || l) : []).map((text) => {
+      const k = kind(text);
+      const h = k === 'dl-hunk' ? /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(text) : null;
+      if (h) [a, b] = [Number(h[1]), Number(h[2])];
+      const n = k === 'dl-del' ? a++ : k === 'dl-add' ? b++ : k === 'dl-ctx' && !text.startsWith('\\') ? (a++, b++) : null;
+      return { text, k, n };
+    });
+  });
 </script>
 
 {#if err}
@@ -32,7 +43,7 @@
 {:else}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="diff" role="region" aria-label="Diff of {file.path}" tabindex={0}>
-    <pre>{#each lines as l}<span class={kind(l)}>{l + '\n'}</span>{/each}</pre>
+    <pre>{#each lines as l}<span class={l.k}>{#if l.k !== 'dl-hunk' && l.k !== 'dl-meta'}<span class="dl-n" aria-hidden="true">{l.n ?? ''}</span>{/if}{l.text + '\n'}</span>{/each}</pre>
     {#if d.truncated}<p class="note">Diff truncated at 2,000 of {d.lines.toLocaleString()} lines.</p>{/if}
   </div>
 {/if}

@@ -66,7 +66,7 @@ harness; do not enable test hooks in a deployed build.
 
 ## Usage sources
 
-Usage is optional. Configure it under Settings → Usage sources:
+Usage is optional. Configure it under Settings → Usage → Sources:
 
 - **Claude Keychain:** macOS only, explicit opt-in; uses Claude Code's sign-in for a read-only usage
   request to Anthropic. macOS may ask for Keychain permission on the host.

@@ -100,7 +100,7 @@ export function groupOf(s: Stream): Group | null {
 }
 
 export const GROUP_LABEL: Record<Group, string> = {
-  attention: 'Needs your attention',
+  attention: 'Needs you',
   working: 'Working',
   finished: 'Finished',
   ready: 'Ready',

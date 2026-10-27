@@ -37,6 +37,10 @@
   });
 
   const ptr = new PullToRefresh(load);
+  const totals = $derived.by(() => {
+    const files = report?.state === 'ok' ? report.files : [];
+    return { add: files.reduce((n, f) => n + (f.additions ?? 0), 0), del: files.reduce((n, f) => n + (f.deletions ?? 0), 0), lines: files.some((f) => f.additions !== null) };
+  });
   const marks = $derived(reviewed.value[stream.id] || {});
   function setMark(f: ChangedFile, on: boolean) {
     const cur = { ...(reviewed.value[stream.id] || {}) };
@@ -49,19 +53,24 @@
 {#if visible}
   <div class="surface changes" {...ptr.handlers}>
     {#if ptr.pull > 0}<div class="ptr" style:height="{ptr.pull}px">{ptr.pull > 64 ? 'Release to refresh' : 'Pull to refresh'}</div>{/if}
-    <div class="surface-head">
-      <div class="surface-title">
-        {#if report?.state === 'ok' || report?.state === 'clean'}
-          <strong>{report.noCommits ? 'No commits yet' : report.detached ? `Detached at ${report.headShort}` : report.branch}</strong>
-          {#if report.state === 'ok'}<span class="muted">{` · ${report.totalFiles} changed file${report.totalFiles === 1 ? '' : 's'}`}</span>{/if}
-        {:else}
-          <strong>Changes</strong>
+    <div class="card branch-card">
+      <div class="branch-row">
+        <Icon name="branch" size={16} />
+        <strong class="branch-name">
+          {#if report?.state === 'ok' || report?.state === 'clean'}{report.noCommits ? 'No commits yet' : report.detached ? `Detached at ${report.headShort}` : report.branch}{:else}Changes{/if}
+        </strong>
+        <button class="icon-btn round tinted" aria-label="Refresh changes" onclick={load} disabled={loading}>
+          <Icon name="refresh" size={17} class={loading ? 'spin' : ''} />
+        </button>
+      </div>
+      <div class="branch-meta">
+        {#if report?.state === 'ok'}
+          <span>{report.totalFiles} file{report.totalFiles === 1 ? '' : 's'}</span>
+          {#if totals.lines}<span class="sep">·</span><span class="add">+{totals.add}</span> <span class="del">−{totals.del}</span>{/if}
+          <span class="sep">·</span>
         {/if}
         <AsOf at={report?.asOf} />
       </div>
-      <button class="icon-btn" aria-label="Refresh changes" onclick={load} disabled={loading}>
-        <Icon name="refresh" class={loading ? 'spin' : ''} />
-      </button>
     </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if !report && !error}<p class="hint padded">Loading…</p>{/if}
@@ -71,24 +80,25 @@
     {#if report?.state === 'clean'}<Empty title="No uncommitted changes">The working tree matches {report.noCommits ? 'an empty repository' : 'HEAD'}.</Empty>{/if}
     {#if report?.state === 'ok'}
       {#if report.truncated}<p class="note">Showing the first {report.files.length} of {report.totalFiles} files.</p>{/if}
-      <p class="hint padded">Read-only. To revert or change a file, ask the agent in the terminal.</p>
-      <ul class="files">
+      <p class="changes-hint"><Icon name="info" size={14} />Read-only. To revert or change a file, ask the agent in the terminal.</p>
+      <ul class="files card">
         {#each report.files as f}
           {@const isOpen = !!open[f.path]}
           {@const done = marks[f.path] === f.signature}
+          {@const slash = f.path.lastIndexOf('/') + 1}
           <li class={['file', done && 'is-reviewed']}>
             <div class="file-row">
               <button class="file-toggle" aria-expanded={isOpen} onclick={() => (open = { ...open, [f.path]: !isOpen })}>
-                <Icon name="chevron" class={['chev', isOpen && 'open']} size={16} />
                 <span class="chg chg-{f.change}" title={f.change} aria-label={f.change}>{LETTER[f.change] || '?'}</span>
-                <span class="file-path">{#if f.origPath}<span class="muted">{`${f.origPath} → `}</span>{/if}{f.path}</span>
+                <span class="file-path">{#if f.origPath}<span class="file-dir">{`${f.origPath} → `}</span>{/if}<span class="file-dir">{f.path.slice(0, slash)}</span>{f.path.slice(slash)}</span>
                 <span class="file-meta">
-                  {#if f.binary}<span class="tag">binary</span>{:else if f.additions !== null}<span class="add">+{f.additions}</span> <span class="del">−{f.deletions}</span>{/if}
+                  {#if f.binary}<span class="tag">binary</span>{:else if f.additions !== null}{#if f.additions}<span class="add">+{f.additions}</span>{/if}{#if f.additions && f.deletions}{' '}{/if}{#if f.deletions}<span class="del">−{f.deletions}</span>{/if}{/if}
                   {#if f.modeChange}<span class="tag">mode {f.modeChange.from.slice(-3)}→{f.modeChange.to.slice(-3)}</span>{/if}
                   {#if f.staged && !f.untracked}<span class="tag">staged</span>{/if}
                   {#if f.unstaged && !f.untracked && f.staged}<span class="tag">+ unstaged</span>{/if}
                   {#if f.untracked}<span class="tag">untracked</span>{/if}
                 </span>
+                <Icon name={isOpen ? 'chevron-down' : 'chevron'} size={16} class="file-chev" />
               </button>
               <label class="review-check" title="Reviewed on this device">
                 <input type="checkbox" checked={done} onchange={(e) => setMark(f, e.currentTarget.checked)} aria-label="Reviewed {f.path} on this device" />

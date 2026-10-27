@@ -5,7 +5,6 @@
   "briardr": 1,
   "client": "src/index.ts",
   "contributes": {
-    "appTabs": [{ "id": "usage", "label": "Usage", "icon": "usage" }],
-    "settings": [{ "id": "usage", "label": "Usage sources" }]
+    "settings": [{ "id": "usage", "label": "Usage" }]
   }
 }

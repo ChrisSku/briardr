@@ -45,7 +45,7 @@ beforeAll(async () => {
   paired = await (await browser.newContext(opts)).newPage();
 
   await paired.goto(base + '/');
-  await paired.getByText('Sign in this device to see and steer the work running on your server.').waitFor();
+  await paired.getByText('See and steer the agents running on your server, from anywhere on your network.').waitFor();
   const out = execFileSync(...serverArgv('pair'), { env, encoding: 'utf8' });
   await paired.getByLabel('Pairing code').fill(out.match(/[A-Z0-9]{4}-[A-Z0-9]{4}/)![0]);
   await paired.getByRole('button', { name: 'Sign in' }).click();
@@ -60,12 +60,12 @@ afterAll(async () => {
 describe('Linux host', () => {
   test('the pairing screen speaks of the server', async () => {
     await anon.goto(base + '/');
-    await anon.getByText('Sign in this device to see and steer the work running on your server.').waitFor();
-    assert.ok(await anon.getByText('on the server with', { exact: false }).isVisible());
+    await anon.getByText('See and steer the agents running on your server, from anywhere on your network.').waitFor();
+    assert.ok(await anon.getByText('Get a code on the server', { exact: false }).isVisible());
   });
 
   test('the host summary shows its name and no battery', async () => {
-    await paired.goto(base + '/agents');
+    await paired.goto(base + '/settings');
     await paired.waitForSelector('.mac-summary .mac-name');
     assert.equal(await paired.locator('.mac-summary').getAttribute('aria-label'), 'Server summary');
     assert.equal(await paired.locator('.mac-batt').count(), 0, 'no battery');
@@ -73,15 +73,24 @@ describe('Linux host', () => {
 
   test('Settings has no Mac power, Keychain or low-battery controls', async () => {
     await paired.goto(base + '/settings');
-    await paired.waitForSelector('#set-about');
-    const index = await paired.locator('.settings-index').innerText();
-    assert.ok(!index.includes('Mac power'), index);
+    await paired.locator('.set-group').first().waitFor();
+    const list = await paired.locator('.settings').innerText();
+    assert.ok(!/Power/.test(list), list);
+    await paired.goto(base + '/settings/power');
+    await paired.getByText('There’s no such section.').waitFor();
     assert.equal(await paired.locator('#set-power').count(), 0);
-    assert.equal(await paired.getByText('Claude: read limits with Claude Code’s sign-in').count(), 0);
-    assert.equal(await paired.getByText('Mac low battery').count(), 0);
     assert.equal(await paired.getByRole('button', { name: /Sleep Mac/ }).count(), 0);
+    await paired.goto(base + '/settings/usage');
+    await paired.getByRole('button', { name: /^Sources/ }).click();
+    await paired.getByRole('dialog', { name: 'Usage sources' }).getByText('Codex: read limits through the Codex app server').waitFor();
+    assert.equal(await paired.getByText('Claude: read limits with Claude Code’s sign-in').count(), 0);
+    await paired.goto(base + '/settings/notifications');
+    await paired.locator('#set-notifications').waitFor();
+    assert.equal(await paired.getByText('Mac low battery').count(), 0);
+    await paired.goto(base + '/settings/about');
     await paired.getByText('the server doesn’t transcribe speech', { exact: false }).waitFor();
-    assert.ok(await paired.getByText('Path to the herdr executable on the server').isVisible());
+    await paired.goto(base + '/settings/herdr');
+    await paired.getByText('Path to the herdr executable on the server').waitFor();
   });
 
   test('Enter is a plain Enter key: holding it doesn’t start server dictation', async () => {

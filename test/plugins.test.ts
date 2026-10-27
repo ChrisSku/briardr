@@ -39,7 +39,9 @@ describe('plugins', () => {
       ['files', 'changes', 'preview', 'docs', 'notes', 'usage'],
     );
     assert.ok(builtins.every((p: any) => p.enabled));
-    assert.deepEqual(find(r.json.plugins, 'usage').contributes.appTabs, [{ id: 'usage', label: 'Usage', icon: 'usage' }]);
+    // Usage is a page in Settings, not an app tab.
+    assert.deepEqual(find(r.json.plugins, 'usage').contributes.settings, [{ id: 'usage', label: 'Usage' }]);
+    assert.deepEqual(find(r.json.plugins, 'usage').contributes.appTabs, []);
     const session = await api('GET', '/api/session');
     assert.deepEqual(session.json.plugins, r.json.plugins);
   });

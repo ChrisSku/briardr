@@ -303,9 +303,10 @@
     }
   }
 
-  // ---------- ownership banner ----------
-  // Watching can last; the banner covers the header, so it can be dismissed until the state changes.
-  // Take control stays in the stream's actions menu. App shows it in the overlay above the header.
+  // ---------- ownership banners ----------
+  // Being in control is the normal case and isn't shown. Watching (another device has control) floats a
+  // banner under the header, with Take over; it can be dismissed until the state changes. Reconnecting and
+  // errors go in the overlay above the header (App shows it). Take control stays in the actions menu too.
   const bannerKey = $derived(`${st.ownership}:${st.watchReason}`);
   let dismissed = $state<string | null>(null);
   $effect(() => {
@@ -315,6 +316,17 @@
       if (topOverlay.value === banner) topOverlay.value = null;
     };
   });
+  const watching = $derived(st.ownership === 'watching' && dismissed !== bannerKey);
+  const contested = $derived(st.watchReason === 'busy' || st.watchReason === 'taken_over');
+  const watchText = $derived(
+    st.watchReason === 'busy'
+      ? 'Another device is in control'
+      : st.watchReason === 'taken_over'
+        ? 'Another device took control'
+        : st.watchReason === 'released'
+          ? `Handed back to ${theHost()}`
+          : 'Read-only until you take control',
+  );
 
   const isLive = $derived(controlling || st.ownership === 'watching');
   const showKeyBar = $derived(!hardwareKeyboard.value || compact);
@@ -324,28 +336,8 @@
   <p>Another client is controlling this pane. Taking over moves control to this device and resizes the pane for it. The other client will switch to watching.</p>
 {/snippet}
 
-{#snippet dismiss()}
-  <button class="icon-btn" aria-label="Dismiss" onclick={() => (dismissed = bannerKey)}>
-    <Icon name="close" size={16} />
-  </button>
-{/snippet}
-
 {#snippet banner()}
-  {#if st.ownership === 'watching' && dismissed === bannerKey}
-    <!-- dismissed until the state changes -->
-  {:else if st.ownership === 'watching' && (st.watchReason === 'busy' || st.watchReason === 'taken_over')}
-    <div class="own-banner" role="status">
-      <span>{st.watchReason === 'busy' ? 'Another client is controlling this stream. You’re watching.' : 'Another client took control. You’re watching.'}</span>
-      <button class="btn btn-small" onclick={() => confirmTakeOver(ctl)}>Take Over</button>
-      {@render dismiss()}
-    </div>
-  {:else if st.ownership === 'watching'}
-    <div class="own-banner" role="status">
-      <span>{st.watchReason === 'released' ? `Handed back to ${theHost()}. You’re watching.` : 'You’re watching.'}</span>
-      <button class="btn btn-small" onclick={() => ctl.connect('control', false)}>Take control</button>
-      {@render dismiss()}
-    </div>
-  {:else if st.ownership === 'reconnecting'}
+  {#if st.ownership === 'reconnecting'}
     <div class="own-banner tone-warn" role="status">
       <span>{st.message || 'Reconnecting…'} Showing the last screen.</span>
       <button class="btn btn-small" onclick={() => ctl.retryNow()}>Retry now</button>
@@ -371,6 +363,16 @@
       <div class="stale-tag" role="status">Last seen screen · not live</div>
     {/if}
   </div>
+  {#if watching}
+    <div class="own-banner watch-banner" role="status">
+      <span class="watch-tile" aria-hidden="true"><Icon name="eye" size={18} /></span>
+      <span class="watch-text"><strong>Watching</strong><span>{watchText}</span></span>
+      <button class="btn btn-small btn-primary" onclick={() => (contested ? confirmTakeOver(ctl) : ctl.connect('control', false))}>{contested ? 'Take over' : 'Take control'}</button>
+      <button class="icon-btn" aria-label="Dismiss" onclick={() => (dismissed = bannerKey)}>
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  {/if}
   {#if showKeyBar}
     <div class={['keybar-wrap', kb.current && 'is-on-keyboard']} bind:this={wrap}>
       <KeyBar

@@ -143,7 +143,7 @@ function expect(fx: F.Fixture) {
     agentsReady: `document.querySelector('.main h1')?.textContent === 'Agents' && ${count('.main .stream-row')} === ${visibleAgents}`,
     treeReady: `document.querySelector('.main h1')?.textContent === 'Workspaces' && ${count('.main .tree-ws')} === ${nWs} && ${count('.main .tree-streams .stream-row')} === ${fx.size}`,
     usageReady: `document.querySelector('.main h1')?.textContent === 'Usage' && ${count('.usage-card .meter-row')} === 7`,
-    settingsReady: `document.querySelector('.main h1')?.textContent === 'Settings' && ${count('.set-section')} >= 8 && ${text('#set-herdr')}.includes('Herdr 0.9.3 is running')`,
+    settingsReady: `document.querySelector('.main h1')?.textContent === 'Settings' && ${count('.set-group .set-row')} >= 8 && ${text('.mac-summary')}.includes('Herdr 0.9.3')`,
   };
 }
 
@@ -166,7 +166,8 @@ async function newPage(browser: Browser, cfg: Config, fx: F.Fixture): Promise<{ 
 }
 
 // ---------- scenarios ----------
-const mainNav = (page: Page, label: string) => page.locator('nav[aria-label="Main"] button', { hasText: label });
+// Usage is a row in Settings (Settings → Usage); Settings is the sidebar's gear on iPad and Mac.
+const mainNav = (page: Page, label: string) => (label === 'Usage' ? page.locator('.usage-row').first() : page.locator('nav[aria-label="Main"]').getByRole('button', { name: label, exact: true }));
 
 async function scenarioLaunch(browser: Browser, cfg: Config, size: number, srv: Map<string, FixtureServer>) {
   const fx = srv.get(impls[0].name)!.fixture;
@@ -221,13 +222,13 @@ async function warmContext(browser: Browser, cfg: Config, s: FixtureServer) {
 type Runner = (c: Ctx, page: Page, cdp: CDPSession | null, s: FixtureServer, record: boolean) => Promise<void>;
 
 const scenarios: Record<string, Runner> = {
-  // Agents → Workspaces → Usage → Settings → Agents, through the main navigation.
+  // Agents → Workspaces → Settings → Usage → Agents, through the main navigation.
   async nav(c, page, cdp, s, record) {
     const e = expect(s.fixture);
     for (const [label, pred, metric] of [
       ['Workspaces', e.treeReady, 'workspaces'],
-      ['Usage', e.usageReady, 'usage'],
       ['Settings', e.settingsReady, 'settings'],
+      ['Usage', e.usageReady, 'usage'],
       ['Agents', e.agentsReady, 'agents'],
     ] as const) {
       await measure(c, page, cdp, `nav:${metric}`, { trigger: 'click', preds: { ready: pred } }, () => mainNav(page, label).click(), record);

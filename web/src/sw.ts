@@ -120,11 +120,11 @@ function offlinePage(): Response {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark"><meta name="briardr-offline" content="1"><title>Briardr</title>
 <style>
-:root{--bg:#fff;--fg:#1c1c1e;--muted:#6c6c70;--accent:#0a66d8}
-@media (prefers-color-scheme:dark){:root{--bg:#000;--fg:#f2f2f7;--muted:#98989f;--accent:#4a9eff}}
+:root{--bg:#f6f5f3;--fg:#1c1917;--muted:#5c5650;--ink:#1c1917;--on-ink:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d0c0b;--fg:#f4f2ef;--muted:#b3aca4;--ink:#f4f2ef;--on-ink:#171614}}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:17px/1.4 -apple-system,system-ui,sans-serif;padding:16px;box-sizing:border-box}
 main{max-width:26rem}h1{font-size:22px;margin:0 0 8px}p{margin:0 0 16px;color:var(--muted)}
-button{font:inherit;font-weight:600;color:#fff;background:var(--accent);border:0;border-radius:10px;padding:10px 18px;min-height:44px}
+button{font:inherit;font-weight:600;color:var(--on-ink);background:var(--ink);border:0;border-radius:12px;padding:10px 18px;min-height:44px}
 </style></head><body><main>
 <h1>Briardr can’t open right now</h1>
 <p id="why">Briardr can’t reach its host, and this device doesn’t have a saved copy of the app to open offline yet.</p>

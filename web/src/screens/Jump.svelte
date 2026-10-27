@@ -30,9 +30,9 @@
 
 <script lang="ts">
   import { byActivity } from '../activity.ts';
-  import { lastOpened } from '../store.ts';
-  import { ToolIcon } from '../ui/icons/index.ts';
-  import { Sheet, StateBadge } from '../ui/kit.ts';
+  import { clockSkew, lastOpened, now } from '../store.ts';
+  import { Icon, ToolIcon } from '../ui/icons/index.ts';
+  import { Sheet, since, StateBadge } from '../ui/kit.ts';
   import { contextOf, openStream } from './streams.ts';
 
   let q = $state('');
@@ -76,37 +76,62 @@
   }
 </script>
 
+{#snippet option(s: Stream, i: number)}
+  <li id="jump-{i}" role="option" aria-selected={i === sel} class={['row', i === sel && 'is-sel']}>
+    <button class="row-main" onclick={() => go(s)} onmouseenter={() => (sel = i)}>
+      <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
+      <span class="row-text">
+        <span class="row-title">{s.name}</span>
+        <span class="row-sub">{contextOf(s)}</span>
+      </span>
+      <span class="row-trail">
+        <StateBadge state={s.state} />
+        {#if s.state && s.stateSince}<span class="row-since">{since(now.value + clockSkew.value - s.stateSince)}</span>{/if}
+      </span>
+    </button>
+  </li>
+{/snippet}
+
 {#if open}
-  <Sheet title="Jump to stream" onClose={close} class="jump" {at}>
-    <!-- svelte-ignore a11y_autofocus -->
-    <input
-      class="field"
-      type="search"
-      placeholder="Stream, project, workspace or folder"
-      aria-label="Search streams"
-      aria-controls="jump-list"
-      aria-activedescendant={list[sel] ? `jump-${sel}` : undefined}
-      bind:value={q}
-      oninput={() => (sel = 0)}
-      autofocus
-      {onkeydown}
-    />
-    <ul class="rows jump-list" id="jump-list" role="listbox" aria-label="Streams">
-      {#each list as s, i}
-        <li id="jump-{i}" role="option" aria-selected={i === sel} class={['row', i === sel && 'is-sel']}>
-          <button class="row-main" onclick={() => go(s)} onmouseenter={() => (sel = i)}>
-            <ToolIcon tool={s.tool} kind={s.kind} />
-            <span class="row-text">
-              <span class="row-title">{s.name}</span>
-              <span class="row-sub">{contextOf(s)}</span>
-            </span>
-            <span class="row-trail">
-              <StateBadge state={s.state} />
-            </span>
-          </button>
-        </li>
-      {/each}
-      {#if !list.length}<li class="row-empty">No matching streams.</li>{/if}
-    </ul>
+  <Sheet title="Jump to a stream" onClose={close} class="jump" {at}>
+    <label class="search jump-search">
+      <Icon name="search" size={18} />
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        type="search"
+        placeholder="Stream, project, workspace or folder"
+        aria-label="Search streams"
+        aria-controls="jump-list"
+        aria-activedescendant={list[sel] ? `jump-${sel}` : undefined}
+        bind:value={q}
+        oninput={() => (sel = 0)}
+        autofocus
+        {onkeydown}
+      />
+    </label>
+    <div class="jump-list" id="jump-list" role="listbox" aria-label="Streams">
+      {#if q && list.length}
+        <!-- With a search: the best match on its own, then the rest. -->
+        <div role="group" aria-labelledby="jump-best">
+          <h3 class="section-head"><span class="overline" id="jump-best">Best match</span></h3>
+          <ul class="rows card" role="none">{@render option(list[0], 0)}</ul>
+        </div>
+        {#if list.length > 1}
+          <div role="group" aria-labelledby="jump-also">
+            <h3 class="section-head"><span class="overline" id="jump-also">Also matching</span><span class="section-n">{list.length - 1}</span></h3>
+            <ul class="rows card" role="none">
+              {#each list.slice(1) as s, i}{@render option(s, i + 1)}{/each}
+            </ul>
+          </div>
+        {/if}
+      {:else if list.length}
+        <ul class="rows card" role="none">
+          {#each list as s, i}{@render option(s, i)}{/each}
+        </ul>
+      {:else}
+        <p class="row-empty">No matching streams.</p>
+      {/if}
+    </div>
+    <p class="jump-tip">Tip: ⌘K opens Jump from anywhere on iPad and Mac</p>
   </Sheet>
 {/if}

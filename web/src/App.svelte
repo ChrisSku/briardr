@@ -1,7 +1,8 @@
 <!--
-  App shell. Compact (iPhone, narrow windows): one column with a bottom tab bar that hides while a
-  stream is open. Regular (iPad, Mac): a sidebar; with a stream open, the agent list or workspace
-  tree stays in view beside it.
+  App shell. Compact (iPhone, narrow windows): one column with a bottom tab bar (Agents, Workspaces,
+  Settings) that hides while a stream is open. Regular (iPad, Mac): a sidebar with Agents and Workspaces,
+  Jump, and Settings as a gear in the corner; with a stream open, the agent list or workspace tree stays
+  in view beside it, next to the sidebar when the window is wide enough (else with its own switch).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -13,13 +14,12 @@
   import ConnectionBar from './screens/ConnectionBar.svelte';
   import UpdateBar from './screens/UpdateBar.svelte';
   import JumpHost, { openJump } from './screens/Jump.svelte';
-  import MacSummary from './screens/MacSummary.svelte';
   import PairScreen from './screens/Pair.svelte';
   import SettingsScreen from './screens/SettingsScreen.svelte';
   import { streamScreen } from './screens/lazy.svelte.ts';
   import WorkspacesScreen from './screens/WorkspacesScreen.svelte';
   import WorkspaceTree from './screens/WorkspaceTree.svelte';
-  import { banners, dismissBanner, listPane, model, session, toasts, topOverlay } from './store.ts';
+  import { banners, dismissBanner, herdr, listPane, model, session, toasts, topOverlay } from './store.ts';
   import { groupOf } from './types.ts';
   import { Icon, iconName, type IconName } from './ui/icons/index.ts';
   import { ConfirmHost, Empty, MenuHost } from './ui/kit.ts';
@@ -27,6 +27,11 @@
 
   const query = matchMedia('(max-width: 759px)');
   let compact = $state(query.matches);
+  // Wide enough for the sidebar beside an open stream's list.
+  const wideQuery = matchMedia('(min-width: 1200px)');
+  let wide = $state(wideQuery.matches);
+  // The release this page belongs to (package.json's version, written in by scripts/build.ts).
+  const version = document.querySelector<HTMLMetaElement>('meta[name="briardr-release"]')?.content;
   const r = $derived(route.value);
   const s = $derived(session.value);
   const inStream = $derived(r.name === 'stream');
@@ -36,14 +41,19 @@
     label: string;
     icon: IconName;
   }
-  // Plugins' app tabs (Usage) sit between Workspaces and Settings.
-  const tabs: NavTab[] = $derived([
+  // Installed plugins' app tabs sit after Workspaces. Settings ends the tab bar; on iPad and Mac it's
+  // the gear in the sidebar's corner.
+  const places: NavTab[] = $derived([
     { route: { name: 'agents' }, label: 'Agents', icon: 'agents' },
     { route: { name: 'workspaces' }, label: 'Workspaces', icon: 'workspaces' },
     ...appTabs.value.map((t): NavTab => ({ route: { name: 'app', tab: t.id }, label: t.label, icon: iconName(t.icon) })),
-    { route: { name: 'settings' }, label: 'Settings', icon: 'settings' },
   ]);
+  const tabs: NavTab[] = $derived([...places, { route: { name: 'settings' }, label: 'Settings', icon: 'settings' }]);
   const isOn = (t: NavTab) => r.name === t.route.name && (r.name !== 'app' || (t.route.name === 'app' && r.tab === t.route.tab));
+  // Beside a stream, the sidebar picks the list next to it instead of leaving the stream.
+  const sideOn = (t: NavTab) => (inStream ? t.route.name === listPane.value : isOn(t));
+  const sidePick = (t: NavTab) => (inStream && (t.route.name === 'agents' || t.route.name === 'workspaces') ? (listPane.value = t.route.name) : navigate(t.route));
+  const showSidebar = $derived(!compact && (!inStream || wide));
   const appTab = $derived(r.name === 'app' ? appTabs.value.find((t) => t.id === r.tab) : undefined);
   $effect(() => {
     if (appTab && !appTab.component) void loadBuiltins('appTabs');
@@ -53,8 +63,9 @@
   });
 
   onMount(() => {
-    const onChange = () => (compact = query.matches);
+    const onChange = () => ((compact = query.matches), (wide = wideQuery.matches));
     query.addEventListener('change', onChange);
+    wideQuery.addEventListener('change', onChange);
     // Keyboard shortcuts read the current route when pressed.
     const onKey = (e: KeyboardEvent) => {
       const cur = route.value;
@@ -75,6 +86,7 @@
     window.addEventListener('keydown', onKey);
     return () => {
       query.removeEventListener('change', onChange);
+      wideQuery.removeEventListener('change', onChange);
       window.removeEventListener('keydown', onKey);
     };
   });
@@ -116,28 +128,42 @@
       {/if}
     </div>
     <div class="app-body">
-      {#if !compact && !inStream}
+      {#if showSidebar}
         <nav class="sidebar" aria-label="Main">
-          <div class="sidebar-brand">Briardr</div>
-          {#each tabs as t}
-            <button class={['side-item', isOn(t) && 'is-on']} aria-current={isOn(t) ? 'page' : undefined} onclick={() => navigate(t.route)}>
-              <Icon name={t.icon} size={20} />
+          <div class="sidebar-brand"><span class="brand-tile" aria-hidden="true"><img src="/icons/briard.png" alt="" /></span>Briardr</div>
+          {#each places as t}
+            <button class={['side-item', sideOn(t) && 'is-on']} aria-current={isOn(t) ? 'page' : undefined} onclick={() => sidePick(t)}>
+              <Icon name={t.icon} size={18} />
               <span>{t.label}</span>
-              {#if t.route.name === 'agents' && attention > 0}<span class="side-badge">{attention}</span>{/if}
+              {#if t.route.name === 'agents' && attention > 0}<span class="cnt tone-attention" aria-label="{attention} need you">{attention}</span>{/if}
             </button>
           {/each}
           <div class="sidebar-foot">
-            <MacSummary />
+            <button class="side-jump" onclick={() => openJump()}>
+              <Icon name="search" size={16} />
+              <span>Jump to stream</span>
+              <kbd>⌘K</kbd>
+            </button>
+            <div class="side-settings">
+              <button class={['icon-btn', r.name === 'settings' && 'is-on']} aria-label="Settings" aria-current={r.name === 'settings' ? 'page' : undefined} onclick={() => navigate({ name: 'settings' })}>
+                <Icon name="settings" size={18} />
+              </button>
+              <span class="side-version">{[`Briardr ${version}`, herdr.value?.version && `Herdr ${herdr.value.version}`].filter(Boolean).join(' · ')}</span>
+            </div>
           </div>
         </nav>
       {/if}
       {#if !compact && inStream}
         <!-- Beside an open stream on iPad and Mac: agents or the workspace tree. -->
         <aside class="list-pane" aria-label={listPane.value === 'agents' ? 'Agents' : 'Workspaces'}>
-          <div class="segmented list-switch" role="tablist">
-            <button role="tab" aria-selected={listPane.value === 'agents'} class={listPane.value === 'agents' ? 'is-on' : ''} onclick={() => (listPane.value = 'agents')}>Agents</button>
-            <button role="tab" aria-selected={listPane.value === 'workspaces'} class={listPane.value === 'workspaces' ? 'is-on' : ''} onclick={() => (listPane.value = 'workspaces')}>Workspaces</button>
-          </div>
+          {#if showSidebar}
+            <h2 class="list-title">{listPane.value === 'agents' ? 'Agents' : 'Workspaces'}</h2>
+          {:else}
+            <div class="segmented list-switch" role="tablist">
+              <button role="tab" aria-selected={listPane.value === 'agents'} class={listPane.value === 'agents' ? 'is-on' : ''} onclick={() => (listPane.value = 'agents')}>Agents</button>
+              <button role="tab" aria-selected={listPane.value === 'workspaces'} class={listPane.value === 'workspaces' ? 'is-on' : ''} onclick={() => (listPane.value = 'workspaces')}>Workspaces</button>
+            </div>
+          {/if}
           <div class="list-pane-body">
             {#if listPane.value === 'agents'}<AgentsList compact />{:else}<WorkspaceTree compact />{/if}
           </div>
@@ -174,7 +200,7 @@
           <button class={isOn(t) ? 'is-on' : ''} aria-current={isOn(t) ? 'page' : undefined} onclick={() => navigate(t.route)}>
             <span class="tab-icon">
               <Icon name={t.icon} size={24} />
-              {#if t.route.name === 'agents' && attention > 0}<span class="tab-badge" aria-label="{attention} need you">{attention}</span>{/if}
+              {#if t.route.name === 'agents' && attention > 0}<span class="cnt tone-attention tab-badge" aria-label="{attention} need you">{attention}</span>{/if}
             </span>
             <span class="tab-label">{t.label}</span>
           </button>

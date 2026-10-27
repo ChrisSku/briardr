@@ -9,7 +9,7 @@ export type Route =
   | { name: 'workspaces' }
   | { name: 'settings'; section?: string }
   | { name: 'stream'; id: string; surface: Surface }
-  /** A plugin's app tab (Usage), at /<tab>. */
+  /** An installed plugin's app tab, at /<tab>. */
   | { name: 'app'; tab: string };
 
 export function parse(pathname: string): Route {
@@ -22,6 +22,9 @@ export function parse(pathname: string): Route {
       return { name: 'workspaces' };
     case 'settings':
       return { name: 'settings', section: parts[1] };
+    case 'usage':
+      // Usage was a tab until it moved into Settings; old links and saved places still open it.
+      return { name: 'settings', section: 'usage' };
     case 'stream':
       if (parts[1]) return { name: 'stream', id: parts[1], surface: parts[2] || 'terminal' };
       return { name: 'agents' };

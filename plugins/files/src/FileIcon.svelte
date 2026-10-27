@@ -38,7 +38,7 @@
 
 <svg
   class="file-icon"
-  style:color={folder ? 'var(--accent)' : spec.tint === 'plain' ? 'var(--fg-3)' : `var(--tint-${spec.tint})`}
+  style:color={folder ? 'var(--text-secondary)' : spec.tint === 'plain' ? 'var(--text-tertiary)' : `var(--tint-${spec.tint})`}
   width={size}
   height={size}
   viewBox="0 0 24 24"
