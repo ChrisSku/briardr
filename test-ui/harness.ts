@@ -20,15 +20,16 @@ export function serverArgv(cmd: string): [string, string[]] {
 }
 
 // WebKit logs a fetch that a navigation cancels as "Fetch API cannot load https://host/ due to access control
-// checks.", and Playwright reports that as a page error. The page's update check (GET /, which catches
-// its own failures) is often in flight when a test navigates, so that one isn't the page's error.
-const CANCELLED_UPDATE_CHECK = /^Fetch API cannot load https:\/\/[^/\s]+\/ due to access control checks\./;
+// checks.", and Playwright reports that as a page error. The page's update check (GET /) and Settings'
+// counts (GET /api/devices and /api/update) catch their own failures and are often in flight when a test
+// navigates, so those aren't the page's errors.
+const CANCELLED_READ = /^Fetch API cannot load https:\/\/[^/\s]+\/(api\/devices|api\/update)? due to access control checks\./;
 
 /** The page's uncaught errors, collected as they happen. */
 export function pageErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => {
-    if (!CANCELLED_UPDATE_CHECK.test(e.stack ?? '')) errors.push(e.message);
+    if (!CANCELLED_READ.test(e.stack ?? '')) errors.push(e.message);
   });
   return errors;
 }
