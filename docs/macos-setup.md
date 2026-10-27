@@ -108,10 +108,15 @@ Data is in `~/Library/Application Support/Briardr`, including `config.json`, own
 `state/`, and `logs/`. Back up this directory privately; it includes keys and personal state.
 See [configuration](configuration.md) for overrides.
 
-Before updating, read the [release notes](https://github.com/ChrisSku/briardr/releases) and back up
-your data. Then run the installer again: it replaces `~/.local/lib/briardr` with the latest release
-(`BRIARDR_VERSION=0.2.0` picks one). If running as a LaunchAgent, restart Briardr with
-`launchctl kickstart -k gui/$(id -u)/app.briardr.server`. Restarting Briardr leaves Herdr running.
+Briardr asks GitHub once a day whether a newer release is out, and Settings → About shows it with its
+release notes (turn **Check for updates daily** off there, or set `updates.check` to `false`). Before
+updating, read the [release notes](https://github.com/ChrisSku/briardr/releases) and back up your data.
+Then tap **Update** in Settings → About, or run `briardr update` on the Mac (`--check` only says whether
+there's a newer release). Either downloads the release for this Mac, checks it against the release's
+checksums and replaces `~/.local/lib/briardr`, then restarts the LaunchAgent on it; a `briardr serve` in
+a terminal needs a restart by hand. Restarting Briardr leaves Herdr and your agents running, and devices
+reconnect and load the new client. Running the installer again does the same (`BRIARDR_VERSION=0.2.0`
+picks a release).
 
 ## From source
 
@@ -129,7 +134,8 @@ mise run build:server
 mise run install-cli    # links ~/.local/bin/briardr to this checkout's build
 ```
 
-`briardr` then runs the checkout's build, and the steps above are the same. To update, switch to the new release's tag and rebuild:
+`briardr` then runs the checkout's build, and the steps above are the same. A checkout doesn't update
+itself: Settings → About and `briardr update` show the command for a newer release. To update, switch to the new release's tag and rebuild:
 `git fetch --tags && git checkout vX.Y.Z && mise install && mise run install && mise run build && mise run build:server`.
 See [development](development.md) for the rest.
 

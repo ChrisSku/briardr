@@ -54,4 +54,6 @@ change the host. Device pairing is the trust boundary, not a separate sandbox. S
 No Briardr account or central relay is required. Tailscale deployments use Tailscale's network
 coordination and certificate services; public HTTPS uses your DNS and Caddy's configured CA. Web
 Push uses the browser vendor's push service with encrypted payloads. Optional usage sources contact
-their providers. The macOS speech helper transcribes on the host.
+their providers. The macOS speech helper transcribes on the host. Once a day (unless `updates.check` is
+off) the host asks GitHub's API for Briardr's latest release; updating downloads it from GitHub's
+releases and checks it against the release's SHA256SUMS.

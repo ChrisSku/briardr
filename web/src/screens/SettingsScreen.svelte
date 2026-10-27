@@ -25,7 +25,7 @@
   import PluginsSection from './settings/PluginsSection.svelte';
   import PowerSection from './settings/PowerSection.svelte';
   import Section from './settings/Section.svelte';
-  import type { Settings } from './settings/settings.ts';
+  import type { Settings, UpdateStatus } from './settings/settings.ts';
   import TerminalSection from './settings/TerminalSection.svelte';
 
   let { section }: { section?: string } = $props();
@@ -73,6 +73,7 @@
 
   // ---------- the list's values ----------
   let devices = $state<number | null>(null);
+  let update = $state<string | null>(null);
   let usage = $state.raw<Record<string, { report: Report | null; tapReport?: Report | null } | undefined> | null>(null);
   interface Report {
     windows: { label: string; usedPercent: number | null; resetsAt: number | null }[];
@@ -81,6 +82,7 @@
   $effect(() => {
     if (section) return;
     api<{ devices: unknown[] }>('GET', '/api/devices').then((r) => (devices = r.devices.length), () => {});
+    api<UpdateStatus>('GET', '/api/update').then((r) => (update = r.available ? r.latest : null), () => {});
     if (isOn('usage')) api<{ usage: typeof usage }>('GET', '/api/usage').then((r) => (usage = r.usage), () => {});
   });
   /** A provider's fullest window in its newest report, for its row. */
@@ -167,7 +169,7 @@
             {@render row(x.id, 'plug', x.label)}
           {/each}
           {@render row('diagnostics', 'warning', 'Diagnostics')}
-          {@render row('about', 'dog', 'About', version, 'brand')}
+          {@render row('about', 'dog', 'About', update ? `${update} available` : version, 'brand')}
         </div>
       </section>
     {:else if section === 'herdr'}
@@ -190,7 +192,7 @@
     {:else if section === 'diagnostics'}
       <DiagnosticsSection />
     {:else if section === 'about'}
-      <AboutSection {s} />
+      <AboutSection {s} {save} />
     {:else if plugin}
       <Section id={plugin.id} title={plugin.label}>
         {#if plugin.component}<plugin.component briardr={pluginContext(plugin.plugin)} {s} {save} />{/if}
