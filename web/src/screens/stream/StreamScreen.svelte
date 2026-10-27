@@ -9,16 +9,16 @@
   import { onMount, untrack } from 'svelte';
   import { record } from '../../diag.ts';
   import { navigate, openedFromAlert, type Surface } from '../../router.ts';
-  import { markOpened, model, prefs, toast, visibleStreamId } from '../../store.ts';
+  import { clockSkew, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
   import { TerminalController } from '../../terminal/controller.ts';
   import { isLocalhostUrl, isWebUrl } from '../../terminal/links.ts';
   import { streamContext } from '../../plugins/context.ts';
   import { linkHandlers, loadBuiltins, streamTabs } from '../../plugins/registry.svelte.ts';
   import type { Stream } from '../../types.ts';
   import { Icon, iconName, ToolIcon } from '../../ui/icons/index.ts';
-  import { Empty, openMenu, StateBadge } from '../../ui/kit.ts';
+  import { Empty, openMenu, since } from '../../ui/kit.ts';
   import { openJump } from '../Jump.svelte';
-  import { contextOf, markSeen } from '../streams.ts';
+  import { markSeen } from '../streams.ts';
   import HistorySheet from './HistorySheet.svelte';
   import InfoSheet from './InfoSheet.svelte';
   import RenameSheet from './RenameSheet.svelte';
@@ -115,6 +115,16 @@
 
   const st = $derived(ctl.status.value);
 
+  // Under the name: the agent and where it runs ("Claude · web/auth"), and on iPad and Mac for how long.
+  const TOOL: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
+  const sub = $derived.by(() => {
+    if (!s) return '';
+    const m = model.value;
+    const place = [m?.workspaces.find((w) => w.id === s.workspaceId)?.name, m?.projects.find((p) => p.id === s.projectId)?.name].filter(Boolean).join('/');
+    const time = !compact && s.state && s.stateSince ? since(now.value + clockSkew.value - s.stateSince) : '';
+    return [TOOL[s.tool.toLowerCase()] ?? s.tool, place, time].filter(Boolean).join(' · ');
+  });
+
   // Also offered by the watching banner, which can be dismissed.
   const takeControl = () => (st.watchReason === 'busy' || st.watchReason === 'taken_over' ? confirmTakeOver(ctl) : ctl.connect('control', false));
 
@@ -142,17 +152,16 @@
 {:else}
   <!-- The banner under the header explains watching and reconnecting; data-ownership is for tests. -->
   <div class="screen stream-screen" data-ownership={st.ownership}>
-    <StreamHeader title={s.name} sub={contextOf(s)} state={s.state} onBack={() => navigate({ name: 'agents' })} onTitle={() => openJump()}>
+    <StreamHeader title={s.name} {sub} state={s.state} {compact} onBack={() => navigate({ name: 'agents' })} onTitle={() => openJump()}>
       {#snippet icon()}
-        <ToolIcon tool={s.tool} kind={s.kind} size={20} />
+        <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
       {/snippet}
       {#snippet trailing()}
-        <StateBadge state={s.state} />
-        <button class="icon-btn" aria-label="Jump to a stream" onclick={() => openJump()}>
-          <Icon name="search" />
+        <button class={['icon-btn', !compact && 'round']} aria-label="Jump to a stream" onclick={() => openJump()}>
+          <Icon name="search" size={compact ? 20 : 18} />
         </button>
-        <button class="icon-btn" aria-label="Stream actions" onclick={(e) => actions(e.currentTarget)}>
-          <Icon name="more" />
+        <button class={['icon-btn round', compact && 'tinted']} aria-label="Stream actions" onclick={(e) => actions(e.currentTarget)}>
+          <Icon name="more" size={18} />
         </button>
       {/snippet}
     </StreamHeader>

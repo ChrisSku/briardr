@@ -476,7 +476,7 @@ describe('ownership (two devices)', () => {
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     await b.page.waitForSelector('[data-ownership=watching]');
-    await b.page.getByText('Another client is controlling this stream').waitFor();
+    await b.page.locator('.watch-banner', { hasText: 'Another device is in control' }).waitFor();
     // Cancel first: nothing changes.
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('button', { name: 'Cancel' }).click();
@@ -486,7 +486,7 @@ describe('ownership (two devices)', () => {
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('dialog').getByRole('button', { name: 'Take Over' }).click();
     await b.page.waitForSelector('[data-ownership=controlling]');
-    await a.page.getByText('Another client took control').waitFor();
+    await a.page.locator('.watch-banner', { hasText: 'Another device took control' }).waitFor();
     assert.equal(await a.page.locator('[data-ownership=watching]').count(), 1);
     await a.ctx.close();
     await b.ctx.close();

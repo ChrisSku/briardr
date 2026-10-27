@@ -151,14 +151,14 @@ const STEPS: Step[] = [
       const name = s.fixture.model.streams.find((x) => x.id === busyStream)!.name;
       await page.goto(s.url + `/stream/${busyStream}`);
       await page.waitForSelector('.conn.conn-watching, [data-ownership=watching]');
-      await page.locator('.top-overlay .own-banner').waitFor();
+      await page.locator('.watch-banner').waitFor();
       void name;
     },
   },
   {
     name: '20-takeover-confirm',
     run: async (page) => {
-      await page.locator('.top-overlay .own-banner').getByRole('button', { name: 'Take Over' }).click();
+      await page.locator('.watch-banner').getByRole('button', { name: 'Take over' }).click();
       await page.waitForSelector('.sheet.confirm');
     },
   },

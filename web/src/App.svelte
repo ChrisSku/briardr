@@ -148,7 +148,7 @@
               <button class={['icon-btn', r.name === 'settings' && 'is-on']} aria-label="Settings" aria-current={r.name === 'settings' ? 'page' : undefined} onclick={() => navigate({ name: 'settings' })}>
                 <Icon name="settings" size={18} />
               </button>
-              <span class="side-version">Briardr {version}{#if herdr.value?.version} · Herdr {herdr.value.version}{/if}</span>
+              <span class="side-version">{[`Briardr ${version}`, herdr.value?.version && `Herdr ${herdr.value.version}`].filter(Boolean).join(' · ')}</span>
             </div>
           </div>
         </nav>
