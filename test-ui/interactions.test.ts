@@ -466,6 +466,22 @@ describe('terminal input (iPhone)', () => {
     assert.equal(wheel.length, rows, `one wheel-up per row crossed (${wheel.length})`);
     assert.equal(new Set(wheel).size, 1, 'all anchored at the cell where the gesture started');
   });
+
+  test('a trackpad wheel over the terminal scrolls one row per row crossed and never sends arrow keys', async () => {
+    const screen = page.locator('.term-screen .xterm-screen'); // xterm's own element, as a Mac trackpad hits it
+    const box = (await screen.boundingBox())!;
+    const cellH = await page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.cell().h);
+    const at = { clientX: box.x + 60, clientY: box.y + 200 };
+    const rows = 5;
+    const before = (await bytesSeen()).join('');
+    const total = (rows + 0.5) * cellH;
+    for (let i = 0; i < 10; i++) await screen.dispatchEvent('wheel', { ...at, deltaY: -total / 10, deltaMode: 0 });
+    await sleep(600);
+    const added = Buffer.from((await bytesSeen()).join('').slice(before.length), 'hex').toString('latin1');
+    const wheel = added.match(/\x1b\[<64;(\d+);(\d+)M/g) || [];
+    assert.equal(wheel.length, rows, `one wheel-up per row crossed (${wheel.length})`);
+    assert.ok(!/\x1b[[O][AB]/.test(added), 'no arrow keys');
+  });
 });
 
 describe('ownership (two devices)', () => {

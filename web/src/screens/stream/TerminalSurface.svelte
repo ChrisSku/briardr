@@ -200,9 +200,11 @@
   }
 
   // Mouse / trackpad: wheel → one scroll event per row crossed, anchored at the pointer's cell.
+  // Captured before xterm sees it: with no scrollback, xterm would turn the wheel into arrow keys.
   let wheelAcc = 0;
-  function onwheel(e: WheelEvent) {
+  function onwheelcapture(e: WheelEvent) {
     e.preventDefault();
+    e.stopPropagation();
     const h = ctl.cell().h;
     wheelAcc += e.deltaMode === 1 ? e.deltaY * h : e.deltaY;
     const cell = ctl.cellAt(e.clientX, e.clientY);
@@ -355,7 +357,7 @@
 <div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onwheel} {oncontextmenu}>
+  <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onwheelcapture} {oncontextmenu}>
     <div class="term-shift" bind:this={shift}>
       <div class="term-screen" bind:this={screen}></div>
     </div>
