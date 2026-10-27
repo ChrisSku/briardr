@@ -27,6 +27,8 @@
   {#each rep?.windows ?? [] as w}
     {@const passed = w.resetsAt !== null && w.resetsAt <= t}
     {@const pct = w.usedPercent}
+    {@const near = !passed && pct !== null && pct >= 90}
+    {@const reset = w.resetsAt ? (passed ? `Reset ${ago(t - w.resetsAt)}` : `Resets in ${duration(w.resetsAt - t)} · ${clockAt(w.resetsAt)}`) : 'Reset time unknown'}
     <div class="meter-row">
       <div class="meter-label">
         <span>{w.label}</span>
@@ -37,9 +39,7 @@
           <span class={['meter-fill', tone(pct)]} style:width="{Math.min(100, pct)}%"></span>
         </div>
       {/if}
-      <div class="meter-sub">
-        {#if !passed && pct !== null && pct >= 90}Almost at the limit · {/if}{w.resetsAt ? (passed ? `Reset ${ago(t - w.resetsAt)}` : `${pct !== null && pct >= 90 ? 'resets' : 'Resets'} in ${duration(w.resetsAt - t)} · ${clockAt(w.resetsAt)}`) : 'Reset time unknown'}
-      </div>
+      <div class="meter-sub">{near ? `Almost at the limit · ${reset[0].toLowerCase()}${reset.slice(1)}` : reset}</div>
     </div>
   {/each}
   {#if rep?.credits}

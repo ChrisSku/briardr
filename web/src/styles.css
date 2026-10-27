@@ -499,18 +499,6 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 /* Keep reading widths comfortable on wide windows instead of stretching rows edge to edge. */
 .is-regular .screen-body > .agents, .is-regular .screen-body > .workspaces { max-width: 860px; }
 
-/* ---------- Mac summary ---------- */
-.mac-summary { padding: 4px 0 12px; display: flex; flex-direction: column; gap: 3px; }
-.mac-summary.is-stale { opacity: 0.75; }
-.mac-line { display: flex; align-items: center; gap: 10px; }
-.mac-name { font-size: 1.02rem; }
-.mac-batt { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; font-weight: 600; margin-left: auto; }
-.mac-sub { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--fg-2); font-size: 0.82rem; }
-.batt { width: 24px; height: 12px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; display: inline-block; padding: 1px; }
-.batt::after { content: ''; position: absolute; right: -4px; top: 3px; width: 2px; height: 4px; background: currentColor; border-radius: 1px; }
-.batt-fill { display: block; height: 100%; background: currentColor; border-radius: 1px; }
-.batt.low { color: var(--danger); }
-
 /* ---------- agents ---------- */
 /* Filter chips, as today: one row of small chips, the count in the state's colour, then the label. */
 .count-strip { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0; scrollbar-width: none; }
@@ -524,6 +512,7 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .count.is-on { background: var(--st-bg); border-color: var(--st); }
 .count:disabled { opacity: 0.45; }
 .agents { display: flex; flex-direction: column; gap: 10px; }
+.agents > * { flex: none; }
 .group { display: flex; flex-direction: column; gap: 8px; }
 .rows { list-style: none; margin: 0; padding: 0; }
 .row { display: flex; align-items: center; border-bottom: 1px solid var(--line-subtle); }
@@ -943,6 +932,7 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 
 /* usage (Settings → Usage): a card per provider, 6 pt meters, ink under 70 %, attention 70–89 %, danger from 90 % */
 .usage { display: flex; flex-direction: column; gap: 10px; }
+.usage > * { flex: none; }
 .usage-top { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font: var(--type-footnote); letter-spacing: var(--track-footnote); margin: -4px 0 -4px; }
 .usage-top span { flex: 1; }
 .usage-card { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -981,11 +971,33 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .set-label { flex: 1; min-width: 0; }
 .set-value { color: var(--text-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 .set-chev { color: var(--text-tertiary); }
-.settings-index { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-.settings-index a { font-size: 0.82rem; text-decoration: none; padding: 5px 10px; border-radius: 999px; background: var(--bg-2); color: var(--fg); }
-.set-section { padding: 16px 0; border-bottom: 1px solid var(--line); scroll-margin-top: 8px; }
-.set-section h2 { font-size: 1.1rem; margin-bottom: 8px; }
-.set-sub { font-size: 0.95rem; margin: 14px 0 4px; }
+.settings { display: flex; flex-direction: column; gap: 10px; }
+.settings > * { flex: none; width: 100%; max-width: 760px; }
+.settings-back { padding: 6px var(--gutter) 0; }
+.settings-back a { display: inline-flex; align-items: center; gap: 2px; min-height: var(--tap); margin-left: -6px; color: var(--text-primary); text-decoration: none; font: var(--type-callout); }
+/* A section's page: its content on a card. */
+.set-section { background: var(--bg-surface); border: 1px solid var(--line-default); border-radius: 14px; padding: 14px; }
+.set-sub { font: var(--type-headline); margin: 14px 0 4px; }
+/* Usage brings its own cards. */
+#set-usage.set-section { background: none; border: 0; padding: 0; }
+/* The computer Briardr runs on: an ink tile, its name, the connection and Herdr. */
+.host-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 12px; color: var(--text-primary); text-decoration: none; }
+.host-row:hover { background: var(--bg-sunken); }
+.host-tile { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 11px; background: var(--ink-default); color: var(--text-on-ink); flex: none; }
+.host-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.host-text strong { font: var(--type-headline); letter-spacing: var(--track-headline); }
+.host-status { display: flex; align-items: center; gap: 6px; font: var(--type-footnote); color: var(--text-secondary); }
+.host-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st); flex: none; }
+.mac-summary.is-stale .host-text { opacity: 0.75; }
+.mac-summary .set-row::before { content: ''; position: absolute; top: 0; left: 52px; right: 0; border-top: 1px solid var(--line-subtle); }
+.set-tile.tone-danger, .set-value.is-low { color: var(--state-danger); }
+/* Usage in the list: a row per provider with a 4 pt bar of its fullest window. */
+.usage-row { padding-top: 9px; padding-bottom: 10px; }
+.usage-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.usage-row-top { display: flex; align-items: baseline; gap: 8px; }
+.usage-row-value { font: var(--type-footnote); }
+.usage-row-value.tone-attention { color: var(--state-attention); }
+.usage-row-value.tone-danger { color: var(--state-danger); }
 .switch-row code, .plugin-command { font-family: var(--mono); font-size: 0.8rem; background: var(--bg-2); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 .plugin-version { display: inline; }
 .set-body { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }

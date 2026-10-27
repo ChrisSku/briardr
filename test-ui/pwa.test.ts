@@ -337,7 +337,8 @@ describe('installation', () => {
     assert.match((await section.textContent()) || '', /tap Share.*Add to Home Screen/s);
     assert.match((await section.textContent()) || '', /may not share this browser’s sign-in.*Add a device/s);
     // Notification setup points to the same steps.
-    assert.ok(await page.locator('#set-notifications').getByRole('link', { name: 'Install app' }).count());
+    await page.goto(proxy.base + '/settings/notifications');
+    await page.locator('#set-notifications').getByRole('link', { name: 'Install app' }).waitFor();
     await page.goto(proxy.base + '/workspaces');
     await page.getByRole('complementary', { name: 'Install Briardr' }).getByRole('button', { name: 'Not now' }).click();
     assert.equal(await card.count(), 0);

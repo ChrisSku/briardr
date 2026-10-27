@@ -841,7 +841,7 @@ describe('the on-screen keyboard (iPhone)', () => {
     if (!p.ok) throw new Error('pairing failed');
     await ctx.addCookies([{ name: '__Host-briardr', value: p.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
     const page = await ctx.newPage();
-    await page.goto(s.base + '/settings');
+    await page.goto(s.base + '/settings/herdr');
     const field = page.getByLabel(/^Path to the herdr executable/);
     await field.focus();
     const top = page.viewportSize()!.height - 160;
@@ -855,7 +855,7 @@ describe('the on-screen keyboard (iPhone)', () => {
 describe('settings', () => {
   test('About shows the build ID, branch and commit of the running page', async () => {
     const a = await device('mac', 'mac-settings');
-    await a.page.goto(s.base + '/settings');
+    await a.page.goto(s.base + '/settings/about');
     const meta = (name: string) => a.page.locator(`meta[name="${name}"]`).getAttribute('content');
     const [build, branch, commit] = [await meta('briardr-version'), await meta('briardr-branch'), await meta('briardr-commit')];
     assert.match(build!, /^[0-9a-f]{12}$/);

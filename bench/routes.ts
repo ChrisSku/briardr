@@ -24,8 +24,8 @@ async function steps(page: Page, s: FixtureServer, log: () => string[]) {
   await page.waitForSelector('.stream-row');
   await page.waitForLoadState('networkidle');
   mark('fresh load: Agents');
-  for (const label of ['Workspaces', 'Usage', 'Settings']) {
-    await page.locator('nav[aria-label="Main"] button', { hasText: label }).click();
+  for (const label of ['Workspaces', 'Settings']) {
+    await page.locator('nav[aria-label="Main"]').getByRole('button', { name: label, exact: true }).click();
     await page.waitForTimeout(600);
     mark(label);
   }

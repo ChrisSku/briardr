@@ -63,15 +63,22 @@ for (const profile of ['iphone', 'mac'] as const) {
       await page.getByRole('tab', { name: 'Terminal', selected: true }).waitFor();
       assert.equal(await page.getByRole('tab', { name: 'Docs' }).count(), 0);
 
-      // Usage is a page in Settings: it leaves Settings, and the tab bar never had it.
+      // Usage is a group in Settings: it leaves Settings, and the tab bar never had it.
+      const settingsList = async () => {
+        await page.waitForFunction(() => [...document.querySelectorAll<HTMLInputElement>('[role=switch]')].every((e) => !e.disabled));
+        await page.getByRole('link', { name: 'Settings', exact: true }).click();
+        await page.getByText('Diagnostics').first().waitFor();
+      };
       await page.goto(`${server.base}/settings/plugins`);
-      await page.locator('#set-usage').waitFor();
       await page.getByRole('switch', { name: /^Usage/ }).click();
-      await page.locator('#set-usage').waitFor({ state: 'detached' });
+      await settingsList();
+      assert.equal(await page.locator('#set-usage').count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Usage', exact: true }).count(), 0);
 
+      await page.goto(`${server.base}/settings/plugins`);
       await page.getByRole('switch', { name: /^Docs/ }).click();
       await page.getByRole('switch', { name: /^Usage/ }).click();
+      await settingsList();
       await page.locator('#set-usage').waitFor();
       await other.page.getByRole('tab', { name: 'Docs' }).waitFor();
       const list = await page.evaluate(() => fetch('/api/plugins').then((r) => r.json()));
