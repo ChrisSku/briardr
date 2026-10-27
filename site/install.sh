@@ -6,7 +6,7 @@
 # It downloads the archive for this computer (macOS or Linux, on Apple silicon/aarch64 or x86_64), checks
 # it against the release's SHA256SUMS, puts Briardr in ~/.local/lib/briardr and links `briardr` into
 # ~/.local/bin. Then `briardr setup` checks for Herdr, offers to install the version Briardr is tested
-# with, and says what's next. Run it again to upgrade. Arguments go to `briardr setup`
+# with, and says what's next. Run it again (or `briardr update`) to upgrade. Arguments go to `briardr setup`
 # (`sh -s -- --yes` installs Herdr without asking).
 #   BRIARDR_VERSION=0.2.0       that version instead of the latest
 #   BRIARDR_INSTALL_DIR=<dir>   somewhere else than ~/.local/lib/briardr

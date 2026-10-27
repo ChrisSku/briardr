@@ -248,7 +248,8 @@ journalctl -u briardr -f                  # logs (also briardr-herdr, caddy)
 ```
 
 A checkout cloned at a release tag has no branch to fast-forward, so name the release to move to:
-`scripts/setup-linux.sh upgrade v0.2.0`. The [releases](https://github.com/ChrisSku/briardr/releases)
+`scripts/setup-linux.sh upgrade v0.2.0`. Settings → About (and `briardr update --check`) says when there's
+a newer release and shows that command for it; the helper's checkout doesn't replace itself. The [releases](https://github.com/ChrisSku/briardr/releases)
 page lists them with their notes.
 
 `mise exec -- bun scripts/smoke-deployment.ts --origin https://briardr.example.com --restart` (WireGuard:

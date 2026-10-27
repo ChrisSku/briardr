@@ -171,8 +171,9 @@ export interface Running {
   readonly urls: string[];
 }
 
-/** `config`: written to config.json first (e.g. proxy mode). `platform`: run as that host (BRIARDR_PLATFORM). */
-export function startServer(opts: { pair?: boolean; config?: object; platform?: string } = {}): Promise<TestServer> {
+/** `config`: written to config.json first (e.g. proxy mode). `platform`: run as that host (BRIARDR_PLATFORM).
+ *  `env`: more environment for the server. */
+export function startServer(opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> } = {}): Promise<TestServer> {
   if (!fs.existsSync(SERVER_BIN)) throw new Error(`${SERVER_BIN} is missing: run \`mise run build:test-server\``);
   return startBinary(SERVER_BIN, opts);
 }
@@ -182,7 +183,7 @@ export function startServer(opts: { pair?: boolean; config?: object; platform?: 
  * `s.run.*` synchronously, so the shim below calls the `/__test/*` hooks with curl. A hook
  * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
  */
-async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string }): Promise<TestServer> {
+async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> }): Promise<TestServer> {
   ensureSession();
   const dataDir = tmpDir('briardr-data-');
   if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
@@ -199,6 +200,7 @@ async function startBinary(bin: string, opts: { pair?: boolean; config?: object;
     BRIARDR_TEST_HOOKS: '1',
   };
   if (opts.platform) env.BRIARDR_PLATFORM = opts.platform;
+  Object.assign(env, opts.env);
   const child = spawn(bin, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (c) => (stderr += c));

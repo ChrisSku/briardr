@@ -37,6 +37,9 @@
     },
     "power": {
       "keepAwake": false
+    },
+    "updates": {
+      "check": true
     }
   }
 }

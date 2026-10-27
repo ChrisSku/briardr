@@ -42,6 +42,8 @@ pub struct BriardrConfig {
     pub notifications: NotificationsConfig,
     pub usage: UsageConfig,
     pub power: PowerConfig,
+    #[serde(default)]
+    pub updates: UpdatesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +83,19 @@ pub struct UsageConfig {
 #[serde(rename_all = "camelCase")]
 pub struct PowerConfig {
     pub keep_awake: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatesConfig {
+    /// Ask GitHub once a day whether a newer release is out (Settings → About shows it).
+    pub check: bool,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        UpdatesConfig { check: true }
+    }
 }
 
 /// Unset strings are written as "" in the config file.
@@ -283,6 +298,7 @@ pub fn default_config(
             codex_path: Some(which("codex", env, &codex_fallbacks)),
         },
         power: PowerConfig { keep_awake: false },
+        updates: UpdatesConfig::default(),
     }
 }
 

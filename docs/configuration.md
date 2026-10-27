@@ -45,6 +45,7 @@ devices are kept. A failed save leaves the running configuration unchanged.
 | `notifications` | Alert categories, names in alerts, and debounce behavior. |
 | `usage` | Optional provider usage sources. |
 | `power` | macOS keep-awake settings. |
+| `updates.check` | Ask GitHub once a day whether a newer release is out; default `true`. Settings → About shows it and its switch. |
 
 For advanced settings, use [`server/src/config.rs`](../server/src/config.rs) as the reference. When
 editing JSON, preserve unrelated settings; the examples in guides show only the relevant fields.

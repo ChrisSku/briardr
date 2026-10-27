@@ -3,4 +3,8 @@
 import { afterAll } from 'bun:test';
 import { endRun } from './helpers.ts';
 
+// Servers under test never ask GitHub for releases: their update check goes to a closed port instead
+// (test/update.test.ts serves its own).
+process.env.BRIARDR_RELEASES_URL ||= 'http://127.0.0.1:9';
+
 afterAll(endRun);

@@ -16,4 +16,23 @@ export interface Settings {
   version: string;
 }
 
+/** GET /api/update: what the host's last check for a newer release found. */
+export interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  checkedAt: number | null;
+  error: string | null;
+  /** The daily check (`updates.check`). */
+  check: boolean;
+  /** A release installation, which replaces itself; otherwise `how` and `command` say what to run. */
+  canInstall: boolean;
+  how: string | null;
+  command: string | null;
+  /** launchd or systemd starts Briardr again after an update. */
+  restarts: boolean;
+  installing: boolean;
+  notes: string | null;
+}
+
 export type Save = (patch: object) => Promise<boolean>;

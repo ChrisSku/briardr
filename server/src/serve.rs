@@ -34,6 +34,9 @@ use crate::usage::{Usage, UsageDeps};
 
 const TLS_REFRESH: Duration = Duration::from_secs(30 * 60);
 const UPLOAD_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
+/// How often Briardr asks GitHub for a newer release (while `updates.check` is on); after a failed check,
+/// it asks again within the hour.
+const UPDATE_CHECK_EVERY: u64 = 24 * 3600 * 1000;
 
 /// Briardr can't listen yet (an address isn't up); exits with 75 (EX_TEMPFAIL) so the service retries.
 #[derive(Debug, thiserror::Error)]
@@ -308,6 +311,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         auth.clone(),
         diag.clone(),
     );
+    let updates = Arc::new(crate::update::Updates::new(&env));
     let dictation_helper = Arc::new(RwLock::new(None));
     if caps.dictation && !env.contains_key("BRIARDR_NO_DICTATION") {
         let slot = dictation_helper.clone();
@@ -343,6 +347,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         ca_profile,
         tls_mode: tls_mode.clone(),
         caps: caps.clone(),
+        updates: updates.clone(),
     });
 
     let monitor = {
@@ -448,6 +453,24 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             tick.tick().await;
             let a = auth_flush.clone();
             let _ = tokio::task::spawn_blocking(move || a.flush_last_seen()).await;
+        }
+    }));
+
+    // The first check waits a minute, so a Briardr restarting again and again doesn't ask each time.
+    let (c, d) = (cell.clone(), diag.clone());
+    timers.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(60),
+            Duration::from_secs(3600),
+        );
+        loop {
+            tick.tick().await;
+            if c.get().updates.check
+                && updates.due(now_ms(), UPDATE_CHECK_EVERY)
+                && updates.check().await.is_err()
+            {
+                d.event("update_check_failed", &Default::default());
+            }
         }
     }));
 

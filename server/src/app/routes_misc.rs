@@ -492,12 +492,60 @@ pub(super) fn register(r: &mut Routes) {
                     cfg.usage.codex_enabled = v;
                 }
             }
+            if let Some(v) = b.get("updates").and_then(|u| bool_field(u, "check")) {
+                cfg.updates.check = v;
+            }
             let cell = app.d.cfg.clone();
             blocking(move || cell.set(cfg)).await??;
             if let Some(target) = retarget {
                 app.d.herdr.retarget(target).await;
             }
             ok(json!({"ok": true}))
+        },
+    );
+
+    // --- updates ---
+    r.add(
+        Method::GET,
+        "/api/update",
+        false,
+        |app: Arc<App>, _ctx: Ctx| async move {
+            let updates = app.d.updates.clone();
+            let check = app.cfg().updates.check;
+            ok(blocking(move || updates.status(check)).await?)
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/update/check",
+        false,
+        |app: Arc<App>, _ctx: Ctx| async move {
+            // A failed check is in the status, with what went wrong.
+            let _ = app.d.updates.check().await;
+            let updates = app.d.updates.clone();
+            let check = app.cfg().updates.check;
+            ok(blocking(move || updates.status(check)).await?)
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/update/install",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let version = str_or_empty(b.get("version"));
+            match app.d.updates.install(&version).await {
+                Ok(restarts) => {
+                    app.event("update_installed", json!({"restarts": restarts}));
+                    ok(json!({"ok": true, "version": version, "restarts": restarts}))
+                }
+                Err(message) => {
+                    app.event("update_failed", json!({}));
+                    Err(action_err(409, "update_failed", message))
+                }
+            }
         },
     );
 

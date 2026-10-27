@@ -24,6 +24,7 @@ pub mod setup;
 pub mod static_files;
 pub mod terminal_hub;
 pub mod tls;
+pub mod update;
 pub mod uploads;
 pub mod usage;
 
@@ -53,7 +54,7 @@ use crate::net::{missing_local_addresses, tailscale_info, valid_network, Tailsca
 use crate::platform::{capabilities, host_platform};
 use crate::serve::ServeError;
 
-const USAGE: &str = "Usage: briardr [serve|setup|pair|devices|revoke <id>|status|configure|caddyfile|systemd-units <dir>|install-agent|uninstall-agent|install-power|install-cli|plugin <command>|create plugin|skill [install|print]|--version]";
+const USAGE: &str = "Usage: briardr [serve|setup|pair|devices|revoke <id>|status|configure|caddyfile|systemd-units <dir>|install-agent|uninstall-agent|install-power|install-cli|plugin <command>|create plugin|skill [install|print]|update [--check]|--version]";
 
 const CONFIGURE_HELP: &str = r#"Usage: briardr configure [options]
   --mode proxy|local-ca|tailscale|files   how HTTPS is provided (proxy: a reverse proxy on this host)
@@ -195,6 +196,7 @@ async fn cli(args: Vec<String>) -> CliResult {
         "install-power" => install_power().await,
         "uninstall-agent" => uninstall_agent(&ctx).await,
         "plugin" | "plugins" => plugin_command(&ctx, rest.to_vec()).await,
+        "update" => update_command(&ctx, rest).await,
         // `briardr create plugin …` reads better than `briardr plugin create …`; both work.
         "create" if rest.first().map(String::as_str) == Some("plugin") => {
             let mut args = vec!["create".to_string()];
@@ -247,7 +249,12 @@ async fn serve_command(ctx: &Ctx) -> CliResult {
         )));
     }
     let running = serve::serve(ctx.paths.clone(), false).await?;
-    wait_for_stop_signal().await?;
+    let updates = running.app.d.updates.clone();
+    tokio::select! {
+        stopped = wait_for_stop_signal() => stopped?,
+        // Installed from the app: launchd or systemd starts the new version once this one exits.
+        () = updates.restart_requested() => println!("Restarting on the new version."),
+    }
     running.close().await;
     Ok(0)
 }
@@ -511,6 +518,106 @@ async fn systemd_units_command(ctx: &Ctx, rest: &[String]) -> CliResult {
     }
     println!("Wrote {}.", written.join(" and "));
     Ok(0)
+}
+
+/// `briardr update`: the latest release in place of this one, then the LaunchAgent restarted on it.
+async fn update_command(ctx: &Ctx, rest: &[String]) -> CliResult {
+    let (mut check, mut yes) = (false, false);
+    for arg in rest {
+        match arg.as_str() {
+            "--check" => check = true,
+            "--yes" | "-y" => yes = true,
+            _ => {
+                println!("{}", update::HELP);
+                return Ok(if arg == "--help" || arg == "-h" { 0 } else { 2 });
+            }
+        }
+    }
+    let source = update::Source::from_env(&ctx.env);
+    let latest = update::latest(&source).await.map_err(CliError::Other)?;
+    let current = crate::app::VERSION;
+    if !update::is_newer(&latest, current) {
+        println!("Briardr {current} is the latest release.");
+        return Ok(0);
+    }
+    println!(
+        "Briardr {latest} is available; this is {current}. What’s new: {}",
+        update::notes_url(&latest)
+    );
+    if check {
+        return Ok(0);
+    }
+    let installation = update::this_installation();
+    let update::Installation::Release(dir) = &installation else {
+        let (how, command) = update::how_to_update(&installation, &latest).unwrap_or_default();
+        println!("{how}\n  {command}");
+        return Ok(1);
+    };
+    if !yes {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            println!("Run `briardr update --yes` to install it.");
+            return Ok(1);
+        }
+        print!("Install Briardr {latest} in {}? [Y/n] ", dir.display());
+        std::io::Write::flush(&mut std::io::stdout())?;
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)?;
+        if !matches!(line.trim().to_lowercase().as_str(), "" | "y" | "yes") {
+            return Ok(1);
+        }
+    }
+    println!("Downloading Briardr {latest}…");
+    update::install(&source, &latest, dir)
+        .await
+        .map_err(CliError::Other)?;
+    println!(
+        "Installed Briardr {latest} in {} (checksum verified).",
+        dir.display()
+    );
+    if is_macos() && agent_runs(&launch_agent_path(&ctx.home), dir, &ctx.home) {
+        let uid = tokio::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .await?;
+        let target = format!(
+            "gui/{}/{}",
+            String::from_utf8_lossy(&uid.stdout).trim(),
+            update::AGENT_LABEL
+        );
+        let loaded = tokio::process::Command::new("launchctl")
+            .args(["print", &target])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if loaded {
+            let restarted = tokio::process::Command::new("launchctl")
+                .args(["kickstart", "-k", &target])
+                .status()
+                .await
+                .is_ok_and(|s| s.success());
+            if restarted {
+                println!("Restarted Briardr on the new version. Herdr and your agents keep running; devices reconnect.");
+                return Ok(0);
+            }
+        }
+    }
+    println!("Restart Briardr to run the new version. Herdr and your agents keep running.");
+    Ok(0)
+}
+
+/// Whether the LaunchAgent at `plist` runs the Briardr installed in `dir`, directly or through the link
+/// `briardr install-cli` makes (as install.sh checks).
+fn agent_runs(plist: &Path, dir: &Path, home: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(plist) else {
+        return false;
+    };
+    let exe = dir.join("bin").join("briardr");
+    let link = home.join(".local").join("bin").join("briardr");
+    text.contains(&*plist_escape(&exe.to_string_lossy()))
+        || (text.contains(&*plist_escape(&link.to_string_lossy()))
+            && std::fs::canonicalize(&link).ok() == std::fs::canonicalize(&exe).ok())
 }
 
 async fn install_agent(ctx: &Ctx) -> CliResult {

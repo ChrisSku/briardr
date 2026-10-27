@@ -587,6 +587,7 @@ pub struct AppDeps {
     /// (wanted, effective) TLS mode.
     pub tls_mode: Arc<RwLock<(String, String)>>,
     pub caps: HostCapabilities,
+    pub updates: Arc<crate::update::Updates>,
 }
 
 struct LiveSocket {
