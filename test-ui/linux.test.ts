@@ -45,7 +45,7 @@ beforeAll(async () => {
   paired = await (await browser.newContext(opts)).newPage();
 
   await paired.goto(base + '/');
-  await paired.getByText('Sign in this device to see and steer the work running on your server.').waitFor();
+  await paired.getByText('See and steer the agents running on your server, from anywhere on your network.').waitFor();
   const out = execFileSync(...serverArgv('pair'), { env, encoding: 'utf8' });
   await paired.getByLabel('Pairing code').fill(out.match(/[A-Z0-9]{4}-[A-Z0-9]{4}/)![0]);
   await paired.getByRole('button', { name: 'Sign in' }).click();
@@ -60,8 +60,8 @@ afterAll(async () => {
 describe('Linux host', () => {
   test('the pairing screen speaks of the server', async () => {
     await anon.goto(base + '/');
-    await anon.getByText('Sign in this device to see and steer the work running on your server.').waitFor();
-    assert.ok(await anon.getByText('on the server with', { exact: false }).isVisible());
+    await anon.getByText('See and steer the agents running on your server, from anywhere on your network.').waitFor();
+    assert.ok(await anon.getByText('Get a code on the server', { exact: false }).isVisible());
   });
 
   test('the host summary shows its name and no battery', async () => {

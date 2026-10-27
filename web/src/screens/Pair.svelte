@@ -1,4 +1,4 @@
-<!-- Pairing: the only screen available before this device is signed in. -->
+<!-- Pairing: the only screen available before this device is signed in. The brand gets its moment here. -->
 <script lang="ts">
   import { hostNoun, isMac, theHost } from '../host.ts';
   import { api, ApiError } from '../api.ts';
@@ -6,6 +6,7 @@
   import { installSuggestion, standalone } from '../install.ts';
   import { navigate } from '../router.ts';
   import { acceptSession, startSession } from '../session.ts';
+  import { Icon } from '../ui/icons/index.ts';
 
   let { reason }: { reason?: string } = $props();
 
@@ -18,6 +19,8 @@
   }
 
   let code = $state('');
+  let focused = $state(false);
+  const chars = $derived(code.replace(/[^A-Z0-9]/g, '').slice(0, 8));
   let name = $state(defaultName());
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -44,41 +47,56 @@
 
 <main class="pair">
   <div class="pair-card">
-    <h1>Briardr</h1>
-    <p class="lead">Sign in this device to see and steer the work running on your {hostNoun()}.</p>
+    <span class="brand-tile pair-tile" aria-hidden="true"><img src="/icons/briard.png" alt="" /></span>
+    <h1>Sign in to Briardr</h1>
+    <p class="lead">See and steer the agents running on your {hostNoun()}, from anywhere on your network.</p>
     {#if reason}<p class="note">{reason}</p>{/if}
     <form class="form" onsubmit={submit}>
-      <label class="field-label">
-        Pairing code
-        <!-- svelte-ignore a11y_autofocus -->
-        <input
-          class="field mono code-input"
-          bind:value={() => code, (v) => (code = v.toUpperCase())}
-          placeholder="XXXX-XXXX"
-          autocomplete="one-time-code"
-          autocapitalize="characters"
-          autocorrect="off"
-          spellcheck={false}
-          inputmode="text"
-          maxlength={9}
-          autofocus
-          required
-        />
-      </label>
+      <div class="field-label">
+        <label for="pair-code">Pairing code</label>
+        <!-- One field (autofill and pasting work as usual), shown as eight cells in two groups of four, as
+             briardr pair prints the code. -->
+        <div class="code-cells">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            id="pair-code"
+            class="code-input mono"
+            bind:value={() => code, (v) => (code = v.toUpperCase())}
+            onfocus={() => (focused = true)}
+            onblur={() => (focused = false)}
+            autocomplete="one-time-code"
+            autocapitalize="characters"
+            autocorrect="off"
+            spellcheck={false}
+            inputmode="text"
+            maxlength={9}
+            autofocus
+            required
+          />
+          <span class="cells" aria-hidden="true">
+            {#each { length: 8 } as _, i}
+              {#if i === 4}<span class="cell-dash">–</span>{/if}
+              <span class={['cell', focused && i === Math.min(chars.length, 7) && 'is-active']}>{chars[i] ?? ''}</span>
+            {/each}
+          </span>
+        </div>
+      </div>
       <label class="field-label">
         Name for this device
         <input class="field" bind:value={name} maxlength={60} />
       </label>
       {#if error}<p class="error" role="alert">{error}</p>{/if}
-      <button class="btn btn-primary btn-block" disabled={busy || code.replace(/[^A-Z0-9]/g, '').length < 8}>
+      <button class="btn btn-primary btn-large btn-block" disabled={busy || chars.length < 8}>
         {busy ? 'Signing in…' : 'Sign in'}
       </button>
     </form>
-    <div class="pair-help">
-      <p>
-        <strong>Get a code</strong> on {theHost()} with <code>briardr pair</code>{isMac() ? '' : ' (as the user Briardr runs as)'}, or from Settings → Devices → Add a device on a device that’s already signed in.
-      </p>
-      <p class="hint">This device stays signed in. You can revoke it any time from Settings on any signed-in device.</p>
+    <div class="card pair-help">
+      <span class="set-tile" aria-hidden="true"><Icon name="terminal" size={17} /></span>
+      <div>
+        <strong>Get a code on {theHost()}</strong>
+        <p>Run <code>briardr pair</code> on {theHost()}{isMac() ? '' : ' (as the user Briardr runs as)'}, or open Settings → Devices → Add a device on a device that’s already signed in.</p>
+        <p class="hint">This device stays signed in. You can revoke it any time from Settings on any signed-in device.</p>
+      </div>
     </div>
   </div>
 </main>
