@@ -5,6 +5,23 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.6
+
+- **A new look for the client: quiet chrome, loud state.** Warm neutral colours in light and dark, with
+  saturated colour kept for what agents are doing: orange when one needs you, blue while working, green
+  when finished. Buttons, links and the selected tab are ink instead of blue.
+
+  - The iPhone tab bar has three tabs: Agents, Workspaces and Settings. On iPad and Mac the sidebar lists
+    Agents and Workspaces, with Jump and a Settings gear at the bottom.
+  - Usage is no longer a tab: it's a page in Settings (Settings → Usage), and `/usage` opens it there.
+  - Agents shows what needs you in its own card, with every row; the other groups show their first three
+    rows and Show all. The Mac summary moved to the top of Settings. On iPhone, swipe a row to the left
+    for Peek and More (a long press still opens the menu).
+  - A stream no longer shows that you're in control. When another device has control, a Watching banner
+    with Take over appears under the header and the keys dim.
+  - Settings is a grouped list; each section opens as its own page.
+  - The key bar keeps its keys and sizes; only its colours change. ([#14](https://github.com/ChrisSku/briardr/pull/14))
+
 ## 0.3.5
 
 - **Choose the key bar's keys in Settings, with a row of their own for an app, and keep the on-screen keyboard up when a tap lands between keys.** Settings › Key bar picks the top row of the key bar from symbols, Control chords, Tab, Shift-Tab, Home, End, Page Up, Page Down, Forward Delete and F1–F12, up to 10 keys. That row is the default; give an app (Claude, Codex, a shell, Neovim, or any program running in a pane) keys of its own and the bar shows them instead while it runs. The choice is stored on each device. A tap in a gap between the bar's keys no longer takes focus from the terminal and closes the iOS keyboard, and while the keyboard is open the bar sits closer to it. ([#13](https://github.com/ChrisSku/briardr/pull/13))
