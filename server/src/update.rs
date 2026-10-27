@@ -119,6 +119,8 @@ pub enum Installation {
     Release(PathBuf),
     /// A Git checkout, built from source.
     Checkout(PathBuf),
+    /// The Linux helper's checkout (scripts/setup-linux.sh), which it builds outside the checkout.
+    Helper(PathBuf),
     /// Something else (the client from BRIARDR_WEB_DIST, a binary copied by itself).
     Other,
 }
@@ -126,7 +128,13 @@ pub enum Installation {
 /// `root` is the project root (`crate::project_root`), `exe` the real path of the running executable.
 pub fn installation(root: &Path, exe: Option<&Path>) -> Installation {
     if root.join(".git").exists() {
-        return Installation::Checkout(root.to_path_buf());
+        // A checkout's own build is in its server/target; the helper's is in its state folder.
+        let own_build = exe.is_some_and(|exe| exe.starts_with(root.join("server").join("target")));
+        return if !own_build && root.join("scripts").join("setup-linux.sh").exists() {
+            Installation::Helper(root.to_path_buf())
+        } else {
+            Installation::Checkout(root.to_path_buf())
+        };
     }
     let bin = root.join("bin").join("briardr");
     let is_this = exe.is_some_and(|exe| std::fs::canonicalize(&bin).is_ok_and(|b| b == exe));
@@ -147,15 +155,10 @@ pub fn this_installation() -> Installation {
 pub fn how_to_update(installation: &Installation, version: &str) -> Option<(String, String)> {
     match installation {
         Installation::Release(_) => None,
-        Installation::Checkout(root)
-            if root.join("scripts").join("setup-linux.sh").exists()
-                && std::env::consts::OS == "linux" =>
-        {
-            Some((
-                format!("This is the Linux helper’s checkout. In {}, run:", root.display()),
-                format!("scripts/setup-linux.sh upgrade v{version}"),
-            ))
-        }
+        Installation::Helper(root) => Some((
+            format!("This is the Linux helper’s checkout. In {}, run:", root.display()),
+            format!("scripts/setup-linux.sh upgrade v{version}"),
+        )),
         Installation::Checkout(root) => Some((
             format!("This Briardr runs from a checkout. In {}, run:", root.display()),
             format!("git fetch --tags && git checkout v{version} && mise install && mise run install && mise run build && mise run build:server"),
@@ -529,6 +532,35 @@ mod tests {
             how_to_update(&Installation::Checkout(release.clone()), "0.4.0").unwrap();
         assert!(how.contains("checkout"), "{how}");
         assert!(command.contains("git checkout v0.4.0"), "{command}");
+    }
+
+    #[test]
+    fn the_linux_helper_s_checkout_is_the_one_built_elsewhere() {
+        let dir = Scratch::new("update-helper");
+        let root = dir.join("briardr");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts").join("setup-linux.sh"), "").unwrap();
+        let own = root
+            .join("server")
+            .join("target")
+            .join("debug")
+            .join("briardr");
+        assert_eq!(
+            installation(&root, Some(&own)),
+            Installation::Checkout(root.clone())
+        );
+        let helper = dir
+            .join("state")
+            .join("cargo-target")
+            .join("release")
+            .join("briardr");
+        assert_eq!(
+            installation(&root, Some(&helper)),
+            Installation::Helper(root.clone())
+        );
+        let (_, command) = how_to_update(&Installation::Helper(root), "0.4.0").unwrap();
+        assert_eq!(command, "scripts/setup-linux.sh upgrade v0.4.0");
     }
 
     /// A release archive as scripts/package.ts makes it, with a `briardr --version` that says `version`.
