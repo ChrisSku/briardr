@@ -1,5 +1,4 @@
 import { definePlugin } from '@briardr/sdk';
-import UsageScreen from './UsageScreen.svelte';
-import UsageSection from './UsageSection.svelte';
+import UsagePage from './UsagePage.svelte';
 
-export default definePlugin({ appTabs: { usage: UsageScreen }, settings: { usage: UsageSection } });
+export default definePlugin({ settings: { usage: UsagePage } });

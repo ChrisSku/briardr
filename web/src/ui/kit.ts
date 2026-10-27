@@ -7,4 +7,4 @@ export { default as ConfirmHost } from './ConfirmHost.svelte';
 export { default as MenuHost } from './MenuHost.svelte';
 export { longPress } from './longpress.ts';
 export { confirmDialog, openMenu, type MenuItem } from './overlays.ts';
-export { ago, duration } from './time.ts';
+export { ago, duration, since } from './time.ts';

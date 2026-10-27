@@ -1,6 +1,6 @@
 # Plugins
 
-Everything in a stream besides the terminal, and the Usage tab, is a plugin: Files, Changes, Preview,
+Everything in a stream besides the terminal, and Settings → Usage, is a plugin: Files, Changes, Preview,
 Docs, Notes and Usage are built in, and anyone can add their own. Plugins are turned on or off for
 every device in Settings → Plugins (or with `briardr plugin enable|disable`).
 

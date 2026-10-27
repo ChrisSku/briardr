@@ -11,6 +11,15 @@ export function ago(ms: number): string {
   return `${Math.round(h / 24)} d ago`;
 }
 
+/** How long ago, short, for row times: "now", "2 min", "1 h", "3 d". */
+export function since(ms: number): string {
+  const m = Math.round(Math.max(0, ms) / 60000);
+  if (m < 1) return 'now';
+  if (m < 60) return `${m} min`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `${h} h` : `${Math.round(h / 24)} d`;
+}
+
 export function duration(ms: number): string {
   const m = Math.max(0, Math.round(ms / 60000));
   if (m < 60) return `${m} min`;

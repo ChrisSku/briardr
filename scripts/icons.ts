@@ -1,7 +1,7 @@
 // Builds Briardr's app icons from scripts/icon.png, a briard's head on a transparent background,
 // placed on a full-bleed dark square: Apple rounds the corners itself. The maskable icon (Android crops
 // it to a circle or another shape) shrinks the dog into the 80% safe circle and keeps the background
-// full size. Also copies the website's icons into site/ and writes the README's image, docs/briardr.png.
+// full size. briard.png is the dog alone, for the app's brand tile. Also copies the website's icons into site/ and writes the README's image, docs/briardr.png.
 // Each PNG then goes through pngquant if it's installed (brew or apt install pngquant): at quality 85–100
 // the icons look the same at about a third of the size.
 // Usage: bun scripts/icons.ts [outdir]   (renders with the Playwright Chromium the UI tests use)
@@ -25,6 +25,8 @@ const SIZES = [
   { file: 'icon-maskable-512.png', size: 512, fill: 0.64 }, // the ears stay inside the safe circle
 ];
 
+/** The dog alone on transparency, for the app's brand tile (sign-in, the sidebar): 68 pt at 2x. */
+const MARK = { file: 'briard.png', size: 136 };
 /** The website's copies (site/), written only when building into web/public/icons. */
 const SITE = ['favicon-32.png', 'apple-touch-icon.png', 'icon-192.png'];
 /** The README's image, also only then: the dog alone on transparency, at twice the 112 px it's shown at. */
@@ -82,7 +84,9 @@ function shrink(file: string) {
 }
 
 for (const { file, size, fill } of SIZES) await render(path.join(out, file), size, fill);
-if (!outArg) await render(README.file, README.size, (0.96 * box.h) / Math.max(box.w, box.h), true);
+const whole = (0.96 * box.h) / Math.max(box.w, box.h); // the whole dog fits, ears included
+await render(path.join(out, MARK.file), MARK.size, whole, true);
+if (!outArg) await render(README.file, README.size, whole, true);
 await browser.close();
 if (!outArg) for (const file of SITE) fs.copyFileSync(path.join(out, file), path.join(root, 'site', file));
 console.log(`icons written to ${out}${outArg ? '' : `, site/ and ${path.relative(root, README.file)}`}`);

@@ -1,5 +1,5 @@
 // Settings → Plugins: turning a built-in off removes its tab on this and other devices, a link to it
-// shows the terminal, and turning it on brings it back. Usage, an app tab, leaves the tab bar.
+// shows the terminal, and turning it on brings it back. Usage, a Settings page, leaves Settings.
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, test } from 'bun:test';
 import { devices, webkit, type Browser, type BrowserContext, type Page } from 'playwright';
@@ -63,14 +63,16 @@ for (const profile of ['iphone', 'mac'] as const) {
       await page.getByRole('tab', { name: 'Terminal', selected: true }).waitFor();
       assert.equal(await page.getByRole('tab', { name: 'Docs' }).count(), 0);
 
-      // Usage is an app tab: it leaves the tab bar (or sidebar).
+      // Usage is a page in Settings: it leaves Settings, and the tab bar never had it.
       await page.goto(`${server.base}/settings/plugins`);
+      await page.locator('#set-usage').waitFor();
       await page.getByRole('switch', { name: /^Usage/ }).click();
-      await page.getByRole('button', { name: 'Usage', exact: true }).waitFor({ state: 'detached' });
+      await page.locator('#set-usage').waitFor({ state: 'detached' });
+      assert.equal(await page.getByRole('button', { name: 'Usage', exact: true }).count(), 0);
 
       await page.getByRole('switch', { name: /^Docs/ }).click();
       await page.getByRole('switch', { name: /^Usage/ }).click();
-      await page.getByRole('button', { name: 'Usage', exact: true }).waitFor();
+      await page.locator('#set-usage').waitFor();
       await other.page.getByRole('tab', { name: 'Docs' }).waitFor();
       const list = await page.evaluate(() => fetch('/api/plugins').then((r) => r.json()));
       assert.ok(list.plugins.every((p: any) => !p.builtin || p.enabled));

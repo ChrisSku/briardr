@@ -187,7 +187,8 @@ async function build() {
       __BRIARDR_VERSION__: JSON.stringify(VERSION),
       __BRIARDR_ICON__: JSON.stringify(icons['/icons/icon-192.png']),
       // Chunks too, so a client still on this version can load them after the next build replaced them.
-      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`])]),
+      // The brand tile's dog is linked from the app by its plain name.
+      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
     },
   });
 
@@ -211,7 +212,8 @@ async function build() {
     .replace('%APP_JS%', `/${js}`)
     .replace('%APP_CSS%', (css ? `<link rel="stylesheet" href="/${css}">` : '') + [...preload].map((p) => `\n    <link rel="modulepreload" href="/${p}">`).join(''));
   const version = identity.update(manifestText).update(page).digest('hex').slice(0, 12);
-  const html = page.replace('%VERSION%', version).replace('%BRANCH%', attr(source.branch)).replace('%COMMIT%', attr(source.commit));
+  const release = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  const html = page.replace('%VERSION%', version).replace('%RELEASE%', attr(release)).replace('%BRANCH%', attr(source.branch)).replace('%COMMIT%', attr(source.commit));
   fs.writeFileSync(path.join(dist, 'index.html'), html);
   fs.writeFileSync(path.join(dist, 'sw.js'), fs.readFileSync(path.join(dist, 'sw.js'), 'utf8').replaceAll(VERSION, version));
   // Brotli and gzip copies of the text files, which the server sends to browsers that accept them

@@ -553,11 +553,39 @@ describe('agents list, peek, banners and links', () => {
     await sleep(500);
     const rowsBefore = herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows;
     const a = await device('iphone', 'phone-peek');
-    await a.page.locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).click();
+    // On a touch screen the row's "…" is out of sight but there for keyboards and VoiceOver.
+    const more = a.page.locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ });
+    await more.focus();
+    await a.page.keyboard.press('Enter');
     await a.page.getByRole('menuitem', { name: /Peek/ }).click();
     await a.page.getByText('Watching live · read-only').waitFor();
     assert.equal(herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows, rowsBefore);
     await a.page.getByRole('button', { name: 'Close' }).click();
+    await a.ctx.close();
+  });
+
+  test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
+    const a = await device('iphone', 'phone-swipe');
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    const box = (await row.boundingBox())!;
+    const y = box.y + box.height / 2;
+    const swipe = (x0: number, x1: number) =>
+      row.locator('.row-main').evaluate((el, [x0, x1, y]) => {
+        const at = (type: string, x: number) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 7, pointerType: 'touch', clientX: x, clientY: y }));
+        at('pointerdown', x0);
+        for (let i = 1; i <= 6; i++) at('pointermove', x0 + ((x1 - x0) * i) / 6);
+        at('pointerup', x1);
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: x1, clientY: y }));
+      }, [x0, x1, y] as const);
+    await swipe(box.x + box.width - 20, box.x + box.width - 200);
+    await row.getByRole('button', { name: 'Peek', exact: true }).waitFor();
+    assert.equal(new URL(a.page.url()).pathname, '/agents', 'a swipe doesn’t open the stream');
+    await row.locator('.row-main').click();
+    await row.getByRole('button', { name: 'Peek', exact: true }).waitFor({ state: 'detached' });
+    assert.equal(new URL(a.page.url()).pathname, '/agents', 'the tap closed the actions instead');
+    await swipe(box.x + box.width - 20, box.x + box.width - 200);
+    await row.getByRole('button', { name: 'Peek', exact: true }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
     await a.ctx.close();
   });
 

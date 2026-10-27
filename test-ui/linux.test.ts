@@ -65,7 +65,7 @@ describe('Linux host', () => {
   });
 
   test('the host summary shows its name and no battery', async () => {
-    await paired.goto(base + '/agents');
+    await paired.goto(base + '/settings');
     await paired.waitForSelector('.mac-summary .mac-name');
     assert.equal(await paired.locator('.mac-summary').getAttribute('aria-label'), 'Server summary');
     assert.equal(await paired.locator('.mac-batt').count(), 0, 'no battery');

@@ -107,7 +107,10 @@ test('pairing in place initializes installed and disabled plugins and follows re
     await page.getByLabel('Pairing code').fill(s.run.auth.createPairingCode().code);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.waitForSelector('.count-strip');
-    assert.equal(await page.getByRole('button', { name: 'Usage', exact: true }).count(), 0);
+    // Usage is off: Settings has no Usage.
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByText('Diagnostics').first().waitFor();
+    assert.equal(await page.locator('#set-usage').count(), 0);
     let navigations = 0;
     page.on('request', (r) => { if (r.isNavigationRequest() && r.frame() === page.mainFrame()) navigations++; });
     // SPA navigation retains the startup path that just paired; a page reload would hide the bug.

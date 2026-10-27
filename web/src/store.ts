@@ -66,7 +66,8 @@ export const prefs = persisted('briardr.prefs', {
 });
 /** Files: line wrapping (null: on for phones, off otherwise) and the width of the folder pane. */
 export const agentFilter = persisted<Group | null>('briardr.agents.filter', null);
-export const collapsed = persisted<Record<string, boolean>>('briardr.agents.collapsed', { ready: true, unknown: true });
+/** Agents groups showing every row instead of the first few (Needs you always shows every row). */
+export const expanded = persisted<Record<string, boolean>>('briardr.agents.expanded', {});
 export const expandedNodes = persisted<Record<string, boolean>>('briardr.tree.expanded', {});
 export const lastPath = persisted<string>('briardr.nav.last', '/agents');
 export const listPane = persisted<'agents' | 'workspaces'>('briardr.nav.listPane', 'agents');
