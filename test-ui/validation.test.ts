@@ -60,6 +60,9 @@ describe('pairing and sign-out', () => {
     onTestFinished(() => ctx.close());
     const page = await ctx.newPage();
     await page.goto(s.base + '/');
+    // The brand tile sits centred over the card.
+    const [tile, card] = [(await page.locator('.pair-tile').boundingBox())!, (await page.locator('.pair-card').boundingBox())!];
+    assert.ok(Math.abs(tile.x + tile.width / 2 - (card.x + card.width / 2)) <= 1, `the tile's centre is at ${tile.x + tile.width / 2}, the card's at ${card.x + card.width / 2}`);
     const { code } = s.run.auth.createPairingCode();
     const wrong = code.replace(/[A-Z0-9]$/, (c) => (c === 'A' ? 'B' : 'A'));
     await page.getByLabel('Pairing code').fill(wrong.toLowerCase()); // typed lower case: shown upper case
