@@ -403,7 +403,8 @@ pub(super) fn register(r: &mut Routes) {
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
             let rel = ctx.query.get("path").unwrap_or("").to_string();
             match blocking(move || read_asset(&cwd, &rel)).await? {
-                // SVGs can carry script; serve them sandboxed so they render only as images.
+                // SVGs and PDFs can carry script; served sandboxed, they only ever render (as images,
+                // or through the Files tab's PDF viewer), never run.
                 Ok(asset) => Ok(response(
                     200,
                     asset.data,

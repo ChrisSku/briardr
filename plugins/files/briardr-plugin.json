@@ -1,7 +1,7 @@
 {
   "id": "files",
   "name": "Files",
-  "description": "Browse the stream’s folder, read code with syntax highlighting, and ask the agent about lines you pick.",
+  "description": "Browse the stream’s folder, read code with syntax highlighting and PDFs page by page, and ask the agent about lines you pick.",
   "briardr": 1,
   "client": "src/index.ts",
   "contributes": { "streamTabs": [{ "id": "files", "label": "Files", "icon": "folder" }] }

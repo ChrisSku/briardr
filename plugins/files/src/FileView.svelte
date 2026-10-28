@@ -1,14 +1,16 @@
 <!--
   One file from the Files surface: highlighted text with line numbers (they stay in view while the
-  code scrolls sideways and are never copied), images as images, binary files described.
+  code scrolls sideways and are never copied), images as images, PDFs as pages (zoomable), binary
+  files described.
   Lines are picked for a prompt by tapping their numbers (a second tap makes a range; Shift-click
   extends one) or by selecting text in them; lines already in the prompt are marked.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, Empty, Icon, type PluginContext, type Stream } from '@briardr/sdk';
-  import { filesView, formatSize, IMAGE_EXT, languageLabel, languageOf, type FileText } from './files.ts';
+  import { filesView, formatSize, IMAGE_EXT, languageLabel, languageOf, PDF_EXT, type FileText } from './files.ts';
   import FileIcon from './FileIcon.svelte';
+  import PdfView from './PdfView.svelte';
   import { addSnippet, promptOf } from './prompt.ts';
 
   interface Props {
@@ -25,6 +27,8 @@
     onAsk: () => void;
   }
   let { stream, briardr, path, compact, revision, treeOpen, onBack, onToggleTree, onAsk }: Props = $props();
+  /** PDF zoom steps, times the pane's width. */
+  const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
   const toast = (text: string) => briardr.toast(text);
 
   let file = $state.raw<FileText | null>(null);
@@ -32,6 +36,8 @@
   let error = $state<string | null>(null);
   let scroller: HTMLElement | undefined = $state();
   let code: HTMLElement | undefined = $state();
+  let pdfInfo = $state<{ pages: number; size: number } | null>(null);
+  let zoomAt = $state(ZOOMS.indexOf(1));
   /** Picked lines (1-based, inclusive); `fromText` when they came from a text selection. */
   let sel = $state<{ anchor: number; from: number; to: number; fromText?: boolean } | null>(null);
 
@@ -39,6 +45,8 @@
   const dir = $derived(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
   const language = $derived(languageOf(path));
   const image = $derived(IMAGE_EXT.test(path));
+  const pdf = $derived(PDF_EXT.test(path));
+  const asset = $derived(`/api/streams/${encodeURIComponent(stream.id)}/docs/asset?path=${encodeURIComponent(path)}`);
   const sid = $derived(stream.id);
   const wrap = $derived(filesView.value.wrap ?? compact);
 
@@ -50,9 +58,11 @@
       file = null;
       rendered = null;
       sel = null;
+      pdfInfo = null;
+      zoomAt = ZOOMS.indexOf(1);
     }
     error = null;
-    if (untrack(() => image)) return;
+    if (untrack(() => image || pdf)) return;
     untrack(() => load(p, same));
   });
 
@@ -168,14 +178,21 @@
       <strong>{name}</strong>
       {#if dir}<span class="fv-dir">{dir}</span>{/if}
     </button>
-    {#if !image && file?.text != null}
+    {#if pdf}
+      <button class="icon-btn" aria-label="Zoom out" title="Zoom out" disabled={zoomAt === 0} onclick={() => zoomAt--}><Icon name="minus" /></button>
+      <button class="icon-btn" aria-label="Zoom in" title="Zoom in" disabled={zoomAt === ZOOMS.length - 1} onclick={() => zoomAt++}><Icon name="plus" /></button>
+    {:else if !image && file?.text != null}
       <button class={['icon-btn', wrap && 'is-on']} aria-label="Wrap lines" aria-pressed={wrap} title="Wrap lines" onclick={() => (filesView.value = { ...filesView.value, wrap: !wrap })}><Icon name="wrap" /></button>
       <button class="icon-btn" aria-label="Copy file" title="Copy file" onclick={copy}><Icon name="copy" /></button>
     {/if}
   </div>
-  {#if file || image}
+  {#if file || image || pdf}
     <div class="fv-meta">
-      {#if image}<span>Image</span>{:else if file}
+      {#if image}<span>Image</span>{:else if pdf}
+        <span>PDF</span>
+        {#if pdfInfo}<span>{pdfInfo.pages.toLocaleString()} {pdfInfo.pages === 1 ? 'page' : 'pages'}</span><span>{formatSize(pdfInfo.size)}</span>{/if}
+        {#if ZOOMS[zoomAt] !== 1}<span>{Math.round(ZOOMS[zoomAt] * 100)}%</span>{/if}
+      {:else if file}
         <span>{file.binary ? 'Binary' : languageLabel(language)}</span>
         {#if !file.binary}<span>{lineCount.toLocaleString()} {lineCount === 1 ? 'line' : 'lines'}</span>{/if}
         <span>{formatSize(file.size)}</span>
@@ -186,8 +203,12 @@
   {#if error}<p class="error fv-error" role="alert">{error}</p>{/if}
   {#if image}
     <div class="fv-image">
-      <img src={`/api/streams/${encodeURIComponent(sid)}/docs/asset?path=${encodeURIComponent(path)}`} alt={name} onerror={() => (error = 'Couldn’t load this image.')} />
+      <img src={asset} alt={name} onerror={() => (error = 'Couldn’t load this image.')} />
     </div>
+  {:else if pdf}
+    {#key path}
+      <PdfView url={asset} {name} zoom={ZOOMS[zoomAt]} onOpen={(pages, size) => (pdfInfo = { pages, size })} onError={(m) => (error = m)} />
+    {/key}
   {:else if file?.binary}
     <Empty title="Binary file">{name} isn’t text, so Files can’t show it.</Empty>
   {:else if rendered}
