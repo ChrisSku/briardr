@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.10
+
+- **Keep the iPhone keyboard up when you tap the key bar's arrow pad, show the Rename sheet above the keyboard in the Home Screen app, and centre the icon on the sign-in screen.** A tap on the arrow pad no longer takes focus from the terminal and closes the on-screen keyboard. In Briardr installed on the Home Screen, sheets whose field sits low on the screen, like Rename stream, stayed hidden under the keyboard: iOS shrinks the page's reported height once it scrolls to such a field, and Briardr now measures the keyboard against the layout instead. The Briardr icon on the sign-in screen is centred. ([#19](https://github.com/ChrisSku/briardr/pull/19))
+
 ## 0.3.9
 
 - **Files shows PDFs.** Opening a `.pdf` in the Files tab shows its pages, fitted to the pane, with zoom buttons in the header and the page count and size above them. PDFs up to 50 MB open; pages are drawn as they scroll into view. ([#18](https://github.com/ChrisSku/briardr/pull/18))
