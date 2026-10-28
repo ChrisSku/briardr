@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.9
+
+- **Files shows PDFs.** Opening a `.pdf` in the Files tab shows its pages, fitted to the pane, with zoom buttons in the header and the page count and size above them. PDFs up to 50 MB open; pages are drawn as they scroll into view. ([#18](https://github.com/ChrisSku/briardr/pull/18))
+
 ## 0.3.8
 
 - **Scrolling with a Mac trackpad or mouse wheel scrolls the terminal again, instead of pressing Up and Down.** The terminal turned the wheel into arrow keys before Briardr saw it, which stepped through shell or prompt history; the wheel now scrolls through Herdr like a swipe on iPhone and iPad. ([#16](https://github.com/ChrisSku/briardr/pull/16))
