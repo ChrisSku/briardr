@@ -256,6 +256,31 @@ describe('terminal input (iPhone)', () => {
     }
   });
 
+  test('in a Home Screen app, whose innerHeight shrinks with the keyboard, the Rename sheet still sits on it', async () => {
+    // Once iOS has scrolled the page to reveal a field low on the screen, a Home Screen app's innerHeight
+    // shrinks to the visual viewport's height; the layout viewport stays as it was.
+    await page.evaluate(() => {
+      (window as any).__innerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+      Object.defineProperty(window, 'innerHeight', { get: () => window.visualViewport!.height, configurable: true });
+    });
+    try {
+      await page.getByRole('button', { name: 'Stream actions' }).click();
+      await page.getByRole('menuitem', { name: 'Rename' }).click();
+      const rename = page.getByRole('dialog', { name: 'Rename stream' });
+      await page.waitForFunction(() => document.activeElement?.closest('[role=dialog]'));
+      await showKeyboard(page, 300);
+      await aboveKeyboard(page, 300, { 'Rename field': rename.getByLabel('Name'), Save: rename.getByRole('button', { name: 'Save' }) });
+      await rename.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      await showKeyboard(page, 0);
+      await page.evaluate(() => {
+        const own = (window as any).__innerHeight;
+        if (own) Object.defineProperty(window, 'innerHeight', own);
+        else delete (window as any).innerHeight;
+      });
+    }
+  });
+
   test('the on-screen keyboard resizes the pane to the rows above it, so a full-screen program fits', async () => {
     const size = () => page.evaluate(() => {
       const { term } = (document.querySelector('.term-host') as any).briardrTerminal;
@@ -344,7 +369,7 @@ describe('terminal input (iPhone)', () => {
     await expectBytes(hex('\x1bOA')); // application cursor mode, as the program requested
   });
 
-  test('a tap between the bar’s keys, or on its edge, leaves focus in the terminal (the keyboard stays up)', async () => {
+  test('a tap between the bar’s keys, on its edge or on the arrow pad leaves focus in the terminal (the keyboard stays up)', async () => {
     await page.locator('.term-host').click();
     const typing = () => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     assert.ok(await typing(), 'the terminal has focus');
@@ -359,6 +384,9 @@ describe('terminal input (iPhone)', () => {
       await page.mouse.click(x, y);
       assert.ok(await typing(), `a tap ${where} took focus from the terminal`);
     }
+    // iOS clicks a tap on the arrow pad, which isn't a button, late, with a mousedown that would take focus.
+    const cancelled = await page.locator('.pad').evaluate((el) => !el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })));
+    assert.ok(cancelled, 'a mousedown on the arrow pad would take focus from the terminal');
   });
 
   test('Delete sits above Enter, as wide; a tap deletes once, holding keeps deleting', async () => {

@@ -5,13 +5,23 @@
 let kb = $state(0);
 let started = false;
 
+// The layout viewport's height. Not innerHeight: once iOS has scrolled the page to reveal a field low on
+// the screen (a sheet's), a Home Screen app's innerHeight shrinks with the keyboard, and stays so.
+const layoutHeight = () => document.documentElement.clientHeight;
+
+/** How far the visual viewport ends above the bottom of the layout: the on-screen keyboard, or about 0. */
+export function viewportInset(): number {
+  const vv = window.visualViewport;
+  return vv ? Math.max(0, Math.round(layoutHeight() - vv.height - vv.offsetTop)) : 0;
+}
+
 /** Starts tracking the keyboard; the app does this once at startup. */
 export function trackKeyboard() {
   const vv = window.visualViewport;
   if (started || !vv) return;
   started = true;
   const update = () => {
-    const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    const inset = viewportInset();
     const next = inset > 60 ? inset : 0;
     if (next !== kb) {
       kb = next;
@@ -34,7 +44,7 @@ function reveal() {
   const el = document.activeElement;
   if (!kb || !(el instanceof HTMLElement) || !el.matches('input, textarea, [contenteditable]') || el.closest('.term-surface')) return;
   const r = el.getBoundingClientRect();
-  const below = r.bottom - (window.innerHeight - kb - 8);
+  const below = r.bottom - (layoutHeight() - kb - 8);
   if (below <= 0) return;
   for (let p = el.parentElement; p; p = p.parentElement) {
     const { overflowY } = getComputedStyle(p);

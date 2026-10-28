@@ -73,6 +73,7 @@
   role="toolbar"
   aria-label="Terminal keys"
   onpointerdown={(e) => e.preventDefault() /* keep the on-screen keyboard up */}
+  onmousedown={(e) => e.preventDefault() /* iOS clicks a tap on the arrow pad (not a button) late, with a mousedown that would take focus */}
 >
   <div class="keys-top" role="group" aria-label="Symbols and shortcuts">
     {#each row as k (k.id)}

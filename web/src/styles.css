@@ -1037,7 +1037,7 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 /* Centred in the space above the keyboard; when it doesn't fit, it starts at the top and scrolls. */
 .pair-card { width: min(420px, 100%); margin-block: auto; display: flex; flex-direction: column; gap: 14px; }
 .pair-card .form { margin-top: 8px; }
-.pair-tile { width: 68px; height: 68px; border-radius: 18px; }
+.pair-tile { width: 68px; height: 68px; border-radius: 18px; align-self: center; }
 .pair-card h1 { font: var(--type-title-1); letter-spacing: var(--track-title-1); margin-top: 0; }
 .lead { color: var(--text-secondary); margin: -6px 0 0; font: var(--type-body); letter-spacing: var(--track-body); }
 .code-cells { position: relative; }

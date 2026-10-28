@@ -15,6 +15,7 @@ import { state, type State } from '../reactive.svelte.ts';
 import { Backoff, onNetworkChange } from '../backoff.ts';
 import { anon, networkKind, record } from '../diag.ts';
 import { idbGet, idbSet, type CachedScreen } from '../idb.ts';
+import { viewportInset } from '../keyboard.svelte.ts';
 import { PROTOCOL } from '../live.ts';
 import { activeMods, applyModsToText, consumeMods, fromKeyEvent, type Outgoing } from './keys.ts';
 import { linkAt, registerLinkProvider } from './links.ts';
@@ -578,8 +579,7 @@ export class TerminalController {
 
 /** Heuristic: a keydown while the on-screen keyboard isn't showing came from a hardware keyboard. */
 export function isHardwareKeyEvent(_e: KeyboardEvent): boolean {
-  const vv = window.visualViewport;
   if (!('ontouchstart' in window)) return true;
-  if (!vv) return false;
-  return window.innerHeight - vv.height < 120;
+  if (!window.visualViewport) return false;
+  return viewportInset() < 120;
 }
