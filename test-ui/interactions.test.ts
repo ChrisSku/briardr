@@ -66,19 +66,24 @@ async function openTarget(page: Page) {
   await page.waitForSelector('[data-ownership=controlling]', { timeout: 10_000 });
 }
 
+// Each echo program run has a number, which it prints with READY and DONE: until `clear` runs, the last
+// run's READY is still on the screen, and a key typed before the program reads keys is lost.
+let echoes = 0;
+let echoing = false;
 /** Start the byte-echo program in the pane (from the API side, not the UI under test); `--kitty` turns
- *  on the kitty keyboard protocol in it. */
+ *  on the kitty keyboard protocol in it. Returns once it reads keys. */
 async function startEcho(mode: '' | '--kitty' = '') {
-  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho} ${mode}`);
-  for (let i = 0; i < 30; i++) {
-    if ((await paneText('recent', 10)).includes('READY')) return;
-    await sleep(100);
-  }
-  throw new Error('echo program did not start');
+  const n = ++echoes;
+  herdr('pane', 'run', ws.pane, `clear; python3 ${rawecho} ${mode} ${n}`);
+  await waitUntil(`echo program ${n} to start`, async () => new RegExp(`READY ${n}\\b`).test(await paneText('recent', 10)));
+  echoing = true;
 }
+/** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
+  if (!echoing) return;
+  echoing = false;
   herdr('pane', 'send-keys', ws.pane, 'ctrl+]');
-  await sleep(300);
+  await waitUntil(`echo program ${echoes} to quit`, async () => new RegExp(`DONE ${echoes}\\b`).test(await paneText('recent', 10)));
 }
 // Polling reads the pane asynchronously: the Briardr server under test runs in this process, and a
 // synchronous `herdr` call would freeze it (and its WebSockets) on every poll.
@@ -94,9 +99,9 @@ async function paneText(source: 'recent' | 'recent-unwrapped', lines: number): P
   }
 }
 async function bytesSeen(): Promise<string[]> {
-  // Only output after this test's own READY: earlier echo programs leave BYTES lines in the pane.
+  // Only output after the running echo program's READY: earlier ones leave BYTES lines in the pane.
   const text = await paneText('recent-unwrapped', 80);
-  const at = text.lastIndexOf('READY');
+  const at = text.lastIndexOf(`READY ${echoes}`);
   if (at < 0) return [];
   return text.slice(at)
     .split('\n')
