@@ -11,6 +11,8 @@ use thiserror::Error;
 pub const MAX_DOCS: usize = 200;
 pub const MAX_DOC_BYTES: u64 = 1024 * 1024;
 pub const MAX_ASSET_BYTES: u64 = 10 * 1024 * 1024;
+/// PDFs (shown by the Files tab) run larger than images.
+pub const MAX_PDF_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_DEPTH: usize = 8;
 const MAX_VISITED: usize = 20_000;
 const SKIP_DIRS: &[&str] = &[
@@ -166,15 +168,25 @@ pub fn read_doc(folder: &Path, rel: &str) -> Result<DocText, DocsError> {
     })
 }
 
+/// An image, or a PDF for the Files tab to render.
 pub fn read_asset(folder: &Path, rel: &str) -> Result<Asset, DocsError> {
-    let content_type =
-        image_type(rel).ok_or(DocsError::Unsupported("Only images can be embedded"))?;
+    let pdf = extension_lower(rel).as_deref() == Some("pdf");
+    let content_type = if pdf {
+        "application/pdf"
+    } else {
+        image_type(rel).ok_or(DocsError::Unsupported("Only images and PDFs can be shown"))?
+    };
     let abs = resolve_inside(folder, rel)?;
     let meta = fs::metadata(&abs)?;
     if !meta.is_file() {
         return Err(DocsError::NotFound("Not a file"));
     }
-    if meta.len() > MAX_ASSET_BYTES {
+    if pdf && meta.len() > MAX_PDF_BYTES {
+        return Err(DocsError::TooLarge(
+            "Files shows PDFs up to 50 MB".to_string(),
+        ));
+    }
+    if !pdf && meta.len() > MAX_ASSET_BYTES {
         return Err(DocsError::TooLarge("Image too large".to_string()));
     }
     Ok(Asset {
@@ -485,9 +497,13 @@ mod tests {
         let (_base, root) = layout();
         write(&root.join("pic.PNG"), b"png");
         write(&root.join("doc.txt"), b"t");
+        write(&root.join("paper.PDF"), b"%PDF");
         let asset = read_asset(&root, "pic.PNG").unwrap();
         assert_eq!(asset.content_type, "image/png");
         assert_eq!(asset.data, b"png");
+        let pdf = read_asset(&root, "paper.PDF").unwrap();
+        assert_eq!(pdf.content_type, "application/pdf");
+        assert_eq!(pdf.data, b"%PDF");
         assert!(matches!(
             read_asset(&root, "doc.txt"),
             Err(DocsError::Unsupported(_))
@@ -503,5 +519,11 @@ mod tests {
         );
         let err = read_asset(&root, "big.png").unwrap_err();
         assert_eq!(err.code(), "too_large");
+        // The same size is fine for a PDF, which may be larger.
+        write(
+            &root.join("big.pdf"),
+            &vec![0u8; MAX_ASSET_BYTES as usize + 1],
+        );
+        assert!(read_asset(&root, "big.pdf").is_ok());
     }
 }

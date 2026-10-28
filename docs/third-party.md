@@ -10,6 +10,7 @@ dependencies, tools, or separately installed software.
 | xterm.js and add-ons | Browser terminal | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js) |
 | markdown-it | Markdown rendering | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
 | highlight.js | Code highlighting | [highlightjs/highlight.js](https://github.com/highlightjs/highlight.js) |
+| PDF.js | PDF viewing in Files | [mozilla/pdf.js](https://github.com/mozilla/pdf.js) |
 | Tokio, Axum, rustls, and other Rust crates | Server, networking, TLS, and supporting functionality | [Cargo manifest](../server/Cargo.toml) and [lockfile](../server/Cargo.lock) |
 | Bun, Rust, mise, Playwright, and other development packages | Build, development, and verification | [package manifest](../package.json) and [tool pins](../mise.toml) |
 | Caddy, WireGuard, and Tailscale | Optional deployment and network access | [Caddy](https://github.com/caddyserver/caddy), [WireGuard](https://www.wireguard.com/), [Tailscale](https://github.com/tailscale/tailscale) |
