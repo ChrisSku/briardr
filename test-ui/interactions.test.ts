@@ -336,6 +336,24 @@ describe('terminal input (iPhone)', () => {
     await closed();
   });
 
+  test('Full screen gives the header’s and tabs’ rows to the pane; the button in the top right corner brings them back', async () => {
+    const rows = () => page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.rows as number);
+    const before = await rows();
+    await page.getByRole('button', { name: 'Stream actions' }).click();
+    await page.getByRole('menuitem', { name: 'Full screen' }).click();
+    const exit = page.getByRole('button', { name: 'Exit full screen' });
+    await exit.waitFor();
+    assert.equal(await page.locator('.stream-head').count(), 0);
+    assert.equal(await page.getByRole('tablist').count(), 0);
+    await waitUntil('the pane to grow into the header’s rows', async () => (await rows()) > before);
+    const b = (await exit.boundingBox())!;
+    assert.ok(b.y < 60 && b.x + b.width > page.viewportSize()!.width - 10, `exit button at ${b.x},${b.y}`);
+    await exit.click();
+    await page.locator('.stream-head').waitFor();
+    await page.getByRole('tablist').waitFor();
+    await waitUntil('the pane to give the rows back', async () => (await rows()) === before);
+  });
+
   test('a double-tapped modifier locks; holding a modifier forms a chord', async () => {
     const ctrl = page.locator('.keys-main .mod').nth(0); // stable: its accessible name changes with state
     await ctrl.click();
@@ -816,6 +834,31 @@ describe('workspaces and menus', () => {
     assert.equal(await focused(), items.at(-1));
     await a.page.keyboard.press('Escape');
     await menu.waitFor({ state: 'detached' });
+    await a.ctx.close();
+  });
+
+  test('⇧⌘↩ shows a stream full screen, without the sidebar and list beside it, until pressed again or the stream is left', async () => {
+    const a = await device('mac', 'mac-full');
+    await openTarget(a.page);
+    const full = () => a.page.evaluate(() => ['.sidebar', '.list-pane', '.stream-head', '[role=tablist]'].map((q) => !!document.querySelector(q)));
+    assert.deepEqual(await full(), [true, true, true, true]);
+    await a.page.keyboard.press('Shift+Meta+Enter');
+    await a.page.getByRole('button', { name: 'Exit full screen' }).waitFor();
+    assert.deepEqual(await full(), [false, false, false, false]);
+    // The tools are still a shortcut away, and stay full screen.
+    await a.page.keyboard.press('Meta+2');
+    await a.page.waitForURL(/\/stream\/[^/]+\/[^/]+$/);
+    assert.deepEqual(await full(), [false, false, false, false]);
+    await a.page.keyboard.press('Shift+Meta+Enter');
+    await a.page.locator('.stream-head').waitFor();
+    assert.deepEqual(await full(), [true, true, true, true]);
+    // Leaving the stream ends full screen.
+    await a.page.keyboard.press('Shift+Meta+Enter');
+    await a.page.getByRole('button', { name: 'Exit full screen' }).waitFor();
+    await a.page.goBack();
+    await a.page.locator('.sidebar').waitFor();
+    await openTarget(a.page);
+    assert.deepEqual(await full(), [true, true, true, true]);
     await a.ctx.close();
   });
 

@@ -679,6 +679,22 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 /* Keep the hidden input at the top so iOS never pans the page to reveal it. */
 .term-screen .xterm-helper-textarea { top: 0 !important; left: 0 !important; }
 .stale-tag { position: absolute; top: 8px; right: 10px; background: var(--state-attention-bg); color: var(--state-attention); font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+/* Full screen: the way back floats in the top right corner; what sits there moves aside for it. */
+.full-exit { position: absolute; top: 2px; right: 2px; z-index: 5; isolation: isolate; color: var(--text-secondary); }
+.full-exit::before {
+  content: ''; position: absolute; inset: 6px; border-radius: 50%; z-index: -1; border: 1px solid var(--line-default); box-shadow: var(--shadow-menu);
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.full-exit:hover { background: none; color: var(--text-primary); }
+.is-full .stale-tag { right: 50px; }
+.is-full .watch-banner { right: 50px; }
+/* The tools' top rows end before the button (the built-in plugins' heads; installed ones use .surface-head). */
+.is-full .surfaces { --full-clear: 48px; }
+.is-full .surfaces .surface-head { margin-right: calc(var(--full-clear) - var(--gutter)); }
+.is-full .surfaces .is-split .ft-head { margin-right: 0; }
+.is-full .surfaces :is(.fv-head, .preview-bar) { padding-right: var(--full-clear); }
+.is-full .surfaces .preview-bar .path { min-width: 60px; }
+.is-full .surfaces .branch-row { margin-right: calc(var(--full-clear) - var(--gutter) - 6px); }
 
 /* key bar: today's keys and sizes; keys on the sunken colour with a hairline, Return and held or locked
    modifiers in ink. */

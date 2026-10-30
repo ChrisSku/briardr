@@ -2,6 +2,7 @@
   A stream: the Terminal, then the tabs of the plugins that are on (Files, Changes, Preview, Docs, Notes,
   installed plugins). The terminal stays connected while switching surfaces. Leaving, locking, or backgrounding releases control; opening or returning to it resumes by
   itself (never by taking over: if another device controls the pane now, this one watches).
+  In full screen the header and tabs hide, and a button floating at the top right brings them back.
   App keys this screen by stream ID, so each stream gets its own instance and controller.
 -->
 <script lang="ts">
@@ -9,7 +10,7 @@
   import { onMount, untrack } from 'svelte';
   import { record } from '../../diag.ts';
   import { navigate, openedFromAlert, type Surface } from '../../router.ts';
-  import { clockSkew, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
+  import { clockSkew, fullScreen, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
   import { TerminalController } from '../../terminal/controller.ts';
   import { isLocalhostUrl, isWebUrl } from '../../terminal/links.ts';
   import { streamContext } from '../../plugins/context.ts';
@@ -135,6 +136,7 @@
         { label: 'Info', onSelect: () => (sheet = 'info') },
         { label: 'History', onSelect: () => (sheet = 'history') },
         { label: 'Jump to stream…', hint: '⌘K', onSelect: () => openJump() },
+        { label: 'Full screen', hint: '⇧⌘↩', onSelect: () => (fullScreen.value = true) },
         st.ownership === 'watching'
           ? { label: 'Take control', onSelect: () => void takeControl() }
           : { label: `Hand back to ${isMac() ? 'Mac' : theHost()}`, hint: 'Release control', disabled: st.ownership !== 'controlling', onSelect: () => ctl.handBack() },
@@ -152,35 +154,42 @@
 {:else}
   <!-- The banner under the header explains watching and reconnecting; data-ownership is for tests. -->
   <div class="screen stream-screen" data-ownership={st.ownership}>
-    <StreamHeader title={s.name} {sub} state={s.state} {compact} onBack={() => navigate({ name: 'agents' })} onTitle={() => openJump()}>
-      {#snippet icon()}
-        <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
-      {/snippet}
-      {#snippet trailing()}
-        <button class={['icon-btn', !compact && 'round']} aria-label="Jump to a stream" onclick={() => openJump()}>
-          <Icon name="search" size={compact ? 20 : 18} />
-        </button>
-        <button class={['icon-btn round', compact && 'tinted']} aria-label="Stream actions" onclick={(e) => actions(e.currentTarget)}>
-          <Icon name="more" size={18} />
-        </button>
-      {/snippet}
-    </StreamHeader>
-    <nav aria-label="Stream surfaces">
-      <div class="surface-tabs" role="tablist">
-        {#each tabs as x (x.id)}
-          <button role="tab" aria-selected={shown === x.id} class={shown === x.id ? 'is-on' : ''} onclick={() => navigate({ name: 'stream', id, surface: x.id }, { replace: true })}>
-            <Icon name={iconName(x.icon)} size={18} />
-            <span>{x.label}</span>
+    {#if !fullScreen.value}
+      <StreamHeader title={s.name} {sub} state={s.state} {compact} onBack={() => navigate({ name: 'agents' })} onTitle={() => openJump()}>
+        {#snippet icon()}
+          <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
+        {/snippet}
+        {#snippet trailing()}
+          <button class={['icon-btn', !compact && 'round']} aria-label="Jump to a stream" onclick={() => openJump()}>
+            <Icon name="search" size={compact ? 20 : 18} />
           </button>
-        {/each}
-      </div>
-    </nav>
+          <button class={['icon-btn round', compact && 'tinted']} aria-label="Stream actions" onclick={(e) => actions(e.currentTarget)}>
+            <Icon name="more" size={18} />
+          </button>
+        {/snippet}
+      </StreamHeader>
+      <nav aria-label="Stream surfaces">
+        <div class="surface-tabs" role="tablist">
+          {#each tabs as x (x.id)}
+            <button role="tab" aria-selected={shown === x.id} class={shown === x.id ? 'is-on' : ''} onclick={() => navigate({ name: 'stream', id, surface: x.id }, { replace: true })}>
+              <Icon name={iconName(x.icon)} size={18} />
+              <span>{x.label}</span>
+            </button>
+          {/each}
+        </div>
+      </nav>
+    {/if}
     <div class="surfaces">
       <TerminalSurface {ctl} stream={s} visible={shown === 'terminal'} {compact} />
       {#each streamTabs.value as t (t.plugin + ':' + t.id)}
         {#if t.component}<t.component stream={s} visible={shown === t.id} {compact} briardr={briardrFor(t.plugin)} />{/if}
       {/each}
     </div>
+    {#if fullScreen.value}
+      <button class="icon-btn full-exit" aria-label="Exit full screen" title="Exit full screen" onclick={() => (fullScreen.value = false)}>
+        <Icon name="minimize" size={18} />
+      </button>
+    {/if}
     {#if sheet === 'rename'}<RenameSheet stream={s} onClose={() => (sheet = null)} />{/if}
     {#if sheet === 'info'}<InfoSheet stream={s} {ctl} onClose={() => (sheet = null)} />{/if}
     {#if sheet === 'history'}<HistorySheet stream={s} onClose={() => (sheet = null)} />{/if}

@@ -116,6 +116,8 @@ export function toast(text: string, ms = 2600) {
 
 /** The stream currently on screen (for deciding whether to show attention banners). */
 export const visibleStreamId = state<string | null>(null);
+/** The open stream fills the window: no header, surface tabs, sidebar or list beside it. Leaving the stream ends it. */
+export const fullScreen = state(false);
 
 /** Whether a physical keyboard is in use (Mac, or iPad with a keyboard). */
 export const hardwareKeyboard = state<boolean>(matchMedia('(pointer: fine)').matches && !('ontouchstart' in window && navigator.maxTouchPoints > 1));
