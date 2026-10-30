@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.11
+
+- **A stream can fill the screen: Full screen in its ⋯ menu (or ⇧⌘↩) hides the header and tabs, and a button in the top right corner brings them back.** It works in the terminal and every tool (Files, Changes, Preview, Docs, Notes and installed plugins); on iPad and Mac it also hides the sidebar and the list beside the stream, and ⌘1–⌘9 still switch tools. Leaving the stream ends full screen. ([#21](https://github.com/ChrisSku/briardr/pull/21))
+
 ## 0.3.10
 
 - **Keep the iPhone keyboard up when you tap the key bar's arrow pad, show the Rename sheet above the keyboard in the Home Screen app, and centre the icon on the sign-in screen.** A tap on the arrow pad no longer takes focus from the terminal and closes the on-screen keyboard. In Briardr installed on the Home Screen, sheets whose field sits low on the screen, like Rename stream, stayed hidden under the keyboard: iOS shrinks the page's reported height once it scrolls to such a field, and Briardr now measures the keyboard against the layout instead. The Briardr icon on the sign-in screen is centred. ([#19](https://github.com/ChrisSku/briardr/pull/19))
