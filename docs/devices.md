@@ -28,7 +28,9 @@ On iPhone and iPad, Web Push requires the Home Screen app. Use a current OS vers
 Home Screen Web Push (iOS/iPadOS 16.4 or later). Browser automation covers layouts and interactions;
 it does not establish real push delivery on a physical device.
 
-The iPad layout makes room for navigation beside a stream. For dictation, the keyboard's built-in
+The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
+Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
+beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the keyboard's built-in
 dictation works in text fields. Briardr's separate host-side dictation feature requires a compatible
 Mac host; it is unavailable with a Linux host.
 

@@ -2,7 +2,8 @@
   App shell. Compact (iPhone, narrow windows): one column with a bottom tab bar (Agents, Workspaces,
   Settings) that hides while a stream is open. Regular (iPad, Mac): a sidebar with Agents and Workspaces,
   Jump, and Settings as a gear in the corner; with a stream open, the agent list or workspace tree stays
-  in view beside it, next to the sidebar when the window is wide enough (else with its own switch).
+  in view beside it, next to the sidebar when the window is wide enough (else with its own switch). A
+  stream in full screen hides both.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -19,7 +20,7 @@
   import { streamScreen } from './screens/lazy.svelte.ts';
   import WorkspacesScreen from './screens/WorkspacesScreen.svelte';
   import WorkspaceTree from './screens/WorkspaceTree.svelte';
-  import { banners, dismissBanner, herdr, listPane, model, session, toasts, topOverlay } from './store.ts';
+  import { banners, dismissBanner, fullScreen, herdr, listPane, model, session, toasts, topOverlay } from './store.ts';
   import { groupOf } from './types.ts';
   import { Icon, iconName, type IconName } from './ui/icons/index.ts';
   import { ConfirmHost, Empty, MenuHost } from './ui/kit.ts';
@@ -53,13 +54,17 @@
   // Beside a stream, the sidebar picks the list next to it instead of leaving the stream.
   const sideOn = (t: NavTab) => (inStream ? t.route.name === listPane.value : isOn(t));
   const sidePick = (t: NavTab) => (inStream && (t.route.name === 'agents' || t.route.name === 'workspaces') ? (listPane.value = t.route.name) : navigate(t.route));
-  const showSidebar = $derived(!compact && (!inStream || wide));
+  const full = $derived(inStream && fullScreen.value);
+  const showSidebar = $derived(!compact && !full && (!inStream || wide));
   const appTab = $derived(r.name === 'app' ? appTabs.value.find((t) => t.id === r.tab) : undefined);
   $effect(() => {
     if (appTab && !appTab.component) void loadBuiltins('appTabs');
   });
   $effect(() => {
     if (inStream && !streamScreen.component.value) void streamScreen.load();
+  });
+  $effect(() => {
+    if (!inStream) fullScreen.value = false;
   });
 
   onMount(() => {
@@ -81,6 +86,9 @@
       } else if (e.metaKey && e.key === '[' && cur.name === 'stream') {
         e.preventDefault();
         history.back();
+      } else if (e.metaKey && e.shiftKey && e.key === 'Enter' && cur.name === 'stream') {
+        e.preventDefault();
+        fullScreen.value = !fullScreen.value;
       }
     };
     window.addEventListener('keydown', onKey);
@@ -98,7 +106,7 @@
 {:else if s.status === 'signed_out'}
   <PairScreen reason={s.reason} />
 {:else}
-  <div class={['app', compact ? 'is-compact' : 'is-regular', inStream && 'in-stream']}>
+  <div class={['app', compact ? 'is-compact' : 'is-regular', inStream && 'in-stream', full && 'is-full']}>
     <a class="skip" href="#main">Skip to content</a>
     <!-- Banners float over the header instead of pushing the screen down. -->
     <div class="top-overlay">
@@ -153,7 +161,7 @@
           </div>
         </nav>
       {/if}
-      {#if !compact && inStream}
+      {#if !compact && inStream && !full}
         <!-- Beside an open stream on iPad and Mac: agents or the workspace tree. -->
         <aside class="list-pane" aria-label={listPane.value === 'agents' ? 'Agents' : 'Workspaces'}>
           {#if showSidebar}
