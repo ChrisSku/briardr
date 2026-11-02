@@ -17,7 +17,7 @@ beforeAll(async () => {
   ws = testPane('briardr-a11y');
   herdr('pane', 'rename', ws.pane, 'a11y target');
   herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-a11y', '--agent', 'claude', '--state', 'blocked');
-  fs.writeFileSync(path.join(ws.dir, 'README.md'), '# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n');
+  fs.writeFileSync(path.join(ws.dir, 'README.md'), '# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n\n```mermaid\nflowchart LR\n  A --> B\n```\n');
   await s.run.herdr.refresh();
   browser = await webkit.launch();
 });
@@ -69,7 +69,7 @@ for (const profile of ['iphone', 'mac'] as const)
         problems.push(...(await audit(page, 'files')));
         await page.getByRole('tab', { name: 'Docs' }).click();
         await page.locator('.doc-list .row-main').first().click();
-        await page.waitForSelector('.md');
+        await page.waitForSelector('.md-diagram-view svg');
         problems.push(...(await audit(page, 'docs')));
         await page.getByRole('tab', { name: 'Changes' }).click();
         await page.waitForTimeout(600);

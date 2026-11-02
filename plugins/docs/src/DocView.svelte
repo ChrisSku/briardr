@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, Icon, type PluginContext, type Stream } from '@briardr/sdk';
-  import { renderMarkdown } from '@briardr/sdk/markdown';
+  import { renderDiagrams, renderMarkdown } from '@briardr/sdk/markdown';
 
   let { stream, briardr, path, onBack, onOpen, canBack }: { stream: Stream; briardr: PluginContext; path: string; onBack: () => void; onOpen: (p: string) => void; canBack: boolean } = $props();
   let doc = $state.raw<{ text: string; size: number } | null>(null);
@@ -19,6 +19,11 @@
       (r) => (doc = r),
       (e) => (error = e instanceof ApiError ? e.message : 'Couldn’t open this file.'),
     );
+  });
+
+  $effect(() => {
+    void html;
+    if (body) void renderDiagrams(body);
   });
 
   function onclick(e: MouseEvent) {

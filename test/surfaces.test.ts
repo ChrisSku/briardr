@@ -75,6 +75,101 @@ describe('docs', () => {
     assert.match(html, /target="_blank"/);
     assert.match(html, /type="checkbox" disabled checked/);
   });
+
+  test('Markdown keeps safe raw HTML, the way a README uses it', async () => {
+    const { renderMarkdown } = await import('../web/src/markdown.ts');
+    const render = (src: string) => renderMarkdown(src, { docPath: 'docs/README.md', streamId: 'w1:p1' });
+    const head = render('<p align="center">\n  <img src="logo.png" width="112" alt="Logo" />\n</p>\n\n<h1 align="center">Name</h1>\n\n<a href="guide.md">Guide</a> · <a href="#usage">Usage</a> · <a href="https://example.com/?a=1&amp;b=2"><img src="https://evil/badge.svg" alt="Badge" /></a>\n');
+    assert.match(head, /<p align="center">/);
+    assert.match(head, /<img src="\/api\/streams\/w1%3Ap1\/docs\/asset\?path=docs%2Flogo\.png" alt="Logo" width="112"/);
+    assert.match(head, /<h1 align="center">Name<\/h1>/);
+    assert.match(head, /<a href="#" data-doc="docs\/guide\.md">Guide<\/a>/);
+    assert.match(head, /<a href="#usage" data-anchor="usage">Usage<\/a> ·/);
+    assert.match(head, /href="https:\/\/example\.com\/\?a=1&amp;b=2" target="_blank" rel="noopener noreferrer"/);
+    assert.match(head, /aria-label="Remote image not loaded: Badge" title="Remote image not loaded: Badge">Badge<\/span>/);
+    assert.match(render('![](https://evil/x.png)'), />Remote image not loaded<\/span>/);
+    assert.match(render('![a"><b>](https://evil/x.png)'), /aria-label="Remote image not loaded: a&quot;&gt;&lt;b&gt;"[^<]*>a&quot;&gt;&lt;b&gt;<\/span>/);
+    assert.ok(!head.includes('evil'));
+    assert.match(render('<details open><summary>More</summary>\n\n**Inner**\n\n</details>\n\nPress <kbd>Esc</kbd><br>\n\n<a name="here"></a>'), /<details open="">[\s\S]*<strong>Inner<\/strong>[\s\S]*<kbd>Esc<\/kbd><br>[\s\S]*<a id="md-here">/);
+    assert.match(render('<p>a&nbsp;b &amp; c & d</p>'), /<p>a&nbsp;b &amp; c &amp; d<\/p>/);
+    assert.match(render('<picture><source srcset="https://evil/a.png"><img src="a.png"></picture>'), /<picture><img src="[^"]*asset[^"]*"[^>]*><\/picture>/);
+    assert.match(render('A Vec<T> and <video src="a.mp4"></video>'), /Vec&lt;T&gt; and &lt;video src="a\.mp4"&gt;/);
+  });
+
+  test('Markdown leaves Mermaid diagrams as code blocks to draw, and other code alone', async () => {
+    const { renderMarkdown } = await import('../web/src/markdown.ts');
+    const html = renderMarkdown('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```\n\n```ts\nmermaid\n```', { docPath: 'README.md', streamId: 'w1:p1' });
+    assert.match(html, /<pre class="md-diagram"><code>flowchart LR\n  A\[&quot;&lt;b&gt;x&lt;\/b&gt;&quot;\] --&gt; B\n<\/code><\/pre>/);
+    assert.match(html, /<pre><code class="language-ts">mermaid/);
+  });
+
+  test('Markdown raw HTML can never run or reach out', async () => {
+    const { renderMarkdown } = await import('../web/src/markdown.ts');
+    const attacks = [
+      '<script>alert(1)</script>',
+      'text <script>alert(1)</script> more',
+      '<SCRIPT SRC=https://evil/x.js></SCRIPT>',
+      '<script>alert(1)',
+      '<style>body{display:none}</style>',
+      '<img src=x onerror=alert(1)>',
+      '<img src="x"onerror=alert(1)>',
+      '<img src=x/onerror=alert(1)>',
+      '<img/src=x/onerror=alert(1)>',
+      '<img srcset="https://evil/a.png 1x" src="a.png">',
+      '<p onclick="alert(1)" style="position:fixed" class="sheet" id="app">x</p>',
+      '<a href="javascript:alert(1)">x</a>',
+      '<a href="JaVaScRiPt:alert(1)">x</a>',
+      '<a href="java&#115;cript:alert(1)">x</a>',
+      '<a href="&#106;avascript:alert(1)">x</a>',
+      '<a href="  javascript:alert(1)">x</a>',
+      '<a href="java\tscript:alert(1)">x</a>',
+      '<a href="data:text/html,<script>alert(1)</script>">x</a>',
+      '<a href="vbscript:x" target="_top">x</a>',
+      '<a href="//evil/x">x</a>',
+      '<img src="//evil/x.png">',
+      '<img src="data:image/svg+xml,<svg onload=alert(1)>">',
+      '<iframe src="https://evil"></iframe>',
+      '<object data="https://evil"></object>',
+      '<embed src="https://evil">',
+      '<svg onload=alert(1)><script>alert(1)</script></svg>',
+      '<math><mtext></form><style><img src=x onerror=alert(1)>',
+      '<form action="https://evil"><input name=a><button>Go</button></form>',
+      '<textarea><img src=x onerror=alert(1)></textarea>',
+      '<title><img src=x onerror=alert(1)></title>',
+      '<base href="https://evil/">',
+      '<meta http-equiv="refresh" content="0;url=https://evil">',
+      '<link rel="stylesheet" href="https://evil/x.css">',
+      '<!-- x --><img src=x onerror=alert(1)><!-- y -->',
+      '<!-- <img src=x onerror=alert(1)',
+      '<scr<!-- -->ipt>alert(1)</scr<!-- -->ipt>',
+      '<<script>script>alert(1)<</script>/script>',
+      '<div title="&quot; onmouseover=&quot;alert(1)">x</div>',
+      '<div title=\'"><script>alert(1)</script>\'>x</div>',
+      '<img alt="&quot;><script>alert(1)</script>" src="a.png">',
+      '<a href="x" href="javascript:alert(1)" onclick=alert(1)>x</a>',
+      '<a href="#&quot; onclick=&quot;alert(1)">x</a>',
+      '<div\nonclick=alert(1)\n>x</div>',
+      '</article><script>alert(1)</script>',
+      '<?php echo 1 ?><![CDATA[<script>alert(1)</script>]]><!DOCTYPE html>',
+    ];
+    for (const attack of attacks) {
+      for (const src of [attack, `Some text ${attack} and more`, `- item\n\n  ${attack}\n\n| a |\n|---|\n| ${attack} |`]) {
+        const html = renderMarkdown(src, { docPath: 'README.md', streamId: 'w1:p1' });
+        // Each real tag, as a browser would see it: only allowed elements, nothing active from the
+        // document, and a URL only where Briardr put one.
+        for (const [tag, name, attrs] of html.matchAll(/<\/?([a-z][a-z0-9-]*)((?:"[^"]*"|[^">])*)>/gi)) {
+          assert.ok(!/^(script|style|iframe|object|embed|svg|math|form|input|button|textarea|title|base|meta|link|article|source)$/i.test(name), `${attack} made ${tag}`);
+          const bare = attrs.replace(/"[^"]*"/g, '""');
+          assert.ok(!/\s(on\w+|style|srcset|action|formaction)\b/i.test(bare), `${attack} made ${tag}`);
+          assert.ok(!/\sclass=/.test(attrs) || /class="(md-table|md-remote-img)"/.test(attrs), `${attack} made ${tag}`);
+          assert.ok(!/\sid=/.test(attrs) || /\sid="md-/.test(attrs), `${attack} made ${tag}`);
+          for (const [, url] of attrs.matchAll(/\s(?:href|src)="([^"]*)"/gi)) {
+            assert.match(url, name === 'img' ? /^\/api\/streams\// : /^(#|https?:\/\/)/, `${attack} made ${tag}`);
+          }
+        }
+      }
+    }
+  });
 });
 
 describe('files', () => {

@@ -9,7 +9,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { ApiError, AsOf, Icon, keyboardInset, prepareImage, type Stream, type StreamContext } from '@briardr/sdk';
-  import { renderMarkdown } from '@briardr/sdk/markdown';
+  import { renderDiagrams, renderMarkdown } from '@briardr/sdk/markdown';
   import { cacheNote, copy, draftKey, enc, inflight, listKey, load, MAX_BYTES, notesPath, sendToTerminal, store, type Draft, type Note } from './notes.ts';
 
   type Status = 'new' | 'loading' | 'saved' | 'saving' | 'unsaved' | 'offline' | 'conflict' | 'error';
@@ -42,6 +42,11 @@
   let refreshGeneration = 0;
   let timer: number | null = null;
   let area: HTMLTextAreaElement | undefined = $state();
+  let previewBody: HTMLElement | undefined = $state();
+  $effect(() => {
+    void text;
+    if (previewBody) void renderDiagrams(previewBody);
+  });
   let picker: HTMLInputElement;
   const kb = keyboardInset(); // keep the editor above the on-screen keyboard
 
@@ -352,7 +357,7 @@
     </div>
   {/if}
   {#if preview}
-    <article class="md notes-preview">{@html renderMarkdown(text || '_Nothing written yet._', { docPath: '', streamId: sid, notes: true })}</article>
+    <article bind:this={previewBody} class="md notes-preview">{@html renderMarkdown(text || '_Nothing written yet._', { docPath: '', streamId: sid, notes: true })}</article>
   {:else}
     <textarea
       bind:this={area}
