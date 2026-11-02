@@ -86,7 +86,9 @@ describe('docs', () => {
     assert.match(head, /<a href="#" data-doc="docs\/guide\.md">Guide<\/a>/);
     assert.match(head, /<a href="#usage" data-anchor="usage">Usage<\/a> ·/);
     assert.match(head, /href="https:\/\/example\.com\/\?a=1&amp;b=2" target="_blank" rel="noopener noreferrer"/);
-    assert.match(head, /Remote image not loaded: Badge/);
+    assert.match(head, /aria-label="Remote image not loaded: Badge" title="Remote image not loaded: Badge">Badge<\/span>/);
+    assert.match(render('![](https://evil/x.png)'), />Remote image not loaded<\/span>/);
+    assert.match(render('![a"><b>](https://evil/x.png)'), /aria-label="Remote image not loaded: a&quot;&gt;&lt;b&gt;"[^<]*>a&quot;&gt;&lt;b&gt;<\/span>/);
     assert.ok(!head.includes('evil'));
     assert.match(render('<details open><summary>More</summary>\n\n**Inner**\n\n</details>\n\nPress <kbd>Esc</kbd><br>\n\n<a name="here"></a>'), /<details open="">[\s\S]*<strong>Inner<\/strong>[\s\S]*<kbd>Esc<\/kbd><br>[\s\S]*<a id="md-here">/);
     assert.match(render('<p>a&nbsp;b &amp; c & d</p>'), /<p>a&nbsp;b &amp; c &amp; d<\/p>/);

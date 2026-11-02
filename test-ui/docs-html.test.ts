@@ -98,8 +98,9 @@ test('a README with raw HTML renders, and nothing in it runs or reaches out', as
     await page.waitForFunction(() => (document.querySelector('article.md img') as HTMLImageElement | null)?.naturalWidth === 1);
     assert.equal((await logo.boundingBox())?.width, 64);
 
-    // The rest of it: a remote image stays a label, and the document's handlers, scripts and styling are gone.
-    await doc.getByText('Remote image not loaded: Badge').waitFor();
+    // The rest of it: a remote image stays a short label, and the document's handlers, scripts and styling are gone.
+    await doc.getByRole('img', { name: 'Remote image not loaded: Badge' }).waitFor();
+    assert.equal(await doc.locator('.md-remote-img').textContent(), 'Badge');
     assert.equal(await doc.locator('script, style, svg, [onerror], [onload], [onclick], [style], .sheet, #evil').count(), 0);
     await doc.getByRole('link', { name: 'Bad link' }).click();
     await doc.getByText('More', { exact: true }).click();

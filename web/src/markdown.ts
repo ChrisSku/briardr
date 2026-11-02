@@ -50,7 +50,10 @@ export function renderMarkdown(src: string, opts: { docPath: string; streamId: s
     const alt = esc(rawAlt);
     const note = opts.notes ? srcAttr.match(NOTE_IMAGE) : null;
     if (note) return `<img src="/api/streams/${esc(encodeURIComponent(opts.streamId))}/notes/images/${note[1]}" alt="${alt}"${attrs} decoding="async">`;
-    if (isExternal(srcAttr)) return `<span class="md-remote-img" role="img" aria-label="Remote image not loaded">Remote image not loaded${alt ? `: ${alt}` : ''}</span>`;
+    if (isExternal(srcAttr)) {
+      const label = `Remote image not loaded${alt ? `: ${alt}` : ''}`;
+      return `<span class="md-remote-img" role="img" aria-label="${label}" title="${label}">${alt || 'Remote image not loaded'}</span>`;
+    }
     const rel = resolveRel(opts.docPath, srcAttr);
     if (!rel) return `<span class="md-remote-img">Image outside this folder${alt ? `: ${alt}` : ''}</span>`;
     const url = `/api/streams/${encodeURIComponent(opts.streamId)}/docs/asset?path=${encodeURIComponent(rel)}`;
