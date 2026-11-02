@@ -814,11 +814,13 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .md blockquote { border-left: 3px solid var(--line-default); padding: 2px 12px; color: var(--text-secondary); }
 .md hr { border: 0; border-top: 1px solid var(--line-default); margin: 18px 0; }
 .md img { max-width: 100%; border-radius: 8px; }
+.md img[width] { height: auto; }
 .md li.task { list-style: none; margin-left: -1.3em; }
 .md li.task input { margin-right: 6px; }
 .md-table { overflow-x: auto; margin: 12px 0; }
 .md table { border-collapse: collapse; min-width: max-content; }
-.md th, .md td { border: 1px solid var(--line-default); padding: 6px 10px; text-align: left; }
+.md th, .md td { border: 1px solid var(--line-default); padding: 6px 10px; }
+.md th:not([align]), .md td:not([align]) { text-align: left; }
 .md th { background: var(--bg-sunken); }
 .md-remote-img { display: inline-block; font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-sunken); padding: 4px 8px; border-radius: 6px; }
 .md-source { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.82rem; background: var(--bg-sunken); padding: 12px; border-radius: 10px; }
