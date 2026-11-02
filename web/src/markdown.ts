@@ -105,6 +105,11 @@ export function renderMarkdown(src: string, opts: { docPath: string; streamId: s
     return out + htmlText(raw.slice(last));
   };
 
+  // Mermaid diagrams stay code here; renderDiagrams (diagrams.ts) draws them once they're in the page.
+  const fence = md.renderer.rules.fence!;
+  md.renderer.rules.fence = (tokens, idx, o, env, self) =>
+    tokens[idx].info.trim().split(/\s+/)[0] === 'mermaid' ? `<pre class="md-diagram"><code>${esc(tokens[idx].content)}</code></pre>\n` : fence(tokens, idx, o, env, self);
+
   md.renderer.rules.table_open = () => '<div class="md-table" tabindex="0" role="region" aria-label="Table"><table>';
   md.renderer.rules.table_close = () => '</table></div>';
 

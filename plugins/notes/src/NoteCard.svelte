@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { AsOf, Icon } from '@briardr/sdk';
-  import { renderMarkdown } from '@briardr/sdk/markdown';
+  import { renderDiagrams, renderMarkdown } from '@briardr/sdk/markdown';
 
   interface Props {
     item: Item;
@@ -31,6 +31,7 @@
   $effect(() => {
     void html;
     measure();
+    void renderDiagrams(body).then(measure);
   });
   const title = $derived(item.text.trim().split('\n')[0].replace(/^#+\s*/, '').slice(0, 60));
 </script>

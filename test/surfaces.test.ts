@@ -94,6 +94,13 @@ describe('docs', () => {
     assert.match(render('A Vec<T> and <video src="a.mp4"></video>'), /Vec&lt;T&gt; and &lt;video src="a\.mp4"&gt;/);
   });
 
+  test('Markdown leaves Mermaid diagrams as code blocks to draw, and other code alone', async () => {
+    const { renderMarkdown } = await import('../web/src/markdown.ts');
+    const html = renderMarkdown('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```\n\n```ts\nmermaid\n```', { docPath: 'README.md', streamId: 'w1:p1' });
+    assert.match(html, /<pre class="md-diagram"><code>flowchart LR\n  A\[&quot;&lt;b&gt;x&lt;\/b&gt;&quot;\] --&gt; B\n<\/code><\/pre>/);
+    assert.match(html, /<pre><code class="language-ts">mermaid/);
+  });
+
   test('Markdown raw HTML can never run or reach out', async () => {
     const { renderMarkdown } = await import('../web/src/markdown.ts');
     const attacks = [

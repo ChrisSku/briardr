@@ -822,6 +822,10 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .md th, .md td { border: 1px solid var(--line-default); padding: 6px 10px; }
 .md th:not([align]), .md td:not([align]) { text-align: left; }
 .md th { background: var(--bg-sunken); }
+.md-diagram-view { margin: 12px 0; text-align: center; overflow-x: auto; }
+.md-diagram-view svg { height: auto; }
+/* Mermaid's own style, scoped by the diagram's id, leaves the line showing through the label. */
+.md-diagram-view .edgeLabel rect { opacity: 1 !important; }
 .md-remote-img { display: inline-block; font-size: 0.82rem; color: var(--text-secondary); background: var(--bg-sunken); padding: 4px 8px; border-radius: 6px; }
 .md-source { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.82rem; background: var(--bg-sunken); padding: 12px; border-radius: 10px; }
 

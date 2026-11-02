@@ -26,6 +26,7 @@ nothing else from Briardr: `{{briardr}}/plugins/<id>/`. They're the best example
 | `keyboardInset()` | `.current` is the on-screen keyboard's height (0 when hidden); CSS has it as `var(--kb)`. A `Sheet` and a scrolling surface already stay above the keyboard, and a focused field scrolls into view; use it for a layout that fills the screen, such as an editor. |
 | `prepareImage(blob, name)` | An image made ready to upload: orientation fixed, camera and location metadata dropped, PNG of at most 4096 px and 20 MB: `{ blob, width, height, name, url }`. |
 | `isLocalhostUrl(url)` | True for `http://localhost:…`, `127.0.0.1` and the like (for `onTerminalLink`). |
+| `renderDiagrams(element)` | From `@briardr/sdk/markdown`: draws the Mermaid diagrams in an element holding `renderMarkdown`'s output; call it after each render. Without it they stay code blocks. Mermaid loads only when there's a diagram. |
 | `renderMarkdown(text, { docPath, streamId })` | From `@briardr/sdk/markdown`: Briardr's Markdown renderer, safe for `{@html}` (raw HTML reduced to an allowlist of safe tags, no remote images; relative images load from the stream's folder). Separate so it loads only with plugins that use it. |
 | `API_VERSION` | `1`, the manifest's `"briardr"`. |
 | Types | `Stream`, `StreamTabProps`, `AppTabProps`, `SettingsProps`, `PluginContext`, `StreamContext`, `TerminalAccess`, `PluginModule`, `MenuItem`, `HostCaps`, `AgentState`, `StreamKind`, `Settings`, `Save`. |

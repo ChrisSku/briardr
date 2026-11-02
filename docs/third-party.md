@@ -9,6 +9,7 @@ dependencies, tools, or separately installed software.
 | Svelte | Web interface | [sveltejs/svelte](https://github.com/sveltejs/svelte) |
 | xterm.js and add-ons | Browser terminal | [xtermjs/xterm.js](https://github.com/xtermjs/xterm.js) |
 | markdown-it | Markdown rendering | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
+| Mermaid | Diagrams in Markdown | [mermaid-js/mermaid](https://github.com/mermaid-js/mermaid) |
 | highlight.js | Code highlighting | [highlightjs/highlight.js](https://github.com/highlightjs/highlight.js) |
 | PDF.js | PDF viewing in Files | [mozilla/pdf.js](https://github.com/mozilla/pdf.js) |
 | Tokio, Axum, rustls, and other Rust crates | Server, networking, TLS, and supporting functionality | [Cargo manifest](../server/Cargo.toml) and [lockfile](../server/Cargo.lock) |
