@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.12
+
+- **Docs and Notes now render the HTML in Markdown files, like the centred header of a README, and draw Mermaid diagrams.** Common tags such as `<p align="center">`, `<img>`, `<a>`, `<details>` and `<kbd>` work, in the same way as on GitHub, and a ` ```mermaid ` block becomes a diagram in the current theme. Anything that could run or reach out stays out: scripts, event handlers, styles and forms never get through, other tags show as text, remote images still aren't loaded and now show just their description (a badge reads "Latest release"), and a diagram can't change its security settings or link anywhere. A diagram Mermaid can't draw stays as code. ([#22](https://github.com/ChrisSku/briardr/pull/22))
+
 ## 0.3.11
 
 - **A stream can fill the screen: Full screen in its ⋯ menu (or ⇧⌘↩) hides the header and tabs, and a button in the top right corner brings them back.** It works in the terminal and every tool (Files, Changes, Preview, Docs, Notes and installed plugins); on iPad and Mac it also hides the sidebar and the list beside the stream, and ⌘1–⌘9 still switch tools. Leaving the stream ends full screen. ([#21](https://github.com/ChrisSku/briardr/pull/21))
