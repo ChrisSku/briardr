@@ -313,7 +313,7 @@ h1, h2, h3 { margin: 0; }
 .is-rail .sidebar-brand { flex-direction: column; padding: 0 0 8px; gap: 6px; }
 .is-rail .side-item, .is-rail .side-jump { position: relative; justify-content: center; padding: 0; }
 .is-rail .side-item .cnt { position: absolute; top: 1px; right: 1px; margin: 0; }
-.is-rail .side-settings { justify-content: center; margin: 0; }
+.is-rail .side-settings { flex-direction: column; margin: 0; }
 
 /* ---------- controls ---------- */
 /* Buttons: Kind (Secondary by default, Primary ink, Tinted, Ghost, Destructive) × Size (Large 52, Medium 40,
