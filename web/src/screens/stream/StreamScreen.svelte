@@ -9,7 +9,7 @@
   import { isMac, theHost } from '../../host.ts';
   import { onMount, untrack } from 'svelte';
   import { record } from '../../diag.ts';
-  import { navigate, openedFromAlert, type Surface } from '../../router.ts';
+  import { holdStream, navigate, openedFromAlert, type Surface } from '../../router.ts';
   import { clockSkew, fullScreen, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
   import { TerminalController } from '../../terminal/controller.ts';
   import { isLocalhostUrl, isWebUrl } from '../../terminal/links.ts';
@@ -18,6 +18,7 @@
   import type { Stream } from '../../types.ts';
   import { Icon, iconName, ToolIcon } from '../../ui/icons/index.ts';
   import { Empty, openMenu, since } from '../../ui/kit.ts';
+  import { canOpenWindows, openWindow } from '../../windows.ts';
   import { openJump } from '../Jump.svelte';
   import { markSeen } from '../streams.ts';
   import HistorySheet from './HistorySheet.svelte';
@@ -72,6 +73,7 @@
   onMount(() => {
     void loadBuiltins('streamTabs');
     visibleStreamId.value = id;
+    const releaseStream = holdStream(id);
     markOpened(id);
     ctl.connect('control', false);
     if (openedFromAlert.value) openedFromAlert.value = false;
@@ -101,6 +103,7 @@
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pageshow', onPageShow);
       visibleStreamId.value = null;
+      releaseStream();
       ctl.dispose(); // releases control now; frees the terminal after the next screen has painted
     };
   });
@@ -137,6 +140,7 @@
         { label: 'History', onSelect: () => (sheet = 'history') },
         { label: 'Jump to stream…', hint: '⌘K', onSelect: () => openJump() },
         { label: 'Full screen', hint: '⇧⌘↩', onSelect: () => (fullScreen.value = true) },
+        ...(canOpenWindows ? [{ label: 'New Window', hint: '⌥⌘N', onSelect: () => openWindow() }] : []),
         st.ownership === 'watching'
           ? { label: 'Take control', onSelect: () => void takeControl() }
           : { label: `Hand back to ${isMac() ? 'Mac' : theHost()}`, hint: 'Release control', disabled: st.ownership !== 'controlling', onSelect: () => ctl.handBack() },

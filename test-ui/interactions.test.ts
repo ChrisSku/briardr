@@ -543,7 +543,7 @@ describe('ownership (two devices)', () => {
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     await b.page.waitForSelector('[data-ownership=watching]');
-    await b.page.locator('.watch-banner', { hasText: 'Another device is in control' }).waitFor();
+    await b.page.locator('.watch-banner', { hasText: 'Another window or device is in control' }).waitFor();
     // Cancel first: nothing changes.
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('button', { name: 'Cancel' }).click();
@@ -553,7 +553,7 @@ describe('ownership (two devices)', () => {
     await b.page.getByRole('button', { name: 'Take Over' }).click();
     await b.page.getByRole('dialog').getByRole('button', { name: 'Take Over' }).click();
     await b.page.waitForSelector('[data-ownership=controlling]');
-    await a.page.locator('.watch-banner', { hasText: 'Another device took control' }).waitFor();
+    await a.page.locator('.watch-banner', { hasText: 'Another window or device took control' }).waitFor();
     assert.equal(await a.page.locator('[data-ownership=watching]').count(), 1);
     await a.ctx.close();
     await b.ctx.close();
@@ -799,6 +799,65 @@ describe('agents list, peek, banners and links', () => {
     await frame.getByText('dev /hello?x=1').waitFor();
     await a.ctx.close();
     dev.close();
+  });
+});
+
+describe('several windows on a Mac', () => {
+  test('a stream opens in a new window, which takes control there; a window on the same stream watches', async () => {
+    const a = await device('mac', 'mac-windows');
+    await a.page.goto(s.base + '/workspaces');
+    const row = a.page.locator('.tree-streams .stream-row', { hasText: 'ui target' });
+    await row.getByRole('button', { name: /More actions/ }).click();
+    const [second] = await Promise.all([a.ctx.waitForEvent('page'), a.page.getByRole('menuitem', { name: 'Open in New Window' }).click()]);
+    await second.waitForSelector('[data-ownership=controlling]');
+    await waitUntil('the title to name the stream', async () => (await second.title()) === 'ui target – Briardr');
+    assert.equal(await a.page.title(), 'Briardr');
+
+    // The first window opens the same stream: nothing is taken from the second.
+    await row.locator('.row-main').click();
+    await a.page.waitForSelector('[data-ownership=watching]');
+    await a.page.locator('.watch-banner', { hasText: 'Another window or device is in control' }).waitFor();
+    assert.equal(await second.locator('[data-ownership=controlling]').count(), 1);
+
+    // ⌥⌘N opens another window, on Agents.
+    const [third] = await Promise.all([a.ctx.waitForEvent('page'), a.page.keyboard.press('Alt+Meta+n')]);
+    await third.waitForSelector('.count-strip');
+    assert.ok(new URL(third.url()).pathname === '/agents');
+    await a.ctx.close();
+  });
+
+  test('a window opened at the start page leaves a stream in use to the window using it', async () => {
+    const a = await device('mac', 'mac-restore');
+    await openTarget(a.page);
+    const b = await a.ctx.newPage();
+    await b.goto(s.base + '/');
+    await b.waitForSelector('.count-strip');
+    assert.equal(new URL(b.url()).pathname, '/agents');
+    assert.equal(await a.page.locator('[data-ownership=controlling]').count(), 1);
+    await b.close();
+    // With that window gone, the start page restores the stream again.
+    const streamPath = new URL(a.page.url()).pathname;
+    await a.page.close();
+    const c = await a.ctx.newPage();
+    await c.goto(s.base + '/');
+    await c.waitForSelector('[data-ownership]');
+    assert.equal(new URL(c.url()).pathname, streamPath);
+    await a.ctx.close();
+  });
+
+  test('what one window stores reaches the others, so they don’t overwrite it', async () => {
+    const a = await device('mac', 'mac-sync');
+    await a.page.goto(s.base + '/workspaces');
+    const b = await a.ctx.newPage();
+    await b.goto(s.base + '/workspaces');
+    const item = (p: Page) => p.locator('.tree-ws').filter({ has: p.locator('.tree-toggle', { hasText: 'briardr-ui' }) });
+    await item(a.page).locator('.tree-row.lvl-0 .tree-toggle').click();
+    assert.equal(await item(a.page).getAttribute('aria-expanded'), 'false');
+    await waitUntil('the other window to follow', async () => (await item(b).getAttribute('aria-expanded')) === 'false');
+    // A change in the other window builds on it instead of restoring the older state.
+    await item(b).locator('.tree-row.lvl-0 .tree-toggle').click();
+    await waitUntil('the first window to follow', async () => (await item(a.page).getAttribute('aria-expanded')) === 'true');
+    await a.ctx.close();
   });
 });
 

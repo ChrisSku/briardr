@@ -322,9 +322,9 @@
   const contested = $derived(st.watchReason === 'busy' || st.watchReason === 'taken_over');
   const watchText = $derived(
     st.watchReason === 'busy'
-      ? 'Another device is in control'
+      ? 'Another window or device is in control'
       : st.watchReason === 'taken_over'
-        ? 'Another device took control'
+        ? 'Another window or device took control'
         : st.watchReason === 'released'
           ? `Handed back to ${theHost()}`
           : 'Read-only until you take control',
@@ -335,7 +335,7 @@
 </script>
 
 {#snippet takeOverBody()}
-  <p>Another client is controlling this pane. Taking over moves control to this device and resizes the pane for it. The other client will switch to watching.</p>
+  <p>Another window or device is controlling this pane. Taking over moves control here and resizes the pane to fit. The other one will switch to watching.</p>
 {/snippet}
 
 {#snippet banner()}
