@@ -28,6 +28,11 @@ On iPhone and iPad, Web Push requires the Home Screen app. Use a current OS vers
 Home Screen Web Push (iOS/iPadOS 16.4 or later). Browser automation covers layouts and interactions;
 it does not establish real push delivery on a physical device.
 
+With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
+gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
+Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
+the mouse, so the selection also shows while a program like that handles the same drag itself.
+
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
 
