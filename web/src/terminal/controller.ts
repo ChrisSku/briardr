@@ -531,6 +531,12 @@ export class TerminalController {
     return this.send({ t: 'scroll', direction, column: col, row });
   }
 
+  /** One mouse event at a cell. Herdr encodes it for the program's mouse mode, and drops it if the program didn't ask for the mouse. */
+  mouse(action: 'down' | 'up' | 'drag' | 'move', button: 'left' | 'middle', col: number, row: number, modifiers: number): boolean {
+    if (!this.canInput) return false; // like a gesture: discarded while connecting, never replayed
+    return this.send({ t: 'mouse', action, button, column: col, row, modifiers });
+  }
+
   private onTyped(data: string) {
     if (this.opts.mode === 'observe') return;
     // Keyboard Return (on-screen) is a line feed; the key bar's Enter is a carriage return.

@@ -28,6 +28,11 @@ On iPhone and iPad, Web Push requires the Home Screen app. Use a current OS vers
 Home Screen Web Push (iOS/iPadOS 16.4 or later). Browser automation covers layouts and interactions;
 it does not establish real push delivery on a physical device.
 
+With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
+gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
+Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
+the mouse, so the selection also shows while a program like that handles the same drag itself.
+
 The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
 Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
 beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the keyboard's built-in
