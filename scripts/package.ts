@@ -104,6 +104,7 @@ fs.copyFileSync(path.join(root, 'server', 'target', target, 'release', 'briardr'
 fs.chmodSync(path.join(stage, 'bin', 'briardr'), 0o755);
 if (target.endsWith('-apple-darwin')) fs.cpSync(path.join(root, 'native'), path.join(stage, 'native'), { recursive: true });
 fs.copyFileSync(path.join(root, 'LICENSE'), path.join(stage, 'LICENSE'));
+fs.copyFileSync(path.join(root, 'LOGO.md'), path.join(stage, 'LOGO.md'));
 fs.writeFileSync(
   path.join(stage, 'THIRD-PARTY-NOTICES.txt'),
   notices(version, [

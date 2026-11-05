@@ -189,5 +189,5 @@ Please report vulnerabilities through [private reporting](SECURITY.md#reporting-
 
 ## License
 
-[MIT](LICENSE). Dependencies keep their own licenses, and Herdr is a separate project; see
-[third-party software](docs/third-party.md).
+[MIT](LICENSE), except the logo: see [LOGO.md](LOGO.md). Dependencies keep their own licenses, and Herdr is a
+separate project; see [third-party software](docs/third-party.md).
