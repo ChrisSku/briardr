@@ -5,6 +5,17 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.16
+
+- **Briardr can have several windows open on a Mac.** New Window (in the sidebar, a stream's ⋯ menu, or ⌥⌘N)
+  and Open in New Window on a stream open one, and each controls its own stream. A window title now names its
+  stream, and changes one window saves, like seen markers and preferences, reach the others instead of being
+  overwritten by them. A window opened at the start page goes to Agents if another window is using the last
+  stream, and a second window on a stream watches it, as a second device does. ([#26](https://github.com/ChrisSku/briardr/pull/26))
+- **The sidebar and the list beside a stream can be collapsed on iPad and Mac.** The button at the top of
+  the sidebar (or ⌘B) shrinks it to its icons, and the button next to Back in a stream's header (or ⌥⌘B)
+  hides the list, so the terminal gets the room. Both are remembered on the device. ([#24](https://github.com/ChrisSku/briardr/pull/24))
+
 ## 0.3.15
 
 - **Clicks and drags in the terminal now reach the program, and dragging copies the selection.** A program
