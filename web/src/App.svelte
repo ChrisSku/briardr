@@ -16,6 +16,7 @@
   import UpdateBar from './screens/UpdateBar.svelte';
   import JumpHost, { openJump } from './screens/Jump.svelte';
   import PairScreen from './screens/Pair.svelte';
+  import RenameSheet from './screens/RenameSheet.svelte';
   import SettingsScreen from './screens/SettingsScreen.svelte';
   import { streamScreen } from './screens/lazy.svelte.ts';
   import WorkspacesScreen from './screens/WorkspacesScreen.svelte';
@@ -216,6 +217,7 @@
       </nav>
     {/if}
     <JumpHost />
+    <RenameSheet />
     <MenuHost />
     <ConfirmHost />
     <div class="toasts" role="status" aria-live="polite">
