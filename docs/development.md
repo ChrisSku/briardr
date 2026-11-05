@@ -176,9 +176,9 @@ Each release has an archive per platform, `briardr-<os>-<arch>.tar.gz` for `maco
 `aarch64` and `x86_64`, that runs Briardr without a checkout, Bun or Rust.
 [`scripts/package.ts`](../scripts/package.ts) makes it: the release server as `bin/briardr`, the web
 client in `web/dist` next to it (where the server looks when its executable is a release's
-`bin/briardr`), the dictation helper's source on macOS, `LICENSE`, and `THIRD-PARTY-NOTICES.txt` with the
-license texts of the Rust crates and npm packages built into them. The Linux archives are built on Ubuntu
-24.04 and need its glibc (2.39) or newer.
+`bin/briardr`), the dictation helper's source on macOS, `LICENSE`, `LOGO.md`, and `THIRD-PARTY-NOTICES.txt`
+with the license texts of the Rust crates and npm packages built into them. The Linux archives are built on
+Ubuntu 24.04 and need its glibc (2.39) or newer.
 
 [`site/install.sh`](../site/install.sh), published at `https://briardr.dev/install.sh`, installs the
 latest archive for the computer it runs on after checking it against `SHA256SUMS`, then runs

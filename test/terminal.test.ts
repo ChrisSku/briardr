@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import { closeWorkspace, closed, herdr, opened, readPane, request, SESSION, sleep, startServer, testPane, until, ws, type TestServer } from './helpers.ts';
+import { closeWorkspace, closed, herdr, opened, readPane, request, SESSION, sleep, startServer, testPane, until, waitUntil, ws, type TestServer } from './helpers.ts';
 
 let s: TestServer;
 let pane: string;
@@ -145,6 +145,43 @@ describe('live terminal safety', () => {
     } finally {
       tui.kill();
     }
+  });
+
+  test('mouse events reach a program that asked for the mouse, and nothing else', async () => {
+    const shell = term('control');
+    await until(shell, (m) => m.t === 'live');
+    const before = readPane(pane);
+    const click = (c: ReturnType<typeof term>, action: string) => c.send(JSON.stringify({ t: 'mouse', action, button: 'left', column: 4, row: 2, modifiers: 0 }));
+    click(shell, 'down');
+    click(shell, 'up');
+    await sleep(400);
+    assert.equal(readPane(pane), before, 'a shell, which didn’t ask for the mouse, receives nothing');
+    shell.close();
+    await closed(shell);
+
+    herdr('pane', 'run', pane, `clear; python3 ${path.resolve('test/fixtures/rawecho.py')} mouse`);
+    await waitUntil('the echo program to start', () => readPane(pane).includes('READY mouse'));
+    const c = term('control');
+    await until(c, (m) => m.t === 'live');
+    const watcher = term('observe');
+    await until(watcher, (m) => m.t === 'live');
+    click(watcher, 'down');
+    await until(watcher, (m) => m.t === 'input_rejected' && m.reason === 'watching');
+    c.send(JSON.stringify({ t: 'mouse', action: 'wiggle', button: 'left', column: 1, row: 1, modifiers: 0 }));
+    c.send(JSON.stringify({ t: 'mouse', action: 'down', button: 'left', column: 'x', row: 1, modifiers: 0 }));
+    click(c, 'down');
+    click(c, 'up');
+    // SGR: ESC [ < 0 ; 5 ; 3 M, then the same ending in m (columns and rows count from 1).
+    const down = Buffer.from('\x1b[<0;5;3M').toString('hex');
+    const up = Buffer.from('\x1b[<0;5;3m').toString('hex');
+    await waitUntil('the release to arrive', () => readPane(pane).includes(up));
+    const received = readPane(pane).split('\n').filter((l) => l.startsWith('BYTES ')).map((l) => l.slice(6).trim());
+    assert.equal(received.join(''), down + up, 'the click arrived once; the watcher’s and the invalid events didn’t');
+    c.send(JSON.stringify({ t: 'input', id: 9, keys: ['ctrl+]'] }));
+    await waitUntil('the echo program to quit', () => readPane(pane).includes('DONE mouse'));
+    watcher.close();
+    c.close();
+    await Promise.all([closed(watcher), closed(c)]);
   });
 
   test('input to a pane that is gone is refused', async () => {

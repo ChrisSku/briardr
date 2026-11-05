@@ -19,10 +19,9 @@
   import { Icon, iconName, ToolIcon } from '../../ui/icons/index.ts';
   import { Empty, openMenu, since } from '../../ui/kit.ts';
   import { openJump } from '../Jump.svelte';
-  import { markSeen } from '../streams.ts';
+  import { markSeen, streamItems } from '../streams.ts';
   import HistorySheet from './HistorySheet.svelte';
   import InfoSheet from './InfoSheet.svelte';
-  import RenameSheet from './RenameSheet.svelte';
   import StreamHeader from './StreamHeader.svelte';
   import TerminalSurface, { confirmTakeOver } from './TerminalSurface.svelte';
 
@@ -39,7 +38,7 @@
     if (stream) lastKnown = stream;
     return stream || lastKnown;
   });
-  let sheet = $state<null | 'rename' | 'info' | 'history'>(null);
+  let sheet = $state<null | 'info' | 'history'>(null);
 
   // svelte-ignore state_referenced_locally
   const ctl = new TerminalController({
@@ -132,7 +131,6 @@
   const actions = (el: HTMLElement) =>
     openMenu(
       [
-        { label: 'Rename', onSelect: () => (sheet = 'rename') },
         { label: 'Info', onSelect: () => (sheet = 'info') },
         { label: 'History', onSelect: () => (sheet = 'history') },
         { label: 'Jump to stream…', hint: '⌘K', onSelect: () => openJump() },
@@ -140,6 +138,7 @@
         st.ownership === 'watching'
           ? { label: 'Take control', onSelect: () => void takeControl() }
           : { label: `Hand back to ${isMac() ? 'Mac' : theHost()}`, hint: 'Release control', disabled: st.ownership !== 'controlling', onSelect: () => ctl.handBack() },
+        ...streamItems(s!),
       ],
       el,
       s!.name,
@@ -197,7 +196,6 @@
         <Icon name="minimize" size={18} />
       </button>
     {/if}
-    {#if sheet === 'rename'}<RenameSheet stream={s} onClose={() => (sheet = null)} />{/if}
     {#if sheet === 'info'}<InfoSheet stream={s} {ctl} onClose={() => (sheet = null)} />{/if}
     {#if sheet === 'history'}<HistorySheet stream={s} onClose={() => (sheet = null)} />{/if}
   </div>

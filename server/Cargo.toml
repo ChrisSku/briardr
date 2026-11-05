@@ -1,6 +1,6 @@
 [package]
 name = "briardr-server"
-version = "0.3.12"
+version = "0.3.14"
 edition = "2021"
 publish = false
 license = "MIT"

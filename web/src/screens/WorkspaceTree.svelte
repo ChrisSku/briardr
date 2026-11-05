@@ -1,7 +1,7 @@
 <!--
   Workspaces: workspace → project → stream, including shells and editors, a card per workspace with its
   most urgent state. Searchable; expansion is remembered; cached rows are dimmed while disconnected.
-  Creating work never changes the Mac's focus.
+  Creating work never changes the Mac's focus. Each level's menu also renames and closes it.
 -->
 <script module lang="ts">
   export function shortPath(p: string): string {
@@ -17,6 +17,7 @@
   import { Empty, openMenu, StateBadge } from '../ui/kit.ts';
   import { peekSheet } from './lazy.svelte.ts';
   import StreamRow from './StreamRow.svelte';
+  import { projectItems, workspaceItems } from './streams.ts';
   import NewProject from './workspaces/NewProject.svelte';
   import NewStream from './workspaces/NewStream.svelte';
   import NewWorkspace from './workspaces/NewWorkspace.svelte';
@@ -91,7 +92,7 @@
             class="icon-btn"
             aria-label="Actions for {ws.name}"
             disabled={!live.value}
-            onclick={(e) => openMenu([{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }], e.currentTarget, ws.name)}
+            onclick={(e) => openMenu([{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }, ...workspaceItems(ws)], e.currentTarget, ws.name)}
           >
             <Icon name="more" />
           </button>
@@ -111,9 +112,9 @@
                     class="icon-btn"
                     aria-label="Actions for {p.name}"
                     disabled={!live.value}
-                    onclick={(e) => openMenu([{ label: 'New stream', onSelect: () => (create = { kind: 'stream', project: p }) }], e.currentTarget, p.name)}
+                    onclick={(e) => openMenu([{ label: 'New stream', onSelect: () => (create = { kind: 'stream', project: p }) }, ...projectItems(p)], e.currentTarget, p.name)}
                   >
-                    <Icon name="plus" size={18} />
+                    <Icon name="more" size={18} />
                   </button>
                 </div>
                 {#if popen}

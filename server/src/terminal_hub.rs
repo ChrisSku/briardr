@@ -21,7 +21,8 @@ use crate::diag::Diagnostics;
 use crate::herdr::model::Model;
 use crate::herdr::state::{HerdrReader, HerdrState};
 use crate::herdr::stream::{
-    CloseCategory, Direction, Frame, SessionEvent, StreamMode, TerminalSession,
+    CloseCategory, Direction, Frame, MouseAction, MouseButton, SessionEvent, StreamMode,
+    TerminalSession,
 };
 
 pub const PROTOCOL: u32 = 1;
@@ -458,6 +459,34 @@ impl TerminalHub {
                 if column.is_finite() && row.is_finite() {
                     c.session
                         .scroll(direction, column.round() as i64, row.round() as i64);
+                }
+            }
+            Some("mouse") => {
+                if let Some(why) = self.can_input(c) {
+                    return self.reject(c, msg.get("id"), why);
+                }
+                let action = match msg.get("action").and_then(Value::as_str) {
+                    Some("down") => MouseAction::Down,
+                    Some("up") => MouseAction::Up,
+                    Some("drag") => MouseAction::Drag,
+                    Some("move") => MouseAction::Move,
+                    _ => return,
+                };
+                let button = match msg.get("button").and_then(Value::as_str) {
+                    Some("left") => MouseButton::Left,
+                    Some("middle") => MouseButton::Middle,
+                    Some("right") => MouseButton::Right,
+                    _ => return,
+                };
+                let (column, row, modifiers) = (num("column"), num("row"), num("modifiers"));
+                if column.is_finite() && row.is_finite() && modifiers.is_finite() {
+                    c.session.mouse(
+                        action,
+                        button,
+                        column.round() as i64,
+                        row.round() as i64,
+                        modifiers.round() as i64,
+                    );
                 }
             }
             Some("input") => self.input(c, msg),
