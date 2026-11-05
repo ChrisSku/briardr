@@ -867,6 +867,85 @@ describe('agents list, peek, banners and links', () => {
 });
 
 describe('workspaces and menus', () => {
+  test('a workspace, its project and a stream are renamed from their menus', async () => {
+    const t = testPane('rename me');
+    onTestFinished(() => closeWorkspace(t.workspace));
+    herdr('pane', 'rename', t.pane, 'rename-stream');
+    await s.run.herdr.refresh();
+    const a = await device('mac', 'mac-rename');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    const rename = async (actions: string, title: string, name: string, within: Page | Locator = a.page) => {
+      await within.getByRole('button', { name: actions, exact: true }).click();
+      await a.page.getByRole('menuitem', { name: 'Rename' }).click();
+      const sheet = a.page.getByRole('dialog', { name: title });
+      await sheet.getByLabel('Name').fill(name);
+      await sheet.getByRole('button', { name: 'Save' }).click();
+      await sheet.waitFor({ state: 'detached' });
+    };
+    await rename('Actions for rename me', 'Rename workspace', 'renamed ws');
+    await a.page.locator('.tree-title', { hasText: 'renamed ws' }).waitFor();
+    assert.equal(herdr('workspace', 'get', t.workspace).result.workspace.label, 'renamed ws');
+
+    const tab = herdr('pane', 'get', t.pane).result.pane.tab_id;
+    const projectName = herdr('tab', 'get', tab).result.tab.label;
+    await rename(`Actions for ${projectName}`, 'Rename project', 'renamed project', a.page.locator('.tree-ws', { hasText: 'renamed ws' }));
+    await a.page.locator('.tree-title', { hasText: 'renamed project' }).waitFor();
+    assert.equal(herdr('tab', 'get', tab).result.tab.label, 'renamed project');
+
+    await rename('More actions for rename-stream', 'Rename stream', 'renamed stream');
+    await a.page.locator('.row-title', { hasText: 'renamed stream' }).waitFor();
+  });
+
+  test('closing asks first, says what closes with it, and leaves a stream that closed while open', async () => {
+    const t = testPane('close me');
+    onTestFinished(() => closeWorkspace(t.workspace));
+    herdr('pane', 'rename', t.pane, 'close-first');
+    const second = herdr('pane', 'split', t.pane, '--direction', 'right', '--no-focus').result.pane.pane_id;
+    herdr('pane', 'rename', second, 'close-second');
+    await s.run.herdr.refresh();
+    const a = await device('mac', 'mac-close');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    const row = a.page.locator('.tree-streams .stream-row', { hasText: 'close-second' });
+
+    // Cancelling changes nothing.
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    const dialog = a.page.getByRole('dialog', { name: 'Close stream “close-second”?' });
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await dialog.waitFor({ state: 'detached' });
+    assert.equal(herdr('pane', 'get', second).result.pane.pane_id, second);
+
+    // Closing the stream that's open from its own menu leaves it.
+    await row.locator('.row-main').click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('button', { name: 'Stream actions' }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    await dialog.locator('.btn-danger').click();
+    await a.page.waitForURL((u) => !u.pathname.startsWith('/stream/'));
+    await a.page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+    await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).waitFor();
+    await row.waitFor({ state: 'detached' }); // the live update follows the response
+
+    // The last stream takes its workspace along in Herdr, and the sheet says so.
+    await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).getByRole('button', { name: /More actions/ }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    const last = a.page.getByRole('dialog', { name: 'Close stream “close-first”?' });
+    await last.getByText('Workspace “close me” closes with it.').waitFor();
+    await last.getByRole('button', { name: 'Cancel' }).click();
+    await last.waitFor({ state: 'detached' });
+
+    // A workspace says how much it stops, and closes everything in it.
+    await a.page.getByRole('button', { name: 'Actions for close me', exact: true }).click();
+    await a.page.getByRole('menuitem', { name: 'Close workspace' }).click();
+    const ws2 = a.page.getByRole('dialog', { name: 'Close workspace “close me”?' });
+    await ws2.getByText('1 stream and everything').waitFor();
+    await ws2.locator('.btn-danger').click();
+    await a.page.locator('.tree-title', { hasText: 'close me' }).waitFor({ state: 'detached' });
+    assert.equal(await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).count(), 0);
+  });
+
   test('a workspace expanded by default collapses with one click', async () => {
     const a = await device('mac', 'mac-tree');
     await a.page.goto(s.base + '/workspaces');

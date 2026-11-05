@@ -34,7 +34,7 @@ The name comes from the briard, a shaggy French herding dog. Briardr was called 
 | | In Briardr |
 | --- | --- |
 | **See who needs you** | Agents grouped by Needs you, Working and Finished across every workspace, with a badge on the app icon. Peek at a live terminal without taking control or resizing it. |
-| **Take the reins** | Open a terminal, answer approvals, send prompts, paste text, upload files and images, and use a touch-friendly key bar whose keys you choose, per app if you like. Nothing you type is replayed after a reconnect. Create workspaces, projects, and Claude Code, Codex or shell streams. |
+| **Take the reins** | Open a terminal, answer approvals, send prompts, paste text, upload files and images, and use a touch-friendly key bar whose keys you choose, per app if you like. Nothing you type is replayed after a reconnect. Create, rename and close workspaces, projects, and Claude Code, Codex or shell streams. |
 | **Explore the project** | Browse files, search paths, read highlighted code and PDFs, and collect lines from several files into a question for the agent. Deleting files and folders asks first. |
 | **Review the work** | Read the Git diff of every stream and mark files as reviewed. Changes uses read-only Git commands and never takes Git's lock. |
 | **Keep context close** | Read the project's Markdown docs, with their HTML and Mermaid diagrams, and keep notes with images next to a stream; send them to its terminal. |
@@ -94,7 +94,7 @@ the Home Screen first and pair inside the installed app**, then turn on notifica
 As a non-root user with sudo, on Ubuntu 24.04 or 26.04 LTS (x86_64 or aarch64):
 
 ```sh
-git clone --branch v0.3.12 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.13 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex
@@ -189,5 +189,5 @@ Please report vulnerabilities through [private reporting](SECURITY.md#reporting-
 
 ## License
 
-[MIT](LICENSE). Dependencies keep their own licenses, and Herdr is a separate project; see
-[third-party software](docs/third-party.md).
+[MIT](LICENSE), except the logo: see [LOGO.md](LOGO.md). Dependencies keep their own licenses, and Herdr is a
+separate project; see [third-party software](docs/third-party.md).
