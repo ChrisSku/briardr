@@ -703,6 +703,70 @@ describe('agents list, peek, banners and links', () => {
     await a.page.keyboard.press('Escape');
   });
 
+  test('a mouse click and drag reach a program that asked for the mouse; Shift keeps them from it', async () => {
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    await sleep(300);
+    const a = await device('mac', 'mac-mouse');
+    onTestFinished(async () => {
+      await stopEcho();
+      await a.ctx.close().catch(() => {});
+    });
+    await openTarget(a.page);
+    await startEcho();
+    const p = await cellOf(a.page, `READY ${echoes}`, 0);
+    const { col, row } = await a.page.evaluate(([x, y]) => (document.querySelector('.term-host') as any).briardrTerminal.cellAt(x, y), [p.x, p.y]);
+    const sgr = (end: string, c = col, r = row) => Buffer.from(`\x1b[<0;${c + 1};${r + 1}${end}`).toString('hex');
+
+    await a.page.mouse.move(p.x, p.y);
+    await a.page.mouse.down();
+    await a.page.mouse.up();
+    const seen = async () => (await bytesSeen()).join('');
+    await waitUntil('the click to reach the program', async () => (await seen()).includes(sgr('m')));
+    assert.equal(await seen(), sgr('M') + sgr('m'), 'one press and one release at the clicked cell');
+
+    await a.page.keyboard.down('Shift');
+    await a.page.mouse.down();
+    await a.page.mouse.up();
+    await a.page.keyboard.up('Shift');
+    await sleep(400);
+    assert.equal(await seen(), sgr('M') + sgr('m'), 'a Shift-click stays in the terminal');
+
+    // The right button opens the menu instead, as in Herdr.
+    await a.page.mouse.click(p.x, p.y, { button: 'right' });
+    await a.page.getByRole('menuitem', { name: 'Copy Line' }).waitFor();
+    await a.page.keyboard.press('Escape');
+    await sleep(300);
+    assert.equal(await seen(), sgr('M') + sgr('m'), 'the right button isn’t sent');
+  });
+
+  test('dragging over text in a shell selects it and copies it on release', async () => {
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    await sleep(300);
+    const a = await device('mac', 'mac-copy');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t: string) => void ((window as any).copied = t) } });
+    });
+    await openTarget(a.page);
+    herdr('pane', 'run', ws.pane, 'clear; echo alpha bravo charlie');
+    const from = await cellOf(a.page, 'bravo', 0);
+    const to = await cellOf(a.page, 'bravo', 5);
+    await sleep(500); // the prompt after it
+    const before = await paneText('recent', 5);
+    await a.page.mouse.move(from.x, from.y);
+    await a.page.mouse.down();
+    await a.page.mouse.move(to.x, to.y, { steps: 4 });
+    await a.page.mouse.up();
+    await a.page.getByText('Copied').waitFor();
+    assert.equal(await a.page.evaluate(() => (window as any).copied), 'bravo');
+    assert.equal(await paneText('recent', 5), before, 'nothing reached the shell');
+    // A plain click clears the selection and doesn't copy again.
+    await a.page.evaluate(() => delete (window as any).copied);
+    await a.page.mouse.click(from.x, from.y);
+    await sleep(200);
+    assert.equal(await a.page.evaluate(() => (window as any).copied), undefined);
+  });
+
   test('Select Text opens a frozen copy with the touched word selected, and sends nothing', async () => {
     herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
     await sleep(300);
@@ -862,6 +926,85 @@ describe('several windows on a Mac', () => {
 });
 
 describe('workspaces and menus', () => {
+  test('a workspace, its project and a stream are renamed from their menus', async () => {
+    const t = testPane('rename me');
+    onTestFinished(() => closeWorkspace(t.workspace));
+    herdr('pane', 'rename', t.pane, 'rename-stream');
+    await s.run.herdr.refresh();
+    const a = await device('mac', 'mac-rename');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    const rename = async (actions: string, title: string, name: string, within: Page | Locator = a.page) => {
+      await within.getByRole('button', { name: actions, exact: true }).click();
+      await a.page.getByRole('menuitem', { name: 'Rename' }).click();
+      const sheet = a.page.getByRole('dialog', { name: title });
+      await sheet.getByLabel('Name').fill(name);
+      await sheet.getByRole('button', { name: 'Save' }).click();
+      await sheet.waitFor({ state: 'detached' });
+    };
+    await rename('Actions for rename me', 'Rename workspace', 'renamed ws');
+    await a.page.locator('.tree-title', { hasText: 'renamed ws' }).waitFor();
+    assert.equal(herdr('workspace', 'get', t.workspace).result.workspace.label, 'renamed ws');
+
+    const tab = herdr('pane', 'get', t.pane).result.pane.tab_id;
+    const projectName = herdr('tab', 'get', tab).result.tab.label;
+    await rename(`Actions for ${projectName}`, 'Rename project', 'renamed project', a.page.locator('.tree-ws', { hasText: 'renamed ws' }));
+    await a.page.locator('.tree-title', { hasText: 'renamed project' }).waitFor();
+    assert.equal(herdr('tab', 'get', tab).result.tab.label, 'renamed project');
+
+    await rename('More actions for rename-stream', 'Rename stream', 'renamed stream');
+    await a.page.locator('.row-title', { hasText: 'renamed stream' }).waitFor();
+  });
+
+  test('closing asks first, says what closes with it, and leaves a stream that closed while open', async () => {
+    const t = testPane('close me');
+    onTestFinished(() => closeWorkspace(t.workspace));
+    herdr('pane', 'rename', t.pane, 'close-first');
+    const second = herdr('pane', 'split', t.pane, '--direction', 'right', '--no-focus').result.pane.pane_id;
+    herdr('pane', 'rename', second, 'close-second');
+    await s.run.herdr.refresh();
+    const a = await device('mac', 'mac-close');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    const row = a.page.locator('.tree-streams .stream-row', { hasText: 'close-second' });
+
+    // Cancelling changes nothing.
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    const dialog = a.page.getByRole('dialog', { name: 'Close stream “close-second”?' });
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await dialog.waitFor({ state: 'detached' });
+    assert.equal(herdr('pane', 'get', second).result.pane.pane_id, second);
+
+    // Closing the stream that's open from its own menu leaves it.
+    await row.locator('.row-main').click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('button', { name: 'Stream actions' }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    await dialog.locator('.btn-danger').click();
+    await a.page.waitForURL((u) => !u.pathname.startsWith('/stream/'));
+    await a.page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+    await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).waitFor();
+    await row.waitFor({ state: 'detached' }); // the live update follows the response
+
+    // The last stream takes its workspace along in Herdr, and the sheet says so.
+    await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).getByRole('button', { name: /More actions/ }).click();
+    await a.page.getByRole('menuitem', { name: 'Close stream' }).click();
+    const last = a.page.getByRole('dialog', { name: 'Close stream “close-first”?' });
+    await last.getByText('Workspace “close me” closes with it.').waitFor();
+    await last.getByRole('button', { name: 'Cancel' }).click();
+    await last.waitFor({ state: 'detached' });
+
+    // A workspace says how much it stops, and closes everything in it.
+    await a.page.getByRole('button', { name: 'Actions for close me', exact: true }).click();
+    await a.page.getByRole('menuitem', { name: 'Close workspace' }).click();
+    const ws2 = a.page.getByRole('dialog', { name: 'Close workspace “close me”?' });
+    await ws2.getByText('1 stream and everything').waitFor();
+    await ws2.locator('.btn-danger').click();
+    await a.page.locator('.tree-title', { hasText: 'close me' }).waitFor({ state: 'detached' });
+    assert.equal(await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).count(), 0);
+  });
+
   test('a workspace expanded by default collapses with one click', async () => {
     const a = await device('mac', 'mac-tree');
     await a.page.goto(s.base + '/workspaces');
@@ -918,6 +1061,48 @@ describe('workspaces and menus', () => {
     await a.page.locator('.sidebar').waitFor();
     await openTarget(a.page);
     assert.deepEqual(await full(), [true, true, true, true]);
+    await a.ctx.close();
+  });
+
+  test('the sidebar collapses to its icons and the list hides, the terminal takes the room, and both are remembered', async () => {
+    const a = await device('mac', 'mac-collapse');
+    await openTarget(a.page);
+    const cols = () => a.page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.cols);
+    const grew = async (than: number) => waitUntil('the terminal to take the room', async () => (await cols()) > than);
+    const sidebar = a.page.locator('.sidebar');
+    const list = a.page.locator('.list-pane');
+
+    const start = await cols();
+    const wide = (await sidebar.boundingBox())!.width;
+    await a.page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    assert.ok((await sidebar.boundingBox())!.width < wide / 2, 'the sidebar is narrow');
+    await grew(start);
+    // Its places still work, by name.
+    const agents = a.page.getByRole('button', { name: 'Agents', exact: true });
+    await a.page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+    await a.page.locator('.list-pane .tree').waitFor();
+    await agents.click();
+    await a.page.locator('.list-pane .count-strip, .list-pane .agents').first().waitFor();
+
+    const railed = await cols();
+    await a.page.getByRole('button', { name: 'Hide list' }).click();
+    await list.waitFor({ state: 'detached' });
+    await grew(railed);
+
+    await a.page.reload();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    assert.equal(await list.count(), 0, 'the list stays hidden after a reload');
+    await a.page.getByRole('button', { name: 'Expand sidebar' }).waitFor();
+
+    // A place in the sidebar brings the list back; so do the shortcuts, and the header's button.
+    await agents.click();
+    await list.waitFor();
+    await a.page.keyboard.press('Alt+Meta+b');
+    await list.waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Show list' }).click();
+    await list.waitFor();
+    await a.page.keyboard.press('Meta+b');
+    await a.page.getByRole('button', { name: 'Collapse sidebar' }).waitFor();
     await a.ctx.close();
   });
 

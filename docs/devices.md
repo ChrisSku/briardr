@@ -28,6 +28,14 @@ On iPhone and iPad, Web Push requires the Home Screen app. Use a current OS vers
 Home Screen Web Push (iOS/iPadOS 16.4 or later). Browser automation covers layouts and interactions;
 it does not establish real push delivery on a physical device.
 
+With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
+gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
+Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
+the mouse, so the selection also shows while a program like that handles the same drag itself.
+
+Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
+and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
+
 The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
 Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
 beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the keyboard's built-in
@@ -39,6 +47,10 @@ Open in New Window on a stream, or the browser's or installed app's own New Wind
 controls its own stream. A stream can only have one controller, so a second window on it watches, with
 Take Over to move control there. As on other devices, a window that is minimized or completely covered
 releases control and takes it back when you return to it.
+
+On iPad and Mac, the button at the top of the sidebar (or ⌘B) collapses it to its icons, and the button
+next to Back in a stream's header (or ⌥⌘B) hides the list beside the stream. Both are remembered on the
+device.
 
 ## Mac desktop client
 

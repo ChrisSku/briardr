@@ -94,6 +94,7 @@
       window.removeEventListener('briardr:paste-text', onText);
       window.removeEventListener('briardr:paste-file', onFile);
       window.removeEventListener('keydown', onKey, true);
+      endPress?.();
     };
   });
 
@@ -146,8 +147,62 @@
       () => toast('Copying isn’t allowed here.'),
     );
 
+  // ---------- mouse ----------
+  // As in a real terminal: a program that asked for the mouse gets clicks, drags and movement (Herdr drops
+  // them for one that didn't, so a shell never sees them), Shift keeps a drag from reaching the program,
+  // and the right button opens the menu, as it does in Herdr. Herdr doesn't say which programs asked, so
+  // the terminal's own selection is always there, and what it selects is copied on release, as in Herdr.
+  const modifiers = (e: MouseEvent) => (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0);
+  let endPress: (() => void) | null = null;
+  let hover = { col: -1, row: -1 };
+
+  function mousePress(e: PointerEvent) {
+    // On a Mac, Control-click is the right button.
+    const button = e.button === 0 && !(e.ctrlKey && navigator.platform.startsWith('Mac')) ? 'left' : e.button === 1 ? 'middle' : null;
+    if (!button) return;
+    endPress?.();
+    const send = !e.shiftKey;
+    let last = ctl.cellAt(e.clientX, e.clientY);
+    if (send) ctl.mouse('down', button, last.col, last.row, modifiers(e));
+    const move = (m: PointerEvent) => {
+      const c = ctl.cellAt(m.clientX, m.clientY);
+      if (c.col === last.col && c.row === last.row) return;
+      last = c;
+      if (send) ctl.mouse('drag', button, c.col, c.row, modifiers(m));
+    };
+    // On the window, so a drag that ends outside the terminal counts, and after xterm's own handler,
+    // so its selection is final. Copying has to happen in this event: Safari only allows it in one.
+    const up = (m: MouseEvent) => {
+      if (m.button !== e.button) return;
+      release(modifiers(m));
+      const sel = button === 'left' && ctl.term.getSelection();
+      if (sel) copy(sel, 'Copied');
+    };
+    const release = (mods: number) => {
+      endPress = null;
+      hover = last;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('mouseup', up);
+      window.removeEventListener('blur', lost);
+      if (send) ctl.mouse('up', button, last.col, last.row, mods);
+    };
+    const lost = () => release(0); // the release will never come: don't leave the program mid-drag
+    endPress = lost;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('mouseup', up);
+    window.addEventListener('blur', lost);
+  }
+
+  function mouseMove(e: PointerEvent) {
+    if (endPress) return; // a drag, handled above
+    const c = ctl.cellAt(e.clientX, e.clientY);
+    if (c.col === hover.col && c.row === hover.row) return;
+    hover = c;
+    ctl.mouse('move', 'left', c.col, c.row, modifiers(e));
+  }
+
   function onpointerdown(e: PointerEvent) {
-    if (e.pointerType === 'mouse') return;
+    if (e.pointerType === 'mouse') return mousePress(e);
     const cell = ctl.cellAt(e.clientX, e.clientY);
     const long = window.setTimeout(() => {
       const cur = g;
@@ -162,6 +217,7 @@
   }
 
   function onpointermove(e: PointerEvent) {
+    if (e.pointerType === 'mouse') return mouseMove(e);
     const cur = g;
     if (!cur || e.pointerId !== cur.id) return;
     if (!cur.moved && Math.hypot(e.clientX - cur.x, e.clientY - cur.y) > 8) {

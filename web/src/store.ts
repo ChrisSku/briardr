@@ -71,6 +71,10 @@ export const expanded = persisted<Record<string, boolean>>('briardr.agents.expan
 export const expandedNodes = persisted<Record<string, boolean>>('briardr.tree.expanded', {});
 export const lastPath = persisted<string>('briardr.nav.last', '/agents');
 export const listPane = persisted<'agents' | 'workspaces'>('briardr.nav.listPane', 'agents');
+/** iPad and Mac: the sidebar shows only icons. */
+export const sidebarCollapsed = persisted<boolean>('briardr.nav.sidebarCollapsed', false);
+/** iPad and Mac: the list beside an open stream is hidden. */
+export const listHidden = persisted<boolean>('briardr.nav.listHidden', false);
 
 /** Local "seen" markers for finished work: streamId -> the state marker that was seen. Never sent to Herdr. */
 export const seen = persisted<Record<string, string>>('briardr.seen', {});

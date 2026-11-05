@@ -251,6 +251,65 @@ pub(super) fn register(r: &mut Routes) {
         },
     );
 
+    // --- renaming and closing ---
+    r.add(
+        Method::POST,
+        "/api/workspaces/:id/rename",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            app.d
+                .actions
+                .rename_workspace(ctx.param("id"), &field(&b, "name"))
+                .await?;
+            ok(json!({"ok": true}))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/workspaces/:id/close",
+        false,
+        |app: Arc<App>, ctx: Ctx| async move {
+            app.d.actions.close_workspace(ctx.param("id")).await?;
+            ok(json!({"ok": true}))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/projects/:id/rename",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            app.d
+                .actions
+                .rename_project(ctx.param("id"), &field(&b, "name"))
+                .await?;
+            ok(json!({"ok": true}))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/projects/:id/close",
+        false,
+        |app: Arc<App>, ctx: Ctx| async move {
+            app.d.actions.close_project(ctx.param("id")).await?;
+            ok(json!({"ok": true}))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/streams/:id/close",
+        false,
+        |app: Arc<App>, ctx: Ctx| async move {
+            app.d.actions.close_stream(ctx.param("id")).await?;
+            ok(json!({"ok": true}))
+        },
+    );
+
     // --- stream actions ---
     r.add(
         Method::POST,

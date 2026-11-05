@@ -1,4 +1,4 @@
-// Create workspace/project/stream, rename, history, info.
+// Create, rename and close workspace/project/stream; history, info.
 // Every Herdr creation passes focus:false so the Mac's focused pane never changes.
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::time::sleep;
 
-use crate::herdr::model::{Stream, StreamKind};
+use crate::herdr::model::{Model, Stream, StreamKind};
 use crate::herdr::rpc::HerdrError;
 use crate::herdr::state::{HerdrReader, HerdrState};
 
@@ -109,6 +109,11 @@ fn clean_label(v: &Value, max: usize) -> Option<String> {
         .collect();
     let out = utf16_prefix(js_trim(&stripped), max);
     (!out.is_empty()).then(|| out.to_string())
+}
+
+/// Herdr has no way to clear a workspace's or tab's label, so these need a name.
+fn required_label(v: &Value) -> Result<String, ActionError> {
+    clean_label(v, 60).ok_or_else(|| err(400, "invalid_name", "Enter a name."))
 }
 
 /// Node's `path.normalize` for POSIX paths: collapses separators, `.` and `..`, and keeps a trailing slash.
@@ -541,6 +546,73 @@ impl Actions {
         Ok(Value::Null)
     }
 
+    pub async fn rename_workspace(&self, id: &str, label_in: &Value) -> Result<Value, ActionError> {
+        if !self.has(|m| m.workspaces.iter().any(|w| w.id == id)) {
+            return Err(err(
+                404,
+                "workspace_gone",
+                "That workspace no longer exists.",
+            ));
+        }
+        let label = required_label(label_in)?;
+        self.call(
+            "workspace.rename",
+            json!({ "workspace_id": id, "label": label }),
+        )
+        .await?;
+        self.refresh().await?;
+        Ok(Value::Null)
+    }
+
+    pub async fn rename_project(&self, id: &str, label_in: &Value) -> Result<Value, ActionError> {
+        if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
+            return Err(err(404, "project_gone", "That project no longer exists."));
+        }
+        let label = required_label(label_in)?;
+        self.call("tab.rename", json!({ "tab_id": id, "label": label }))
+            .await?;
+        self.refresh().await?;
+        Ok(Value::Null)
+    }
+
+    /// Closing stops what runs inside on the host; the client confirms first. Linked worktree
+    /// workspaces are never closed along with this one: Herdr refuses, and says so.
+    pub async fn close_workspace(&self, id: &str) -> Result<Value, ActionError> {
+        if !self.has(|m| m.workspaces.iter().any(|w| w.id == id)) {
+            return Err(err(
+                404,
+                "workspace_gone",
+                "That workspace no longer exists.",
+            ));
+        }
+        self.call("workspace.close", json!({ "workspace_id": id }))
+            .await?;
+        self.refresh().await?;
+        Ok(Value::Null)
+    }
+
+    pub async fn close_project(&self, id: &str) -> Result<Value, ActionError> {
+        if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
+            return Err(err(404, "project_gone", "That project no longer exists."));
+        }
+        self.call("tab.close", json!({ "tab_id": id })).await?;
+        self.refresh().await?;
+        Ok(Value::Null)
+    }
+
+    pub async fn close_stream(&self, id: &str) -> Result<Value, ActionError> {
+        if !self.has(|m| m.streams.iter().any(|s| s.id == id)) {
+            return Err(err(404, "stream_gone", "That stream no longer exists."));
+        }
+        self.call("pane.close", json!({ "pane_id": id })).await?;
+        self.refresh().await?;
+        Ok(Value::Null)
+    }
+
+    fn has(&self, found: impl FnOnce(&Model) -> bool) -> bool {
+        self.herdr.model().is_some_and(|m| found(&m))
+    }
+
     /// `lines` is the JS number from the request (NaN when missing or not a number).
     pub async fn history(&self, stream_id: &str, lines: f64) -> Result<Value, ActionError> {
         // Math.max(100, Math.min(20000, Math.round(lines) || 1000)); JS rounds .5 up.
@@ -816,6 +888,22 @@ mod tests {
         let e = actions.rename("pane-1", &json!("x")).await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "stream_gone"));
         let e = actions.info("pane-1").await.unwrap_err();
+        assert_eq!((e.status, e.code.as_str()), (404, "stream_gone"));
+        let e = actions
+            .rename_workspace("w-1", &json!("x"))
+            .await
+            .unwrap_err();
+        assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
+        let e = actions
+            .rename_project("p-1", &json!("x"))
+            .await
+            .unwrap_err();
+        assert_eq!((e.status, e.code.as_str()), (404, "project_gone"));
+        let e = actions.close_workspace("w-1").await.unwrap_err();
+        assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
+        let e = actions.close_project("p-1").await.unwrap_err();
+        assert_eq!((e.status, e.code.as_str()), (404, "project_gone"));
+        let e = actions.close_stream("pane-1").await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "stream_gone"));
     }
 
