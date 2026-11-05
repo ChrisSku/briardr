@@ -10,7 +10,7 @@
   import { onMount, untrack } from 'svelte';
   import { record } from '../../diag.ts';
   import { navigate, openedFromAlert, type Surface } from '../../router.ts';
-  import { clockSkew, fullScreen, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
+  import { clockSkew, fullScreen, listHidden, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
   import { TerminalController } from '../../terminal/controller.ts';
   import { isLocalhostUrl, isWebUrl } from '../../terminal/links.ts';
   import { streamContext } from '../../plugins/context.ts';
@@ -155,6 +155,13 @@
   <div class="screen stream-screen" data-ownership={st.ownership}>
     {#if !fullScreen.value}
       <StreamHeader title={s.name} {sub} state={s.state} {compact} onBack={() => navigate({ name: 'agents' })} onTitle={() => openJump()}>
+        {#snippet leading()}
+          {#if !compact}
+            <button class="icon-btn" aria-label={listHidden.value ? 'Show list' : 'Hide list'} aria-expanded={!listHidden.value} title="{listHidden.value ? 'Show' : 'Hide'} list (⌥⌘B)" onclick={() => (listHidden.value = !listHidden.value)}>
+              <Icon name="sidebar" size={18} />
+            </button>
+          {/if}
+        {/snippet}
         {#snippet icon()}
           <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
         {/snippet}

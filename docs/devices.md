@@ -42,6 +42,10 @@ beside it hide until you tap the button in the top right corner or press ⇧⌘�
 dictation works in text fields. Briardr's separate host-side dictation feature requires a compatible
 Mac host; it is unavailable with a Linux host.
 
+On iPad and Mac, the button at the top of the sidebar (or ⌘B) collapses it to its icons, and the button
+next to Back in a stream's header (or ⌥⌘B) hides the list beside the stream. Both are remembered on the
+device.
+
 ## Mac desktop client
 
 Open the HTTPS URL in Safari or another modern browser. In Safari versions supporting web apps,

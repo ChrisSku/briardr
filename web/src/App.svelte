@@ -2,8 +2,9 @@
   App shell. Compact (iPhone, narrow windows): one column with a bottom tab bar (Agents, Workspaces,
   Settings) that hides while a stream is open. Regular (iPad, Mac): a sidebar with Agents and Workspaces,
   Jump, and Settings as a gear in the corner; with a stream open, the agent list or workspace tree stays
-  in view beside it, next to the sidebar when the window is wide enough (else with its own switch). A
-  stream in full screen hides both.
+  in view beside it, next to the sidebar when the window is wide enough (else with its own switch). The
+  sidebar collapses to its icons, which fit beside a stream at any width, and the list can be hidden
+  (⌘B, ⌥⌘B; remembered on this device). A stream in full screen hides both.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -21,7 +22,7 @@
   import { streamScreen } from './screens/lazy.svelte.ts';
   import WorkspacesScreen from './screens/WorkspacesScreen.svelte';
   import WorkspaceTree from './screens/WorkspaceTree.svelte';
-  import { banners, dismissBanner, fullScreen, herdr, listPane, model, session, toasts, topOverlay } from './store.ts';
+  import { banners, dismissBanner, fullScreen, herdr, listHidden, listPane, model, session, sidebarCollapsed, toasts, topOverlay } from './store.ts';
   import { groupOf } from './types.ts';
   import { Icon, iconName, type IconName } from './ui/icons/index.ts';
   import { ConfirmHost, Empty, MenuHost } from './ui/kit.ts';
@@ -54,9 +55,14 @@
   const isOn = (t: NavTab) => r.name === t.route.name && (r.name !== 'app' || (t.route.name === 'app' && r.tab === t.route.tab));
   // Beside a stream, the sidebar picks the list next to it instead of leaving the stream.
   const sideOn = (t: NavTab) => (inStream ? t.route.name === listPane.value : isOn(t));
-  const sidePick = (t: NavTab) => (inStream && (t.route.name === 'agents' || t.route.name === 'workspaces') ? (listPane.value = t.route.name) : navigate(t.route));
+  const sidePick = (t: NavTab) => {
+    if (!inStream || (t.route.name !== 'agents' && t.route.name !== 'workspaces')) return navigate(t.route);
+    listPane.value = t.route.name;
+    listHidden.value = false;
+  };
   const full = $derived(inStream && fullScreen.value);
-  const showSidebar = $derived(!compact && !full && (!inStream || wide));
+  const rail = $derived(sidebarCollapsed.value);
+  const showSidebar = $derived(!compact && !full && (!inStream || wide || rail));
   const appTab = $derived(r.name === 'app' ? appTabs.value.find((t) => t.id === r.tab) : undefined);
   $effect(() => {
     if (appTab && !appTab.component) void loadBuiltins('appTabs');
@@ -90,6 +96,11 @@
       } else if (e.metaKey && e.shiftKey && e.key === 'Enter' && cur.name === 'stream') {
         e.preventDefault();
         fullScreen.value = !fullScreen.value;
+      } else if (e.metaKey && e.code === 'KeyB' && !compact) {
+        // ⌥⌘B, or ⌘B where the window has no room for the sidebar, is the list beside the stream.
+        e.preventDefault();
+        if (cur.name === 'stream' && (e.altKey || !showSidebar)) listHidden.value = !listHidden.value;
+        else if (!e.altKey) sidebarCollapsed.value = !sidebarCollapsed.value;
       }
     };
     window.addEventListener('keydown', onKey);
@@ -138,31 +149,39 @@
     </div>
     <div class="app-body">
       {#if showSidebar}
-        <nav class="sidebar" aria-label="Main">
-          <div class="sidebar-brand"><span class="brand-tile" aria-hidden="true"><img src="/icons/briard.png" alt="" /></span>Briardr</div>
+        <nav class={['sidebar', rail && 'is-rail']} aria-label="Main">
+          <div class="sidebar-brand">
+            <span class="brand-tile" aria-hidden="true"><img src="/icons/briard.png" alt="" /></span>
+            {#if !rail}<span class="brand-name">Briardr</span>{/if}
+            <button class="icon-btn side-toggle" aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!rail} title="{rail ? 'Expand' : 'Collapse'} sidebar (⌘B)" onclick={() => (sidebarCollapsed.value = !rail)}>
+              <Icon name="sidebar" size={18} />
+            </button>
+          </div>
           {#each places as t}
-            <button class={['side-item', sideOn(t) && 'is-on']} aria-current={isOn(t) ? 'page' : undefined} onclick={() => sidePick(t)}>
+            <button class={['side-item', sideOn(t) && 'is-on']} aria-current={isOn(t) ? 'page' : undefined} aria-label={rail ? t.label : undefined} title={rail ? t.label : undefined} onclick={() => sidePick(t)}>
               <Icon name={t.icon} size={18} />
-              <span>{t.label}</span>
+              {#if !rail}<span>{t.label}</span>{/if}
               {#if t.route.name === 'agents' && attention > 0}<span class="cnt tone-attention" aria-label="{attention} need you">{attention}</span>{/if}
             </button>
           {/each}
           <div class="sidebar-foot">
-            <button class="side-jump" onclick={() => openJump()}>
+            <button class="side-jump" aria-label={rail ? 'Jump to stream' : undefined} title={rail ? 'Jump to stream (⌘K)' : undefined} onclick={() => openJump()}>
               <Icon name="search" size={16} />
-              <span>Jump to stream</span>
-              <kbd>⌘K</kbd>
+              {#if !rail}
+                <span>Jump to stream</span>
+                <kbd>⌘K</kbd>
+              {/if}
             </button>
             <div class="side-settings">
               <button class={['icon-btn', r.name === 'settings' && 'is-on']} aria-label="Settings" aria-current={r.name === 'settings' ? 'page' : undefined} onclick={() => navigate({ name: 'settings' })}>
                 <Icon name="settings" size={18} />
               </button>
-              <span class="side-version">{[`Briardr ${version}`, herdr.value?.version && `Herdr ${herdr.value.version}`].filter(Boolean).join(' · ')}</span>
+              {#if !rail}<span class="side-version">{[`Briardr ${version}`, herdr.value?.version && `Herdr ${herdr.value.version}`].filter(Boolean).join(' · ')}</span>{/if}
             </div>
           </div>
         </nav>
       {/if}
-      {#if !compact && inStream && !full}
+      {#if !compact && inStream && !full && !listHidden.value}
         <!-- Beside an open stream on iPad and Mac: agents or the workspace tree. -->
         <aside class="list-pane" aria-label={listPane.value === 'agents' ? 'Agents' : 'Workspaces'}>
           {#if showSidebar}

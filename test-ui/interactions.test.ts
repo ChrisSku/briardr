@@ -1005,6 +1005,48 @@ describe('workspaces and menus', () => {
     await a.ctx.close();
   });
 
+  test('the sidebar collapses to its icons and the list hides, the terminal takes the room, and both are remembered', async () => {
+    const a = await device('mac', 'mac-collapse');
+    await openTarget(a.page);
+    const cols = () => a.page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.cols);
+    const grew = async (than: number) => waitUntil('the terminal to take the room', async () => (await cols()) > than);
+    const sidebar = a.page.locator('.sidebar');
+    const list = a.page.locator('.list-pane');
+
+    const start = await cols();
+    const wide = (await sidebar.boundingBox())!.width;
+    await a.page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    assert.ok((await sidebar.boundingBox())!.width < wide / 2, 'the sidebar is narrow');
+    await grew(start);
+    // Its places still work, by name.
+    const agents = a.page.getByRole('button', { name: 'Agents', exact: true });
+    await a.page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+    await a.page.locator('.list-pane .tree').waitFor();
+    await agents.click();
+    await a.page.locator('.list-pane .count-strip, .list-pane .agents').first().waitFor();
+
+    const railed = await cols();
+    await a.page.getByRole('button', { name: 'Hide list' }).click();
+    await list.waitFor({ state: 'detached' });
+    await grew(railed);
+
+    await a.page.reload();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    assert.equal(await list.count(), 0, 'the list stays hidden after a reload');
+    await a.page.getByRole('button', { name: 'Expand sidebar' }).waitFor();
+
+    // A place in the sidebar brings the list back; so do the shortcuts, and the header's button.
+    await agents.click();
+    await list.waitFor();
+    await a.page.keyboard.press('Alt+Meta+b');
+    await list.waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Show list' }).click();
+    await list.waitFor();
+    await a.page.keyboard.press('Meta+b');
+    await a.page.getByRole('button', { name: 'Collapse sidebar' }).waitFor();
+    await a.ctx.close();
+  });
+
   test('on a phone, a menu opened while typing leaves focus in the terminal; with a hardware keyboard it takes it', async () => {
     const a = await device('iphone', 'phone-menu');
     await openTarget(a.page);

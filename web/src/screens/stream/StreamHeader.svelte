@@ -15,16 +15,19 @@
     onBack: () => void;
     /** Tapping the name (and the space after it) does this; the trailing buttons stay the accessible way in. */
     onTitle?: () => void;
+    /** After the back button. */
+    leading?: Snippet;
     icon?: Snippet;
     trailing?: Snippet;
   }
-  let { title, sub, state, compact = false, onBack, onTitle, icon, trailing }: Props = $props();
+  let { title, sub, state, compact = false, onBack, onTitle, leading, icon, trailing }: Props = $props();
 </script>
 
 <header class="screen-head stream-head">
   <button class="icon-btn back" aria-label="Back" onclick={onBack}>
     <Icon name="back" />
   </button>
+  {@render leading?.()}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="head-main" class:tappable={!!onTitle} onclick={onTitle}>
     {#if !compact}{@render icon?.()}{/if}
