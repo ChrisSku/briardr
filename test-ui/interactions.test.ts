@@ -862,7 +862,7 @@ describe('workspaces and menus', () => {
     await a.page.waitForURL((u) => !u.pathname.startsWith('/stream/'));
     await a.page.getByRole('button', { name: 'Workspaces', exact: true }).click();
     await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).waitFor();
-    assert.equal(await row.count(), 0);
+    await row.waitFor({ state: 'detached' }); // the live update follows the response
 
     // The last stream takes its workspace along in Herdr, and the sheet says so.
     await a.page.locator('.tree-streams .stream-row', { hasText: 'close-first' }).getByRole('button', { name: /More actions/ }).click();
