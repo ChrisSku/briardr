@@ -5,6 +5,13 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.15
+
+- **Clicks and drags in the terminal now reach the program, and dragging copies the selection.** A program
+  that asked for the mouse, like a full-screen agent or editor, gets left and middle clicks, drags and
+  movement, as in a real terminal; a shell sees nothing. Dragging or double-clicking copies the selected
+  text when you let go, as in Herdr, and holding Shift keeps the drag from the program. ([#23](https://github.com/ChrisSku/briardr/pull/23))
+
 ## 0.3.14
 
 - **Workspaces, projects and streams can be renamed and closed from Briardr.** Their menus in Workspaces now
