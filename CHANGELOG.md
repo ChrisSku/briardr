@@ -5,6 +5,12 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.13
+
+- **The Briardr logo isn't under the MIT license any more.** The code stays MIT. From this version on the logo is all rights
+  reserved, as `LOGO.md` says, so a fork or a modified build has to use a different one. Earlier versions keep the terms they
+  shipped with. ([#25](https://github.com/ChrisSku/briardr/pull/25))
+
 ## 0.3.12
 
 - **Docs and Notes now render the HTML in Markdown files, like the centred header of a README, and draw Mermaid diagrams.** Common tags such as `<p align="center">`, `<img>`, `<a>`, `<details>` and `<kbd>` work, in the same way as on GitHub, and a ` ```mermaid ` block becomes a diagram in the current theme. Anything that could run or reach out stays out: scripts, event handlers, styles and forms never get through, other tags show as text, remote images still aren't loaded and now show just their description (a badge reads "Latest release"), and a diagram can't change its security settings or link anywhere. A diagram Mermaid can't draw stays as code. ([#22](https://github.com/ChrisSku/briardr/pull/22))
