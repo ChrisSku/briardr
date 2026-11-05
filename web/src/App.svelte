@@ -26,7 +26,7 @@
   import { groupOf } from './types.ts';
   import { Icon, iconName, type IconName } from './ui/icons/index.ts';
   import { ConfirmHost, Empty, MenuHost } from './ui/kit.ts';
-
+  import { canOpenWindows, openWindow } from './windows.ts';
 
   const query = matchMedia('(max-width: 759px)');
   let compact = $state(query.matches);
@@ -73,6 +73,11 @@
   $effect(() => {
     if (!inStream) fullScreen.value = false;
   });
+  // Tells windows apart in the Window menu and Mission Control.
+  const streamName = $derived(r.name === 'stream' ? model.value?.streams.find((x) => x.id === r.id)?.name : undefined);
+  $effect(() => {
+    document.title = streamName ? `${streamName} – Briardr` : 'Briardr';
+  });
 
   onMount(() => {
     const onChange = () => ((compact = query.matches), (wide = wideQuery.matches));
@@ -96,6 +101,9 @@
       } else if (e.metaKey && e.shiftKey && e.key === 'Enter' && cur.name === 'stream') {
         e.preventDefault();
         fullScreen.value = !fullScreen.value;
+      } else if (e.metaKey && e.altKey && e.code === 'KeyN' && canOpenWindows) {
+        e.preventDefault();
+        openWindow();
       } else if (e.metaKey && e.code === 'KeyB' && !compact) {
         // ⌥⌘B, or ⌘B where the window has no room for the sidebar, is the list beside the stream.
         e.preventDefault();
@@ -173,6 +181,11 @@
               {/if}
             </button>
             <div class="side-settings">
+              {#if canOpenWindows}
+                <button class="icon-btn" aria-label="New window" title="New window (⌥⌘N)" onclick={() => openWindow()}>
+                  <Icon name="window" size={18} />
+                </button>
+              {/if}
               <button class={['icon-btn', r.name === 'settings' && 'is-on']} aria-label="Settings" aria-current={r.name === 'settings' ? 'page' : undefined} onclick={() => navigate({ name: 'settings' })}>
                 <Icon name="settings" size={18} />
               </button>

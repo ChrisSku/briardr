@@ -27,6 +27,8 @@ export function state<T>(initial: T): State<T> {
  * A value kept in this browser's localStorage under `key`, saved on every assignment. With `throttle`
  * (ms), saved at most that often (the latest value, at the end of the interval) and whenever the page
  * is hidden: for large values that change often, like the cached model during a burst of updates.
+ * Other windows' changes arrive here too, so a window doesn't overwrite them with its older copy. Throttled
+ * values are caches of live state, which each window gets for itself.
  */
 export class Persisted<T> extends State<T> {
   readonly key: string;
@@ -42,6 +44,10 @@ export class Persisted<T> extends State<T> {
     if (throttle) {
       document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && this.flush());
       addEventListener('pagehide', () => this.flush());
+    } else {
+      addEventListener('storage', (e: StorageEvent) => {
+        if (e.storageArea === localStorage && e.key === key) super.value = load(key, initial);
+      });
     }
   }
   override get value(): T {

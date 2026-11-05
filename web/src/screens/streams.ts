@@ -9,6 +9,7 @@ import { confirmDialog, duration, type MenuItem } from '../ui/kit.ts';
 import { openRename } from './RenameSheet.svelte';
 import { theHost } from '../host.ts';
 import { caps } from '../host.ts';
+import { canOpenWindows, openWindow } from '../windows.ts';
 
 export function batteryText(): { pct: string; detail: string; icon: IconName | null } | null {
   const b = mac.value?.battery;
@@ -125,6 +126,7 @@ export function streamMenu(s: Stream, peek: (s: Stream) => void): MenuItem[] {
     { label: 'Peek', hint: 'Read-only', onSelect: () => peek(s) },
     { label: 'Open', hint: 'Take control', onSelect: () => openStream(s) },
   ];
+  if (canOpenWindows) items.push({ label: 'Open in New Window', onSelect: () => openWindow({ name: 'stream', id: s.id, surface: 'terminal' }) });
   if (s.state === 'done') items.push(isSeen(s) ? { label: 'Mark as not seen', onSelect: () => markSeen(s, false) } : { label: 'Mark as seen', onSelect: () => markSeen(s) });
   items.push(...streamItems(s));
   return items;

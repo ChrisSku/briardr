@@ -55,6 +55,7 @@ export const SHAPES = {
   trash: '<path d="M4.5 7h15M9.5 7V5h5v2M6.5 7l1 12.5h9l1-12.5" /><path d="M10.5 10.5v6M13.5 10.5v6" />',
   usage: '<path d="M4.5 17a8 8 0 1115 0" /><path d="M12 17l4-6" /><circle cx="12" cy="17" r="1.2" />',
   warning: '<path d="M12 4l9 16H3z" /><path d="M12 10v4.5M12 17.5h.01" />',
+  window: '<rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M3 9h18M6.5 6.75h.01M9.5 6.75h.01" />',
   wifi: '<path d="M2 9a15 15 0 0120 0M5 12.5a10 10 0 0114 0M8.5 16a5 5 0 017 0" /><path d="M12 20h.01" stroke-width="2.6" />',
   workspaces: '<path d="M3.5 6.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v9a2 2 0 01-2 2h-13a2 2 0 01-2-2z" /><path d="M7.5 12.5h9M7.5 15.5h5" />',
   wrap: '<path d="M4 6.5h16M4 12h12.5a3.5 3.5 0 010 7H12" /><path d="M14.5 16.5L12 19l2.5 2.5M4 19h4" />',

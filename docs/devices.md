@@ -42,6 +42,12 @@ beside it hide until you tap the button in the top right corner or press ⇧⌘�
 dictation works in text fields. Briardr's separate host-side dictation feature requires a compatible
 Mac host; it is unavailable with a Linux host.
 
+On a Mac, Briardr can have several windows: New Window in the sidebar, in a stream's ⋯ menu or with ⌥⌘N,
+Open in New Window on a stream, or the browser's or installed app's own New Window command. Each window
+controls its own stream. A stream can only have one controller, so a second window on it watches, with
+Take Over to move control there. As on other devices, a window that is minimized or completely covered
+releases control and takes it back when you return to it.
+
 On iPad and Mac, the button at the top of the sidebar (or ⌘B) collapses it to its icons, and the button
 next to Back in a stream's header (or ⌥⌘B) hides the list beside the stream. Both are remembered on the
 device.
