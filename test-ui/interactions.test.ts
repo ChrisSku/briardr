@@ -1195,6 +1195,29 @@ describe('the on-screen keyboard (iPhone)', () => {
   });
 });
 
+describe('the on-screen keyboard (iPad)', () => {
+  test('the key bar comes back when the on-screen keyboard shows after a hardware key hid it', async () => {
+    const ctx = await browser.newContext({ ...devices['iPad Pro 11'], ignoreHTTPSErrors: true, locale: 'en-US' });
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'pad-kb-bar');
+    if (!p.ok) throw new Error('pairing failed');
+    await ctx.addCookies([{ name: '__Host-briardr', value: p.cookie, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
+    const page = await ctx.newPage();
+    try {
+      await openTarget(page);
+      const bar = page.locator('.keybar');
+      await page.locator('.term-host').click();
+      // A key with no on-screen keyboard up means a hardware keyboard, which hides the bar (WebKit's touch
+      // emulation reports one touch point, so it starts this way too).
+      await page.keyboard.type('a');
+      await bar.waitFor({ state: 'detached' });
+      await showKeyboard(page, 300);
+      await bar.waitFor();
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
 describe('settings', () => {
   test('About shows the build ID, branch and commit of the running page', async () => {
     const a = await device('mac', 'mac-settings');
