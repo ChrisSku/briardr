@@ -69,6 +69,11 @@
   const controlling = $derived(st.ownership === 'controlling');
   let resized = $state(0); // bumped when the terminal takes a new size (e.g. the Mac's, while watching)
 
+  // The on-screen keyboard showing means the touch screen is in use again, so the key bar comes back.
+  $effect(() => {
+    if ('ontouchstart' in window && kb.current > 0) hardwareKeyboard.value = false;
+  });
+
   onMount(() => {
     ctl.mount(host, screen);
     const sizes = ctl.term.onResize(() => resized++);
