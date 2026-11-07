@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.19
+
+- **The key bar comes back on an iPad when the on-screen keyboard opens.** A key press with no on-screen keyboard up counts as a hardware keyboard and hides the bar; opening the on-screen keyboard now shows it again. ([#30](https://github.com/ChrisSku/briardr/pull/30))
+
 ## 0.3.18
 
 - **Files previews HTML pages.** Opening an `.html` file shows the page, with the stylesheets, scripts, images and other pages it links to by relative path; the eye button in the file's header switches to its source and back. The page runs in a sandboxed frame with no access to Briardr or other sites, and links to other sites open in a new tab. ([#29](https://github.com/ChrisSku/briardr/pull/29))
