@@ -8,7 +8,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, Empty, Icon, type PluginContext, type Stream } from '@briardr/sdk';
-  import { filesView, formatSize, IMAGE_EXT, languageLabel, languageOf, PDF_EXT, type FileText } from './files.ts';
+  import { filesView, formatSize, HTML_EXT, IMAGE_EXT, languageLabel, languageOf, PDF_EXT, type FileText } from './files.ts';
   import FileIcon from './FileIcon.svelte';
   import PdfView from './PdfView.svelte';
   import { addSnippet, promptOf } from './prompt.ts';
@@ -46,6 +46,10 @@
   const language = $derived(languageOf(path));
   const image = $derived(IMAGE_EXT.test(path));
   const pdf = $derived(PDF_EXT.test(path));
+  const htmlPage = $derived(HTML_EXT.test(path));
+  /** An HTML page shows as the page it describes until the source is asked for. */
+  let showSource = $state(false);
+  const previewing = $derived(htmlPage && !showSource && file?.text != null);
   const asset = $derived(`/api/streams/${encodeURIComponent(stream.id)}/docs/asset?path=${encodeURIComponent(path)}`);
   const sid = $derived(stream.id);
   const wrap = $derived(filesView.value.wrap ?? compact);
@@ -59,6 +63,7 @@
       rendered = null;
       sel = null;
       pdfInfo = null;
+      showSource = false;
       zoomAt = ZOOMS.indexOf(1);
     }
     error = null;
@@ -182,6 +187,9 @@
       <button class="icon-btn" aria-label="Zoom out" title="Zoom out" disabled={zoomAt === 0} onclick={() => zoomAt--}><Icon name="minus" /></button>
       <button class="icon-btn" aria-label="Zoom in" title="Zoom in" disabled={zoomAt === ZOOMS.length - 1} onclick={() => zoomAt++}><Icon name="plus" /></button>
     {:else if !image && file?.text != null}
+      {#if htmlPage}
+        <button class={['icon-btn', previewing && 'is-on']} aria-label={previewing ? 'Show source' : 'Preview page'} aria-pressed={previewing} title={previewing ? 'Show source' : 'Preview page'} onclick={() => (showSource = !showSource)}><Icon name={previewing ? 'file' : 'eye'} /></button>
+      {/if}
       <button class={['icon-btn', wrap && 'is-on']} aria-label="Wrap lines" aria-pressed={wrap} title="Wrap lines" onclick={() => (filesView.value = { ...filesView.value, wrap: !wrap })}><Icon name="wrap" /></button>
       <button class="icon-btn" aria-label="Copy file" title="Copy file" onclick={copy}><Icon name="copy" /></button>
     {/if}
@@ -193,7 +201,7 @@
         {#if pdfInfo}<span>{pdfInfo.pages.toLocaleString()} {pdfInfo.pages === 1 ? 'page' : 'pages'}</span><span>{formatSize(pdfInfo.size)}</span>{/if}
         {#if ZOOMS[zoomAt] !== 1}<span>{Math.round(ZOOMS[zoomAt] * 100)}%</span>{/if}
       {:else if file}
-        <span>{file.binary ? 'Binary' : languageLabel(language)}</span>
+        <span>{previewing ? 'HTML preview' : file.binary ? 'Binary' : languageLabel(language)}</span>
         {#if !file.binary}<span>{lineCount.toLocaleString()} {lineCount === 1 ? 'line' : 'lines'}</span>{/if}
         <span>{formatSize(file.size)}</span>
         {#if rendered && !rendered.highlighted && language && language !== 'plaintext'}<span>Large file: no highlighting</span>{/if}
@@ -211,6 +219,9 @@
     {/key}
   {:else if file?.binary}
     <Empty title="Binary file">{name} isn’t text, so Files can’t show it.</Empty>
+  {:else if previewing && file}
+    <!-- No sandbox permissions: the page can't run script, submit forms or open windows. -->
+    <iframe class="fv-html" title={`Preview of ${name}`} sandbox="" referrerpolicy="no-referrer" srcdoc={file.text}></iframe>
   {:else if rendered}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div
