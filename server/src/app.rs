@@ -193,9 +193,9 @@ pub fn security_headers(
 ) -> Vec<(&'static str, String)> {
     let h = strip_port(host);
     let frames = match previews {
-        None => format!("https://{h}:*"),
-        Some([]) => "'none'".to_string(),
-        Some(list) => list.join(" "),
+        None => format!("'self' https://{h}:*"),
+        Some([]) => "'self'".to_string(),
+        Some(list) => format!("'self' {}", list.join(" ")),
     };
     let csp = [
         "default-src 'self'".to_string(),
@@ -610,6 +610,7 @@ pub struct App {
     pub plugins: crate::plugins::StateCell,
     pub backends: crate::plugins::backend::Backends,
     routes: Routes,
+    pub site_links: crate::site::SiteLinks,
     live: Mutex<Vec<LiveSocket>>,
     next_live: AtomicU64,
     model_pending: AtomicBool,
@@ -642,6 +643,7 @@ impl App {
             backends,
             d,
             routes,
+            site_links: crate::site::SiteLinks::default(),
             live: Mutex::new(Vec::new()),
             next_live: AtomicU64::new(1),
             model_pending: AtomicBool::new(false),
@@ -925,6 +927,9 @@ impl App {
         };
         if path.starts_with("/api/") {
             return self.handle_api(req, path, peer, client).await;
+        }
+        if let Some(rest) = path.strip_prefix("/site/") {
+            return crate::site::serve(&self, rest).await;
         }
         if let Some(rest) = path.strip_prefix("/plugins/") {
             return self.serve_plugin_file(req.headers(), rest).await;
@@ -1563,9 +1568,9 @@ mod tests {
         let h = security_headers("briardr.ts.net:3000", 3100, None);
         let csp = &h[0].1;
         assert!(csp.contains("connect-src 'self' wss://briardr.ts.net:3000"));
-        assert!(csp.contains("frame-src https://briardr.ts.net:*"));
+        assert!(csp.contains("frame-src 'self' https://briardr.ts.net:*"));
         let none = security_headers("a", 1, Some(&[]));
-        assert!(none[0].1.contains("frame-src 'none'"));
+        assert!(none[0].1.contains("frame-src 'self'"));
         assert_eq!(none.last().map(|x| x.1.as_str()), Some("1"));
     }
 

@@ -73,6 +73,7 @@ const LABELS: Record<string, string> = {
 
 export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif)$/i;
 export const PDF_EXT = /\.pdf$/i;
+export const HTML_EXT = /\.html?$/i;
 
 export function languageOf(path: string): string | null {
   const name = path.split('/').pop()!.toLowerCase();

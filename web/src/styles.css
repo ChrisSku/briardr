@@ -902,6 +902,7 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
   background: repeating-conic-gradient(var(--bg-sunken) 0% 25%, var(--bg-surface) 0% 50%) 50% / 20px 20px;
 }
 .fv-image img { max-width: 100%; height: auto; border-radius: 4px; box-shadow: var(--shadow-card); }
+.fv-html { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; color-scheme: light; }
 .fv-pdf { flex: 1; min-height: 0; overflow: auto; background: var(--bg-sunken); overscroll-behavior: contain; }
 .fv-pdf:focus-visible { outline: 2px solid var(--ink-default); outline-offset: -2px; }
 .fv-pdf-pages {

@@ -21,6 +21,7 @@ pub mod preview;
 pub mod push;
 pub mod serve;
 pub mod setup;
+pub mod site;
 pub mod static_files;
 pub mod terminal_hub;
 pub mod tls;
