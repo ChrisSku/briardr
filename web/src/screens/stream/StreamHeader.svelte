@@ -1,16 +1,15 @@
-<!-- A stream's header: back, the name with its state and where it runs under it, then the actions. On iPad
-     and Mac the avatar leads and the state is a Filled badge. -->
+<!-- A stream's header: back, one line with the state's dot, the name in the state's colour and where it runs after it, then the
+     actions. On iPad and Mac the avatar leads. -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import type { AgentState } from '../../types.ts';
+  import { STATE_LABEL, type AgentState } from '../../types.ts';
   import { Icon } from '../../ui/icons/index.ts';
-  import { StateBadge } from '../../ui/kit.ts';
-
+  
   interface Props {
     title: string;
     sub?: string;
     state?: AgentState | null;
-    /** iPhone: Dot badge, no avatar. */
+    /** iPhone: no avatar. */
     compact?: boolean;
     onBack: () => void;
     /** Tapping the name (and the space after it) does this; the trailing buttons stay the accessible way in. */
@@ -32,13 +31,10 @@
   <div class="head-main" class:tappable={!!onTitle} onclick={onTitle}>
     {#if !compact}{@render icon?.()}{/if}
     <div class="head-text">
-      <h1>{title}</h1>
-      {#if state || sub}
-        <div class="head-sub">
-          <StateBadge state={state ?? null} filled={!compact} />
-          {#if sub}<span>{state && compact ? '· ' : ''}{sub}</span>{/if}
-        </div>
-      {/if}
+      <h1 class={state && `st-${state}`}>
+        {#if state}<span class={['dot', state === 'working' && 'is-pulsing']} aria-hidden="true"></span><span class="sr-only">{STATE_LABEL[state]}: </span>{/if}<span class="head-name">{title}</span>
+        {#if sub}<span class="head-sub">{sub}</span>{/if}
+      </h1>
     </div>
   </div>
   <div class="head-trail">{@render trailing?.()}</div>

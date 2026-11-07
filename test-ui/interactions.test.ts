@@ -78,6 +78,16 @@ async function startEcho(mode: '' | '--kitty' = '') {
   await waitUntil(`echo program ${n} to start`, async () => new RegExp(`READY ${n}\\b`).test(await paneText('recent', 10)));
   echoing = true;
 }
+/** Quit whatever the pane runs and wait until its shell answers: a command typed before the prompt is back
+ *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts. */
+let syncs = 0;
+async function settleShell() {
+  const n = 1000 + ++syncs;
+  herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+  // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
+  herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
+  await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)));
+}
 /** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
   if (!echoing) return;
@@ -704,8 +714,7 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('a mouse click and drag reach a program that asked for the mouse; Shift keeps them from it', async () => {
-    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-    await sleep(300);
+    await settleShell();
     const a = await device('mac', 'mac-mouse');
     onTestFinished(async () => {
       await stopEcho();
@@ -740,8 +749,7 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('dragging over text in a shell selects it and copies it on release', async () => {
-    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-    await sleep(300);
+    await settleShell();
     const a = await device('mac', 'mac-copy');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await a.page.addInitScript(() => {
@@ -768,8 +776,7 @@ describe('agents list, peek, banners and links', () => {
   });
 
   test('Select Text opens a frozen copy with the touched word selected, and sends nothing', async () => {
-    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-    await sleep(300);
+    await settleShell();
     const a = await device('mac', 'mac-select');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await openTarget(a.page);
