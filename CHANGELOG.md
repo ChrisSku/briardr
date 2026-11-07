@@ -5,6 +5,11 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.18
+
+- **Files previews HTML pages.** Opening an `.html` file shows the page, with the stylesheets, scripts, images and other pages it links to by relative path; the eye button in the file's header switches to its source and back. The page runs in a sandboxed frame with no access to Briardr or other sites, and links to other sites open in a new tab. ([#29](https://github.com/ChrisSku/briardr/pull/29))
+- **The stream header is one line, and the key bar is slimmer.** A stream's state shows as a dot and the colour of its name instead of the word "Working" or "Done", with the agent and place beside it. The header and the keys are shorter, and the key bar sits closer to the top of the keyboard. ([#29](https://github.com/ChrisSku/briardr/pull/29))
+
 ## 0.3.17
 
 - **Files previews HTML pages.** Opening an `.html` file shows the page, with the stylesheets, scripts, images and other pages it links to by relative path; the eye button in the file's header switches to its source and back. The page runs in a sandboxed frame with no access to Briardr or other sites, and links to other sites open in a new tab. ([#28](https://github.com/ChrisSku/briardr/pull/28))
