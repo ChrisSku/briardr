@@ -49,7 +49,11 @@
   const htmlPage = $derived(HTML_EXT.test(path));
   /** An HTML page shows as the page it describes until the source is asked for. */
   let showSource = $state(false);
-  const previewing = $derived(htmlPage && !showSource && file?.text != null);
+  /** The link the server shows this stream's folder as pages through (server/src/site.rs). */
+  let site = $state<{ sid: string; token: string } | null>(null);
+  const siteToken = $derived(site?.sid === stream.id ? site.token : null);
+  const previewing = $derived(htmlPage && !showSource && file?.text != null && siteToken != null);
+  const pageUrl = $derived(`/site/${siteToken}/${path.split('/').map(encodeURIComponent).join('/')}`);
   const asset = $derived(`/api/streams/${encodeURIComponent(stream.id)}/docs/asset?path=${encodeURIComponent(path)}`);
   const sid = $derived(stream.id);
   const wrap = $derived(filesView.value.wrap ?? compact);
@@ -69,6 +73,15 @@
     error = null;
     if (untrack(() => image || pdf)) return;
     untrack(() => load(p, same));
+  });
+
+  $effect(() => {
+    if (!htmlPage || siteToken) return;
+    const id = stream.id;
+    briardr.core<{ token: string }>('POST', `/api/streams/${encodeURIComponent(id)}/files/site`).then(
+      (r) => (site = { sid: id, token: r.token }),
+      () => (error = 'Couldn’t preview this page.'),
+    );
   });
 
   async function load(p: string, keepScroll: boolean) {
@@ -220,8 +233,10 @@
   {:else if file?.binary}
     <Empty title="Binary file">{name} isn’t text, so Files can’t show it.</Empty>
   {:else if previewing && file}
-    <!-- No sandbox permissions: the page can't run script, submit forms or open windows. -->
-    <iframe class="fv-html" title={`Preview of ${name}`} sandbox="" referrerpolicy="no-referrer" srcdoc={file.text}></iframe>
+    <!-- Scripts run, but the page has no origin of its own, so it can't act as Briardr; the server limits what it can reach. -->
+    {#key revision}
+      <iframe class="fv-html" title={`Preview of ${name}`} sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" src={pageUrl}></iframe>
+    {/key}
   {:else if rendered}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
     <div

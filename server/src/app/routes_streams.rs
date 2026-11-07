@@ -572,6 +572,18 @@ pub(super) fn register(r: &mut Routes) {
         },
     );
 
+    // A link for showing the stream's HTML files as pages (see site.rs).
+    r.add(
+        Method::POST,
+        "/api/streams/:id/files/site",
+        false,
+        |app: Arc<App>, ctx: Ctx| async move {
+            let s = app.stream_with_folder(ctx.param("id"))?;
+            let token = app.site_links.mint(&s.id, &ctx.device()?.id);
+            ok(json!({"token": token}))
+        },
+    );
+
     // --- uploads ---
     r.add(
         Method::POST,

@@ -64,6 +64,8 @@ sw.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== sw.location.origin || e.request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) return;
+  // Pages from a stream's folder (server/src/site.rs) come from the server, never the shell.
+  if (url.pathname.startsWith('/site/')) return;
   if (e.request.mode === 'navigate') return e.respondWith(navigation(e));
   if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/') || url.pathname.startsWith('/sdk/')) {
     // A stable name (the plugin runtime) must come from this build's shell, never a previous one.

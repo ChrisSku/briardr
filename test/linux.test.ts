@@ -184,7 +184,7 @@ describe('proxy mode', () => {
   test('security headers frame only the preview origins', async () => {
     const r = await call('GET', '/');
     const csp = r.headers.get('content-security-policy') || '';
-    assert.match(csp, /frame-src https:\/\/p1\.briardr\.test https:\/\/p2\.briardr\.test /);
+    assert.match(csp, /frame-src 'self' https:\/\/p1\.briardr\.test https:\/\/p2\.briardr\.test /);
     assert.doesNotMatch(csp, /frame-src https:\/\/briardr\.test:\*/);
     assert.match(csp, /connect-src 'self' wss:\/\/briardr\.test/);
   });
