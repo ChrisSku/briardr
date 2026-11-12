@@ -513,6 +513,8 @@ pub(super) fn register(r: &mut Routes) {
             blocking(move || cell.set(cfg)).await??;
             if after != before {
                 app.d.herdr.retarget(after).await;
+                // Open streams are the other Herdr's: their screens are told they're gone.
+                app.d.hub.close_all();
             }
             ok(json!({"ok": true}))
         },

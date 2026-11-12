@@ -49,6 +49,8 @@ export interface TermStatus {
   retryAt: number | null;
 }
 
+/** Lines of a herdr-core stream's history this terminal keeps (its first paint sends 500). */
+const RAW_SCROLLBACK = 1000;
 const PING_EVERY = 10_000;
 const PONG_DEADLINE = 5_000;
 const RESIZE_DEBOUNCE = 250;
@@ -97,6 +99,10 @@ export class TerminalController {
   private saveTimer: number | null = null;
   private disposed = false;
   private netOff: (() => void) | null = null;
+  /** The stream is the program's own output (herdr-core): this terminal keeps its history. */
+  private raw = false;
+  /** The program takes the mouse, so scrolling goes to it (herdr-core says; Herdr TUI doesn't). */
+  private programMouse = false;
   private webgl: WebglAddon | null = null;
   private desired = { cols: 80, rows: 24 };
   private scheme = matchMedia('(prefers-color-scheme: dark)');
@@ -107,7 +113,7 @@ export class TerminalController {
     this.wantMode = opts.mode;
     this.status = state<TermStatus>({ ownership: 'idle', watchReason: opts.mode === 'observe' ? 'peek' : null, message: null, width: 0, height: 0, liveAt: null, cachedAt: null, retryAt: null });
     this.term = new Terminal({
-      scrollback: 0, // Herdr and the program own history; there is no separate local history layer
+      scrollback: 0, // Herdr TUI and the program own history; a herdr-core stream turns it on (hello.raw)
       fontFamily: 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, monospace',
       fontSize: opts.fontSize,
       lineHeight: 1.12,
@@ -129,8 +135,18 @@ export class TerminalController {
     // Removed in dispose(): a listener left on the media query keeps the whole terminal reachable.
     this.scheme.addEventListener('change', this.onScheme);
 
-    // Typed text (on-screen keyboard or hardware keyboard) arrives here.
-    this.term.onData((data) => this.onTyped(data));
+    // Typed text (on-screen keyboard or hardware keyboard) arrives here, and so do the terminal's own
+    // replies to the program's queries. xterm marks typing just before (a private event); without
+    // it, everything counts as typed.
+    const core = (this.term as any)._core?.coreService;
+    let typed = false;
+    core?.onUserInput?.(() => (typed = true));
+    this.term.onData((data) => {
+      const user = typed || !core?.onUserInput;
+      typed = false;
+      if (user) this.onTyped(data);
+      else this.onReply(data);
+    });
     this.term.attachCustomKeyEventHandler((e) => this.onKey(e));
     registerLinkProvider(this.term, (url) => this.opts.onLink(url));
   }
@@ -303,6 +319,14 @@ export class TerminalController {
         return;
       }
       switch (msg.t) {
+        case 'hello':
+          this.raw = msg.raw === true;
+          this.programMouse = false;
+          this.term.options.scrollback = this.raw ? RAW_SCROLLBACK : 0;
+          break;
+        case 'modes':
+          this.programMouse = msg.mouse === true;
+          break;
         case 'live':
           gotLive = true;
           this.backoff.reset();
@@ -509,6 +533,7 @@ export class TerminalController {
       this.opts.onNotice(this.status.value.ownership === 'watching' ? 'You’re watching. Take control to type.' : `Not sent — not connected to ${theHost()}.`);
       return false;
     }
+    this.followOutput();
     return this.send({ t: 'input', id: ++this.inputId, ...out });
   }
 
@@ -522,11 +547,29 @@ export class TerminalController {
       this.opts.onNotice('Not inserted — you aren’t controlling this stream.');
       return false;
     }
+    this.followOutput();
     return this.send({ t: 'input', id: ++this.inputId, paste: { text, bracketed } });
   }
 
-  /** One scroll-wheel event per row crossed, anchored at the gesture's starting cell. */
+  /** Typing shows the end of the output again, as in a terminal. */
+  private followOutput() {
+    if (this.raw) this.term.scrollToBottom();
+  }
+
+  /** The terminal's reply to a query: only the program's own output asks (herdr-core). */
+  private onReply(data: string) {
+    if (this.raw && this.canInput) this.send({ t: 'reply', data });
+  }
+
+  /**
+   * One scroll-wheel event per row crossed, anchored at the gesture's starting cell. A herdr-core
+   * stream's history is this terminal's own, so it scrolls here unless the program takes the scroll.
+   */
   scroll(direction: 'up' | 'down', col: number, row: number): boolean {
+    if (this.raw && !this.programMouse && this.term.buffer.active.type === 'normal') {
+      this.term.scrollLines(direction === 'up' ? -1 : 1);
+      return true;
+    }
     if (!this.canInput) return false; // gestures while connecting are discarded, never replayed
     return this.send({ t: 'scroll', direction, column: col, row });
   }

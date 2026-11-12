@@ -94,6 +94,8 @@ pub struct Frame {
     pub height: u16,
     pub full: bool,
     pub bytes: Vec<u8>,
+    /// herdr-core stream bytes to credit once the frame is sent (Herdr TUI has no credit: 0).
+    pub credit: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,6 +118,7 @@ pub fn parse_line(line: &str) -> Option<Line> {
                 height: dim(msg.get("height")),
                 full: truthy(msg.get("full")),
                 bytes: STANDARD.decode(encoded).ok()?,
+                credit: 0,
             }))
         }
         "terminal.closed" => Some(Line::Closed(text(msg.get("reason")))),
@@ -202,6 +205,19 @@ impl MouseButton {
     }
 }
 
+/// One input from a controlling viewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Input {
+    /// Typed text, sent as it is.
+    Text(String),
+    /// Named keys (`ctrl+c`, `up`, `f5`), lowercase.
+    Keys(Vec<String>),
+    /// A key sent as its standard sequence (Home, End, Page Up…).
+    Raw(&'static str),
+    /// Sanitized text; `bracketed` wraps it if the program turned bracketed paste on.
+    Paste { text: String, bracketed: bool },
+}
+
 /// Arguments after the session flags. A size is only passed when both dimensions are non-zero,
 /// and `--takeover` only applies to control.
 pub fn terminal_args(
@@ -267,6 +283,8 @@ pub fn mouse_cmd(
 pub enum SessionEvent {
     Live,
     Frame(Frame),
+    /// Whether the program takes the mouse now (herdr-core only: Herdr TUI doesn't say).
+    Mouse(bool),
     Warning(&'static str),
     Closed {
         category: CloseCategory,
@@ -603,6 +621,7 @@ mod tests {
             height: 24,
             full: true,
             bytes: b"hi".to_vec(),
+            credit: 0,
         })
     }
 
@@ -696,6 +715,7 @@ mod tests {
                 height: 40,
                 full: false,
                 bytes: b"hi".to_vec(),
+                credit: 0,
             }))
         );
         assert_eq!(

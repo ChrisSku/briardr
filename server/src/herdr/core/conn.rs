@@ -19,6 +19,9 @@ pub const DATA: u8 = 0;
 pub const CREDIT: u8 = 1;
 pub const CLOSE: u8 = 2;
 pub const RESIZE: u8 = 3;
+pub const FOCUS: u8 = 4;
+/// Bytes the viewer's terminal sent by itself (a reply to a query), not typed.
+pub const AUTOMATIC_INPUT: u8 = 6;
 const HEADER: usize = 9;
 const MAX_PAYLOAD: usize = 16 << 20;
 /// The protocol generation Briardr speaks.
