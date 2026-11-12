@@ -3,6 +3,9 @@
   "output": {
     "herdrPath": "/opt/homebrew/bin/herdr",
     "herdrSession": "",
+    "herdrBackend": "tui",
+    "herdrCoreSession": "",
+    "herdrCoreSocket": "",
     "port": 7443,
     "previewPortStart": 7444,
     "previewPortCount": 16,

@@ -29,8 +29,9 @@ use crate::actions::{from_herdr, ActionError, Actions};
 use crate::auth::{Auth, Device, RateLimiter};
 use crate::config::{preview_origins, save_config, BriardrConfig, Paths};
 use crate::diag::Diagnostics;
+use crate::herdr::backend::Herdr;
 use crate::herdr::rpc::HerdrError;
-use crate::herdr::state::{HerdrEvent, HerdrReader, HerdrState};
+use crate::herdr::state::{HerdrEvent, HerdrReader};
 use crate::net::{forwarded_client, is_allowed_peer, is_trusted_proxy};
 use crate::notes::Notes;
 use crate::platform::{HostCapabilities, HostPlatform};
@@ -571,7 +572,7 @@ impl ConfigCell {
 pub struct AppDeps {
     pub cfg: Arc<ConfigCell>,
     pub auth: Arc<Auth>,
-    pub herdr: HerdrState,
+    pub herdr: Herdr,
     pub actions: Arc<Actions>,
     pub hub: Arc<TerminalHub>,
     pub diag: Arc<Diagnostics>,

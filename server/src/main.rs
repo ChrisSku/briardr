@@ -50,7 +50,7 @@ use crate::config::{
     BriardrConfig, ConfigError, Paths,
 };
 use crate::deploy::{caddyfile, systemd_units, UnitOptions};
-use crate::herdr::rpc::{herdr_status, HerdrTarget};
+use crate::herdr::backend::Target;
 use crate::net::{missing_local_addresses, tailscale_info, valid_network, TailscaleInfo};
 use crate::platform::{capabilities, host_platform};
 use crate::serve::ServeError;
@@ -67,6 +67,7 @@ const CONFIGURE_HELP: &str = r#"Usage: briardr configure [options]
   --allowed-networks CIDR[,CIDR]          direct modes: IPv4 networks whose devices may connect, e.g. 10.8.0.0/24
                                           ("" for none; loopback and Tailscale are always allowed)
   --herdr-path PATH                       absolute path to the herdr executable
+  --herdr-backend tui|core                which Herdr to use: Herdr TUI's server, or herdr-core (the Herdr app's)
   --port N                                Briardr's port (proxy mode: the loopback HTTP port)
   --dry-run                               validate and print the result without saving
 Changes are validated first; the previous config.json is kept as config.json.bak."#;
@@ -318,7 +319,7 @@ async fn revoke(ctx: &Ctx, rest: &[String]) -> CliResult {
 async fn status(ctx: &Ctx) -> CliResult {
     let mut cfg = load_config_only(ctx).await?;
     let problem = validate_config(&mut cfg).err().map(config_message);
-    let st = herdr_status(&HerdrTarget::of(&cfg)).await;
+    let st = Target::of(&cfg).status().await;
     let proxy = cfg.tls.mode == "proxy";
     let ts = if proxy {
         TailscaleInfo::default()
@@ -363,6 +364,7 @@ async fn status(ctx: &Ctx) -> CliResult {
         "publicOrigin": public_origin,
         "previewOrigins": preview_origins,
         "configProblem": problem,
+        "herdrBackend": cfg.herdr_backend,
         "herdrPath": cfg.herdr_path,
         "herdrSession": cfg.herdr_session,
         "herdr": {
@@ -875,6 +877,7 @@ pub fn apply_configure(
                     .map(check_network)
                     .collect::<Result<Vec<_>, _>>()?
             }
+            "--herdr-backend" => next.herdr_backend = take_value(args, &mut i, a)?,
             "--herdr-path" => {
                 let p = take_value(args, &mut i, a)?;
                 if !Path::new(&p).is_absolute() {

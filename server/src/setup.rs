@@ -87,6 +87,18 @@ pub fn herdr_hint(problem: &str, session: &str) -> String {
     }
 }
 
+/// What to do about herdr-core, for `briardr serve`.
+pub fn core_hint(problem: &str) -> String {
+    match problem {
+        "not_running" => "not running: open the Herdr app".to_string(),
+        "timeout" => {
+            "not answering: on macOS, look for a privacy prompt for Herdr Core".to_string()
+        }
+        "incompatible" => "a herdr-core this Briardr can't use".to_string(),
+        _ => "not reachable".to_string(),
+    }
+}
+
 /// What setup found out about Herdr.
 pub struct HerdrOutcome {
     /// The Herdr setup installed, whose path the config should name.

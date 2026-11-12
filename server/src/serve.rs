@@ -16,8 +16,8 @@ use crate::auth::Auth;
 use crate::config::{load_config, validate_config, BriardrConfig, ConfigError, Paths};
 use crate::diag::Diagnostics;
 use crate::dictation::ensure_helper;
-use crate::herdr::rpc::{herdr_status, HerdrTarget};
-use crate::herdr::state::{HerdrReader, HerdrState};
+use crate::herdr::backend::{Herdr, Target};
+use crate::herdr::state::HerdrReader;
 use crate::listener::{self, CertResolver, Handler};
 use crate::monitor::{AlertSink, Monitor};
 use crate::net::{listen_addresses, missing_local_addresses, tailscale_info, TailscaleInfo};
@@ -257,7 +257,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
     )));
 
     let auth = Arc::new(Auth::new(paths.devices(), paths.pairing()));
-    let herdr = HerdrState::new(HerdrTarget::of(&cfg), diag.clone());
+    let herdr = Herdr::new(Target::of(&cfg), diag.clone());
     let host = the_host(&caps);
     let actions = Arc::new(Actions::new(herdr.clone(), host.clone()));
     let hub = Arc::new(TerminalHub::new(herdr.clone(), diag.clone(), host.clone()));
@@ -519,20 +519,29 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         for u in &urls {
             println!("  Listening: {u}");
         }
-        let session = if cfg.herdr_session.is_empty() {
-            String::new()
-        } else {
-            format!(" (session {})", cfg.herdr_session)
-        };
+        let target = Target::of(&cfg);
         let state = if herdr.health().ok {
             "connected".to_string()
         } else {
-            match herdr_status(&HerdrTarget::of(&cfg)).await.problem {
-                Some(problem) => crate::setup::herdr_hint(&problem, &cfg.herdr_session),
-                None => "running, connecting".to_string(),
+            match (target.status().await.problem, &target) {
+                (Some(problem), Target::Tui(_)) => {
+                    crate::setup::herdr_hint(&problem, &cfg.herdr_session)
+                }
+                (Some(problem), Target::Core(_)) => crate::setup::core_hint(&problem),
+                (None, _) => "running, connecting".to_string(),
             }
         };
-        println!("  Herdr: {}{session} — {state}", cfg.herdr_path);
+        match &target {
+            Target::Tui(_) => {
+                let session = if cfg.herdr_session.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (session {})", cfg.herdr_session)
+                };
+                println!("  Herdr: {}{session} — {state}", cfg.herdr_path);
+            }
+            Target::Core(t) => println!("  Herdr: herdr-core at {} — {state}", t.socket.display()),
+        }
         match &tls {
             Some(m) if m.mode != cfg.tls.mode => println!(
                 "  Certificates: {} (wanted {}; retrying)",

@@ -7,6 +7,7 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::time::sleep;
 
+use crate::herdr::backend::{Backend, Herdr};
 use crate::herdr::model::{Model, Stream, StreamKind};
 use crate::herdr::rpc::HerdrError;
 use crate::herdr::state::{HerdrReader, HerdrState};
@@ -248,13 +249,13 @@ pub fn from_herdr(e: &HerdrError, host: &str) -> ActionError {
 }
 
 pub struct Actions {
-    herdr: HerdrState,
+    herdr: Herdr,
     /// The host as messages name it, e.g. "the Mac" or "the server".
     host: String,
 }
 
 impl Actions {
-    pub fn new(herdr: HerdrState, host: String) -> Self {
+    pub fn new(herdr: Herdr, host: String) -> Self {
         Actions { herdr, host }
     }
 
@@ -266,9 +267,30 @@ impl Actions {
         )
     }
 
+    /// Herdr TUI, for the actions herdr-core doesn't have yet.
+    fn tui(&self) -> Result<HerdrState, ActionError> {
+        match self.herdr.backend() {
+            Backend::Tui(h) => Ok(h),
+            Backend::Core(_) => Err(err(
+                501,
+                "not_supported",
+                "This isn’t available with herdr-core yet.",
+            )),
+        }
+    }
+
     async fn call(&self, method: &str, params: Value) -> Result<Value, ActionError> {
-        self.herdr
+        self.tui()?
             .request(method, params)
+            .await
+            .map_err(|e| from_herdr(&e, &self.host))
+    }
+
+    async fn core_call(&self, method: &str, params: Value) -> Result<Value, ActionError> {
+        let Backend::Core(c) = self.herdr.backend() else {
+            return Err(self.internal());
+        };
+        c.request(method, params)
             .await
             .map_err(|e| from_herdr(&e, &self.host))
     }
@@ -494,7 +516,7 @@ impl Actions {
             loop {
                 let params =
                     json!({ "name": name, "kind": kind, "pane_id": pane_id, "timeout_ms": 30_000 });
-                let Err(e) = self.herdr.request("agent.start", params).await else {
+                let Err(e) = self.tui()?.request("agent.start", params).await else {
                     break;
                 };
                 if e.code == "agent_not_ready" {
@@ -622,6 +644,19 @@ impl Actions {
         } else {
             rounded.clamp(100.0, 20000.0) as u64
         };
+        if let Backend::Core(_) = self.herdr.backend() {
+            let r = self
+                .core_call(
+                    "terminal.read",
+                    json!({ "terminal": stream_id, "lines": n }),
+                )
+                .await?;
+            let text = r.get("text").and_then(Value::as_str).unwrap_or("");
+            let truncated = r.get("complete").and_then(Value::as_bool) == Some(false);
+            return Ok(
+                json!({ "text": text, "truncated": truncated, "lines": n, "asOf": now_ms() }),
+            );
+        }
         let r = self
             .call(
                 "pane.read",
@@ -644,9 +679,8 @@ impl Actions {
             .and_then(|m| m.streams.iter().find(|s| s.id == stream_id))
             .ok_or_else(|| err(404, "stream_gone", "That stream no longer exists."))?;
         let mut agent: Option<Value> = None;
-        if stream.kind == StreamKind::Agent {
-            agent = self
-                .herdr
+        if let (StreamKind::Agent, Backend::Tui(h)) = (stream.kind, self.herdr.backend()) {
+            agent = h
                 .request("agent.get", json!({ "target": stream_id }))
                 .await
                 .ok()
@@ -710,7 +744,10 @@ mod tests {
             timeout: Duration::from_secs(1),
         };
         (
-            Actions::new(HerdrState::new(target, diag), host.to_string()),
+            Actions::new(
+                Herdr::new(crate::herdr::backend::Target::Tui(target), diag),
+                host.to_string(),
+            ),
             dir,
         )
     }

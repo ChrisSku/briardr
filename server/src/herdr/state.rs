@@ -44,7 +44,6 @@ const MIN_RETRY: Duration = Duration::from_millis(500);
 const MAX_RETRY: Duration = Duration::from_secs(15);
 const RESUBSCRIBE_DELAY: Duration = Duration::from_millis(300);
 const EVENT_DEBOUNCE: Duration = Duration::from_millis(120);
-const EVENT_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -118,8 +117,11 @@ pub struct HerdrState {
 }
 
 impl HerdrState {
-    pub fn new(target: HerdrTarget, diag: Arc<Diagnostics>) -> Self {
-        let (events, _) = broadcast::channel(EVENT_CAPACITY);
+    pub fn new(
+        target: HerdrTarget,
+        diag: Arc<Diagnostics>,
+        events: broadcast::Sender<HerdrEvent>,
+    ) -> Self {
         HerdrState {
             shared: Arc::new(Shared {
                 inner: Mutex::new(Inner {

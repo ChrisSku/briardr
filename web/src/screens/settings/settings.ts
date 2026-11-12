@@ -1,8 +1,11 @@
 // Settings as the host reports them, and how sections save changes.
 import type { HostCaps } from '../../types.ts';
 export interface Settings {
+  /** Which Herdr Briardr talks to: Herdr TUI's server, or herdr-core (the Herdr app's). */
+  herdrBackend: 'tui' | 'core';
   herdrPath: string;
   herdrSession: string;
+  herdrCoreSocket: string;
   herdr: { running: boolean; version: string | null; problem: string | null };
   notifications: { includeNames: boolean; needsYou: boolean; finished: boolean; ready: boolean; lowBattery: boolean };
   usage: { claudeKeychainOptIn: boolean; codexEnabled: boolean };

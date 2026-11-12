@@ -18,8 +18,11 @@ use tokio::sync::mpsc;
 
 use crate::app::{js_number, now_ms, Query};
 use crate::diag::Diagnostics;
+use crate::herdr::backend::{Backend, Herdr};
+use crate::herdr::core::stream::CoreSession;
 use crate::herdr::model::Model;
-use crate::herdr::state::{HerdrReader, HerdrState};
+use crate::herdr::rpc::HerdrError;
+use crate::herdr::state::HerdrReader;
 use crate::herdr::stream::{
     CloseCategory, Direction, Frame, MouseAction, MouseButton, SessionEvent, StreamMode,
     TerminalSession,
@@ -138,8 +141,70 @@ fn public_reason(c: CloseCategory, host: &str) -> String {
 /// What the hub asks a connection's socket task to send.
 enum Out {
     Text(String),
-    Binary(Vec<u8>),
+    /// A frame, and how many of the stream's bytes it carries.
+    Binary(Vec<u8>, usize),
     Close(u16, String),
+}
+
+/// A pane's stream from Herdr TUI or herdr-core.
+enum Session {
+    Tui(TerminalSession),
+    Core(CoreSession),
+}
+
+impl Session {
+    fn is_connecting(&self) -> bool {
+        match self {
+            Session::Tui(s) => s.is_connecting(),
+            Session::Core(s) => s.is_connecting(),
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        match self {
+            Session::Tui(s) => s.is_live(),
+            Session::Core(s) => s.is_live(),
+        }
+    }
+
+    fn resize(&self, cols: i64, rows: i64) {
+        if let Session::Tui(s) = self {
+            s.resize(cols, rows);
+        }
+    }
+
+    fn scroll(&self, direction: Direction, column: i64, row: i64) {
+        if let Session::Tui(s) = self {
+            s.scroll(direction, column, row);
+        }
+    }
+
+    fn mouse(
+        &self,
+        action: MouseAction,
+        button: MouseButton,
+        column: i64,
+        row: i64,
+        modifiers: i64,
+    ) {
+        if let Session::Tui(s) = self {
+            s.mouse(action, button, column, row, modifiers);
+        }
+    }
+
+    /// The viewer has `bytes` more of the stream; herdr-core sends more as they're written out.
+    fn credit(&self, bytes: usize) {
+        if let Session::Core(s) = self {
+            s.credit(bytes);
+        }
+    }
+
+    async fn release(&self) {
+        match self {
+            Session::Tui(s) => s.release().await,
+            Session::Core(s) => s.release().await,
+        }
+    }
 }
 
 struct Conn {
@@ -148,7 +213,7 @@ struct Conn {
     pane_id: String,
     client_session: String,
     mode: StreamMode,
-    session: TerminalSession,
+    session: Session,
     tx: mpsc::UnboundedSender<Out>,
 }
 
@@ -167,7 +232,7 @@ struct Job {
 }
 
 pub struct TerminalHub {
-    herdr: HerdrState,
+    herdr: Herdr,
     diag: Arc<Diagnostics>,
     /// "the Mac" or "the server", for the `released` reason.
     host: String,
@@ -192,7 +257,7 @@ fn fields(v: Value) -> BTreeMap<String, Value> {
 }
 
 impl TerminalHub {
-    pub fn new(herdr: HerdrState, diag: Arc<Diagnostics>, host: String) -> Self {
+    pub fn new(herdr: Herdr, diag: Arc<Diagnostics>, host: String) -> Self {
         TerminalHub {
             herdr,
             diag,
@@ -242,7 +307,9 @@ impl TerminalHub {
     /// Runs one /ws/term connection until it closes.
     pub async fn attach(self: &Arc<Self>, mut ws: WebSocket, device_id: String, q: Query) {
         let pane_id = q.get("pane").unwrap_or("").to_string();
-        let mode = if q.get("mode") == Some("control") {
+        let backend = self.herdr.backend();
+        // herdr-core streams are watched only, until Briardr encodes keys for them.
+        let mode = if q.get("mode") == Some("control") && matches!(backend, Backend::Tui(_)) {
             StreamMode::Control
         } else {
             StreamMode::Observe
@@ -297,8 +364,17 @@ impl TerminalHub {
             (StreamMode::Control, Some(c), Some(r)) => Some((c, r)),
             _ => None,
         };
-        let target = self.herdr.herdr_target();
-        let (session, mut events) = TerminalSession::start(&target, &pane_id, mode, size, takeover);
+        let (session, mut events) = match &backend {
+            Backend::Tui(h) => {
+                let (s, e) =
+                    TerminalSession::start(&h.herdr_target(), &pane_id, mode, size, takeover);
+                (Session::Tui(s), e)
+            }
+            Backend::Core(c) => {
+                let (s, e) = CoreSession::start(&c.target(), &pane_id, mode);
+                (Session::Core(s), e)
+            }
+        };
         let (tx, mut out_rx) = mpsc::unbounded_channel();
         let mut id_bytes = [0u8; 6];
         rand::fill(&mut id_bytes);
@@ -347,7 +423,7 @@ impl TerminalHub {
                             self.event("term_live", json!({"mode": mode.as_str(), "ms": now_ms().saturating_sub(t0)}));
                             conn.send_text(json!({"t": "live", "mode": mode.as_str(), "width": f.width, "height": f.height}));
                         }
-                        let _ = conn.tx.send(Out::Binary(encode_frame(&f)));
+                        let _ = conn.tx.send(Out::Binary(encode_frame(&f), f.bytes.len()));
                     }
                     Some(SessionEvent::Warning(code)) => conn.send_text(json!({"t": "warning", "code": code})),
                     Some(SessionEvent::Closed { category, .. }) => {
@@ -373,10 +449,11 @@ impl TerminalHub {
                             break;
                         }
                     }
-                    Some(Out::Binary(b)) => {
+                    Some(Out::Binary(b, bytes)) => {
                         if ws.send(Message::Binary(b.into())).await.is_err() {
                             break;
                         }
+                        conn.session.credit(bytes);
                     }
                     Some(Out::Close(code, reason)) => {
                         close(&mut ws, code, &reason).await;
@@ -610,7 +687,14 @@ impl TerminalHub {
                     sent.drain(..500);
                 }
             }
-            match self.herdr.request(job.method, job.params).await {
+            let sent = match self.herdr.backend() {
+                Backend::Tui(h) => h.request(job.method, job.params).await,
+                Backend::Core(_) => Err(HerdrError {
+                    code: "not_controlling".to_string(),
+                    message: String::new(),
+                }),
+            };
+            match sent {
                 Ok(_) => {
                     let mut ok = Map::new();
                     ok.insert("t".into(), json!("input_ok"));
