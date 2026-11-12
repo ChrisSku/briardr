@@ -562,6 +562,7 @@ mod tests {
 
         fn health(&self) -> HerdrHealth {
             HerdrHealth {
+                backend: "tui",
                 ok: true,
                 problem: None,
                 version: Some("0.9.3".to_string()),

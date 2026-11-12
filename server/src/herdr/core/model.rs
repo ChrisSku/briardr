@@ -178,7 +178,7 @@ pub fn normalize(
             projects.push(Project {
                 id: tab_id.to_string(),
                 workspace_id: id.to_string(),
-                name: text(tab, "name").map_or_else(|| (j + 1).to_string(), String::from),
+                name: text(tab, "name").unwrap_or("").to_string(),
                 number: j as u64 + 1,
                 focused: false,
             });
@@ -217,12 +217,11 @@ pub fn normalize(
             });
         }
         if !projects.iter().any(|p| p.id == tab) {
-            let number = projects.iter().filter(|p| p.workspace_id == space).count() as u64 + 1;
             projects.push(Project {
                 id: tab.to_string(),
                 workspace_id: space.to_string(),
-                name: number.to_string(),
-                number,
+                name: String::new(),
+                number: 0,
                 focused: false,
             });
         }
@@ -279,6 +278,24 @@ pub fn normalize(
             Some(stream(t, w, p, prev_streams.get(address).copied(), now))
         })
         .collect();
+
+    // As in the app, a tab closes with its last terminal and a space with its last tab (the
+    // document keeps them until the app runs), and an unnamed tab is called by its number.
+    projects.retain(|p| streams.iter().any(|s| s.project_id == p.id));
+    workspaces.retain(|w| projects.iter().any(|p| p.workspace_id == w.id));
+    for (i, w) in workspaces.iter_mut().enumerate() {
+        w.number = i as u64 + 1;
+        for (j, p) in projects
+            .iter_mut()
+            .filter(|p| p.workspace_id == w.id)
+            .enumerate()
+        {
+            p.number = j as u64 + 1;
+            if p.name.is_empty() {
+                p.name = p.number.to_string();
+            }
+        }
+    }
 
     // An unnamed space is called after its folder, as in the app.
     for w in &mut workspaces {
@@ -341,9 +358,25 @@ mod tests {
 
     #[test]
     fn spaces_tabs_and_panes_follow_the_document() {
-        let ts = vec![terminal("t1", json!({})), terminal("t2", json!({}))];
-        let m = normalize(&ts, Some(&doc()), None, Some("0.1.20"), 5);
-        assert_eq!(m.workspaces.len(), 1);
+        let mut d = doc();
+        let tabs = d["spaces"][0]["tabs"].as_array_mut().unwrap();
+        tabs.push(
+            json!({"id": "tb3", "name": "", "root": {"id": "tb3", "type": "row", "children": [
+            {"id": "e", "type": "block", "content": {"terminal": "t3"}}]}}),
+        );
+        d["spaces"].as_array_mut().unwrap().push(json!({"id": "sp2", "name": "gone", "folder": "/w",
+            "tabs": [{"id": "tb4", "name": "", "root": {"id": "tb4", "type": "block", "content": {"terminal": "t8"}}}]}));
+        let ts = vec![
+            terminal("t1", json!({})),
+            terminal("t2", json!({})),
+            terminal("t3", json!({})),
+        ];
+        let m = normalize(&ts, Some(&d), None, Some("0.1.20"), 5);
+        assert_eq!(
+            m.workspaces.len(),
+            1,
+            "a space whose terminals all ended closed with them"
+        );
         assert_eq!(
             m.workspaces[0].name, "app",
             "an unnamed space is called after its folder"
@@ -352,11 +385,15 @@ mod tests {
         assert_eq!(
             names,
             ["review", "2"],
-            "an unnamed tab is called by its place"
+            "a tab whose terminals ended is gone; an unnamed tab is called by its place"
         );
         let order: Vec<&str> = m.streams.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(order, ["t2", "t1"], "the split's order, not the core's");
-        assert!(m.streams.iter().all(|s| s.project_id == "tb1"));
+        assert_eq!(
+            order,
+            ["t2", "t1", "t3"],
+            "the split's order, not the core's"
+        );
+        assert!(m.streams[..2].iter().all(|s| s.project_id == "tb1"));
         assert_eq!(m.streams[0].kind, StreamKind::Shell);
         assert_eq!(m.herdr_version.as_deref(), Some("0.1.20"));
     }

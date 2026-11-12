@@ -326,6 +326,17 @@ pub(super) fn register(r: &mut Routes) {
     );
 
     r.add(
+        Method::POST,
+        "/api/streams/:id/seen",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let seen = field(&b, "seen") != json!(false);
+            ok(app.d.actions.mark_seen(ctx.param("id"), seen).await?)
+        },
+    );
+
+    r.add(
         Method::GET,
         "/api/streams/:id/info",
         false,

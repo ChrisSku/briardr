@@ -17,7 +17,7 @@
   import { Empty, openMenu, StateBadge } from '../ui/kit.ts';
   import { peekSheet } from './lazy.svelte.ts';
   import StreamRow from './StreamRow.svelte';
-  import { projectItems, workspaceItems } from './streams.ts';
+  import { projectItems, takesProjects, workspaceItems } from './streams.ts';
   import NewProject from './workspaces/NewProject.svelte';
   import NewStream from './workspaces/NewStream.svelte';
   import NewWorkspace from './workspaces/NewWorkspace.svelte';
@@ -92,7 +92,7 @@
             class="icon-btn"
             aria-label="Actions for {ws.name}"
             disabled={!live.value}
-            onclick={(e) => openMenu([{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }, ...workspaceItems(ws)], e.currentTarget, ws.name)}
+            onclick={(e) => openMenu([...(takesProjects(ws) ? [{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }] : []), ...workspaceItems(ws)], e.currentTarget, ws.name)}
           >
             <Icon name="more" />
           </button>

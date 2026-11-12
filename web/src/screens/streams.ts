@@ -2,7 +2,7 @@
 // opening a stream, renaming and closing, and a stream's actions menu.
 import { api, ApiError } from '../api.ts';
 import { navigate } from '../router.ts';
-import { listPane, live, mac, model, seen, seenKey, toast, visibleStreamId } from '../store.ts';
+import { herdr, listPane, live, mac, model, seen, seenKey, toast, visibleStreamId } from '../store.ts';
 import type { Project, Stream, Workspace } from '../types.ts';
 import type { IconName } from '../ui/icons/index.ts';
 import { confirmDialog, duration, type MenuItem } from '../ui/kit.ts';
@@ -47,6 +47,13 @@ export function contextOf(s: Stream): string {
   return [ws, pr].filter(Boolean).join(' · ');
 }
 
+/** Briardr talks to herdr-core, under the Herdr app (rather than Herdr TUI). */
+export const onHerdrApp = () => herdr.value?.backend === 'core';
+/** With the Herdr app: terminals no space of it shows, in a workspace of their own. */
+const outsideSpaces = (id: string) => onHerdrApp() && id === 'other';
+/** Whether a workspace takes new projects (a space of the Herdr app does; its other terminals don't). */
+export const takesProjects = (ws: Workspace) => !outsideSpaces(ws.id);
+
 export function isSeen(s: Stream): boolean {
   return seen.value[s.id] === seenKey(s);
 }
@@ -56,6 +63,9 @@ export function markSeen(s: Stream, on = true) {
   if (on) next[s.id] = seenKey(s);
   else delete next[s.id];
   seen.value = next;
+  // The Herdr app's clients share what was seen, so it's no longer done on the desk either. Herdr TUI
+  // keeps no such record: there this device's is all there is.
+  if (onHerdrApp() && s.kind === 'agent') api('POST', `/api/streams/${encodeURIComponent(s.id)}/seen`, { seen: on }).catch(() => {});
 }
 
 export function openStream(s: Stream) {
@@ -87,10 +97,10 @@ function closesWith(projectId: string, closingStream: boolean): string {
   return closingStream ? ` Project “${p.name}” closes with it.` : '';
 }
 
-/** Rename and Close for a menu, off while there's no connection. */
-function manageItems(what: string, rename: () => void, closeIt: () => void): MenuItem[] {
+/** Rename (unless there's no name to give) and Close for a menu, off while there's no connection. */
+function manageItems(what: string, rename: (() => void) | null, closeIt: () => void): MenuItem[] {
   return [
-    { label: 'Rename', disabled: !live.value, onSelect: rename },
+    ...(rename ? [{ label: 'Rename', disabled: !live.value, onSelect: rename }] : []),
     { label: `Close ${what}`, destructive: true, disabled: !live.value, onSelect: closeIt },
   ];
 }
@@ -99,7 +109,7 @@ export function workspaceItems(ws: Workspace): MenuItem[] {
   const streams = model.value?.streams.filter((s) => s.workspaceId === ws.id) ?? [];
   return manageItems(
     'workspace',
-    () => openRename({ noun: 'workspace', path: `/api/workspaces/${encodeURIComponent(ws.id)}/rename`, name: ws.name }),
+    outsideSpaces(ws.id) ? null : () => openRename({ noun: 'workspace', path: `/api/workspaces/${encodeURIComponent(ws.id)}/rename`, name: ws.name }),
     () => close('workspace', ws.name, `This stops ${plural(streams.length, 'stream')} and everything running in them on ${theHost()}.`, `/api/workspaces/${encodeURIComponent(ws.id)}/close`, streams),
   );
 }
@@ -108,7 +118,7 @@ export function projectItems(p: Project): MenuItem[] {
   const streams = model.value?.streams.filter((s) => s.projectId === p.id) ?? [];
   return manageItems(
     'project',
-    () => openRename({ noun: 'project', path: `/api/projects/${encodeURIComponent(p.id)}/rename`, name: p.name }),
+    outsideSpaces(p.id) ? null : () => openRename({ noun: 'project', path: `/api/projects/${encodeURIComponent(p.id)}/rename`, name: p.name }),
     () => close('project', p.name, `This stops ${plural(streams.length, 'stream')} and everything running in them on ${theHost()}.${closesWith(p.id, false)}`, `/api/projects/${encodeURIComponent(p.id)}/close`, streams),
   );
 }
@@ -116,7 +126,8 @@ export function projectItems(p: Project): MenuItem[] {
 export function streamItems(s: Stream): MenuItem[] {
   return manageItems(
     'stream',
-    () => openRename({ noun: 'stream', path: `/api/streams/${encodeURIComponent(s.id)}/rename`, name: s.label ?? '', fallback: s.tool }),
+    // The Herdr app's terminals have no names.
+    onHerdrApp() ? null : () => openRename({ noun: 'stream', path: `/api/streams/${encodeURIComponent(s.id)}/rename`, name: s.label ?? '', fallback: s.tool }),
     () => close('stream', s.name, `This stops ${s.kind === 'agent' ? 'the agent and ' : ''}everything running in its terminal on ${theHost()}.${closesWith(s.projectId, true)}`, `/api/streams/${encodeURIComponent(s.id)}/close`, [s]),
   );
 }
@@ -127,7 +138,11 @@ export function streamMenu(s: Stream, peek: (s: Stream) => void): MenuItem[] {
     { label: 'Open', hint: 'Take control', onSelect: () => openStream(s) },
   ];
   if (canOpenWindows) items.push({ label: 'Open in New Window', onSelect: () => openWindow({ name: 'stream', id: s.id, surface: 'terminal' }) });
-  if (s.state === 'done') items.push(isSeen(s) ? { label: 'Mark as not seen', onSelect: () => markSeen(s, false) } : { label: 'Mark as seen', onSelect: () => markSeen(s) });
+  if (onHerdrApp()) {
+    // Shared with the Herdr app: seen makes it idle everywhere, and an idle agent that finished a turn can be marked unread.
+    if (s.state === 'done') items.push({ label: 'Mark as seen', onSelect: () => markSeen(s) });
+    else if (s.state === 'idle' && (s.stateChangeSeq ?? 0) > 0) items.push({ label: 'Mark as not seen', onSelect: () => markSeen(s, false) });
+  } else if (s.state === 'done') items.push(isSeen(s) ? { label: 'Mark as not seen', onSelect: () => markSeen(s, false) } : { label: 'Mark as seen', onSelect: () => markSeen(s) });
   items.push(...streamItems(s));
   return items;
 }

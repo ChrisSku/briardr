@@ -48,6 +48,8 @@ const EVENT_DEBOUNCE: Duration = Duration::from_millis(120);
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HerdrHealth {
+    /// Which Herdr this is: "tui" (Herdr TUI) or "core" (herdr-core, under the Herdr app).
+    pub backend: &'static str,
     pub ok: bool,
     pub problem: Option<String>,
     pub version: Option<String>,
@@ -129,6 +131,7 @@ impl HerdrState {
                     socket: None,
                     model: None,
                     health: HerdrHealth {
+                        backend: "tui",
                         ok: false,
                         problem: None,
                         version: None,

@@ -47,6 +47,8 @@ export interface Model {
 }
 
 export interface HerdrHealth {
+  /** Herdr TUI, or herdr-core under the Herdr app (missing in a cache an older Briardr wrote). */
+  backend?: 'tui' | 'core';
   ok: boolean;
   problem: string | null;
   version: string | null;

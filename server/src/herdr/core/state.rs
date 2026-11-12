@@ -23,6 +23,8 @@ const MIN_RETRY: Duration = Duration::from_millis(500);
 const MAX_RETRY: Duration = Duration::from_secs(15);
 /// The Herdr app's layout document.
 pub const LAYOUT_DOC: &str = "herdr-app";
+/// Writes of the layout that lose to another screen's, before giving up.
+const EDIT_TRIES: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoreTarget {
@@ -114,6 +116,7 @@ impl CoreState {
                     doc: None,
                     model: None,
                     health: HerdrHealth {
+                        backend: "core",
                         ok: false,
                         problem: None,
                         version: None,
@@ -187,6 +190,50 @@ impl CoreState {
         }
         self.rebuild();
         Ok(())
+    }
+
+    /// The layout document as last read.
+    pub fn layout(&self) -> Option<Value> {
+        self.lock().doc.clone()
+    }
+
+    /// A terminal's record as last seen.
+    pub fn terminal(&self, address: &str) -> Option<Value> {
+        self.lock()
+            .terminals
+            .iter()
+            .find(|t| t.get("address").and_then(Value::as_str) == Some(address))
+            .cloned()
+    }
+
+    /// Changes the layout document with `change` and writes it over the version it read, so a
+    /// change from another screen meanwhile is never lost: that write fails, and this one reads
+    /// again and changes the newer document. False when `change` found nothing to change.
+    pub async fn edit_layout(
+        &self,
+        change: impl Fn(&mut Value) -> bool,
+    ) -> Result<bool, HerdrError> {
+        for _ in 0..EDIT_TRIES {
+            let read = self.request("doc.get", json!({"name": LAYOUT_DOC})).await?;
+            let version = read.get("version").and_then(Value::as_u64).unwrap_or(0);
+            let before = read.get("value").cloned().unwrap_or(Value::Null);
+            let mut doc = before.clone();
+            if !change(&mut doc) {
+                return Ok(false);
+            }
+            if doc == before {
+                return Ok(true);
+            }
+            let write = json!({"name": LAYOUT_DOC, "value": doc, "version": version});
+            match self.request("doc.set", write).await {
+                Err(e) if e.code == "conflict" => continue,
+                done => return done.map(|_| true),
+            }
+        }
+        Err(HerdrError {
+            code: "conflict".to_string(),
+            message: "The Herdr app’s layout kept changing. Try again.".to_string(),
+        })
     }
 
     async fn read_doc(&self) -> Option<Value> {
