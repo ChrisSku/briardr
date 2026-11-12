@@ -47,6 +47,7 @@ interface Stream {
   stateSince: number | null;
   cwd: string | null; folder: string | null;      // the pane's folder; folder is its short name
   focused: boolean; title: string | null; rows: number | null;
+  machine?: string;                               // another machine's terminal (herdr-core): no cwd here
 }
 ```
 

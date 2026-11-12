@@ -49,9 +49,11 @@ last saw, labeled stale, adapts to phone, tablet and desktop layouts, and has li
 
 ## Get started
 
-You need **Herdr running on the same host as Briardr**. Briardr is tested with Herdr 0.9.3 to 0.9.5.
-On a Mac, the installer offers to install Herdr 0.9.5 when Herdr is missing; the Linux helper installs
-it. To run Briardr from a checkout instead, see [development](docs/development.md).
+You need **Herdr running on the same host as Briardr**: Herdr's terminal app, tested with 0.9.3 to
+0.9.5, or the Herdr desktop app, through its herdr-core (0.1.20 and newer). On a Mac, the installer
+offers to install Herdr 0.9.5 when Herdr is missing; the Linux helper installs it. To use the Herdr app,
+choose it in Settings → Herdr ([how](docs/macos-setup.md#use-the-herdr-app)). To run Briardr from a
+checkout instead, see [development](docs/development.md).
 
 Choose a host and how your devices will reach it:
 

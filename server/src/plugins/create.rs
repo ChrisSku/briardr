@@ -263,6 +263,7 @@ fn manifest(a: &Answers) -> Manifest {
         id: a.id.clone(),
         label: a.name.clone(),
         icon: Some("plug".into()),
+        local: false,
     };
     let mut contributes = Contributes::default();
     match a.kind {

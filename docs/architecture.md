@@ -1,15 +1,17 @@
 # Architecture
 
-Briardr serves an installable web client and connects to a local Herdr session. One instance targets
-one Herdr session; it is not currently a fleet dashboard. Herdr owns the processes and terminals;
-Briardr provides remote views and actions around them.
+Briardr serves an installable web client and connects to a local Herdr: Herdr TUI's session, or
+herdr-core, the runtime under the Herdr desktop app (`herdrBackend`). One instance targets one of them;
+it is not currently a fleet dashboard. Herdr owns the processes and terminals; Briardr provides remote
+views and actions around them.
 
 ## Repository map
 
 | Path | Responsibility |
 | --- | --- |
 | `server/` | Rust binary: HTTPS, WebSockets, authentication, Herdr bridge, Git/files/docs, notes, previews, usage, notifications, and host integrations. |
-| `server/src/herdr/` | Local control-socket requests, normalized state, events, and terminal sessions. |
+| `server/src/herdr/` | Local control-socket requests, normalized state, events, and terminal sessions; `backend.rs` switches between Herdr TUI and herdr-core. |
+| `server/src/herdr/core/` | herdr-core: its framed connection, terminal records and the Herdr app's layout documents (one per machine), terminal streams, and the key, paste and mouse encoding for the program's modes (herdr-core takes bytes). |
 | `server/src/terminal_hub.rs` | Per-device terminal ownership, observation, control, and release. |
 | `web/src/screens/` | Svelte app screens, stream tools, settings, and responsive navigation. |
 | `web/src/terminal/` | Browser terminal controller, input rules, keys, and links. |
@@ -19,7 +21,7 @@ Briardr provides remote views and actions around them.
 | `server/src/plugins/` | Installed plugins: manifests, enablement, files, and backends (approved commands speaking JSON over stdin/stdout). |
 | `native/transcribe.swift` | Optional macOS on-device speech transcription helper. |
 | `scripts/` | Bun build tooling, release packaging, Linux installation, deployment smoke tests, and optional Mac power setup. |
-| `deploy/versions.env` | The Herdr, Caddy and Ubuntu versions Briardr installs, with checksums. |
+| `deploy/versions.env` | The Herdr, Caddy and Ubuntu versions Briardr installs, and the herdr-core it is tested with, with checksums. |
 | `test/`, `test-ui/`, `server/tests/` | Integration, WebKit UI, and Rust fixture tests. Rust unit tests also live beside implementation modules. |
 | `bench/` | Performance and comparison tooling. |
 | `site/` | The [briardr.dev](https://briardr.dev) website, published by the Pages workflow. |
@@ -35,6 +37,8 @@ keeps its Cargo build outside the checkout and configures the service with the r
 | Rule | Implementation | Verification |
 | --- | --- | --- |
 | Never queue/replay terminal input while connecting or disconnected. | `server/src/terminal_hub.rs`, `web/src/terminal/controller.ts` | `test/terminal.test.ts`, `test-ui/interactions.test.ts` |
+| Never start a herdr-core (it would hand Briardr's environment to every terminal); change the Herdr app's layout only as the app does, over the version read. | `server/src/herdr/core/` | `test/core.test.ts`, Rust core tests |
+| A terminal on another machine never has its files looked for on this host. | `App::stream_with_folder`, `App::stream_here`, plugin tabs marked `local` | `test/core.test.ts` |
 | No silent takeover; Peek never resizes; leaving/backgrounding releases control. | Terminal hub, `server/src/herdr/stream.rs`, `StreamScreen.svelte` | Terminal and interaction suites |
 | Git review uses read-only commands and does not take an index lock. | `server/src/git.rs` | Rust Git unit tests, `test/surfaces.test.ts` |
 | Private APIs and WebSockets require a paired device; Host, Origin, and peer checks apply. | `server/src/app.rs`, `auth.rs`, `net.rs` | `test/auth.test.ts`, `test/linux.test.ts` |

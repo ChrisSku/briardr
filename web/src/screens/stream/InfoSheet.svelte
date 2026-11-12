@@ -22,6 +22,7 @@
         ['Workspace', `${model.value?.workspaces.find((w) => w.id === stream.workspaceId)?.name || ''} (${stream.workspaceId})`],
         ['Project', `${model.value?.projects.find((p) => p.id === stream.projectId)?.name || ''} (${stream.projectId})`],
         ['Folder', stream.cwd],
+        ['Machine', stream.machine],
         ['Program', `${stream.tool} (${stream.kind})`],
         ['State', stream.state ? `${stream.state}${stream.stateChangeSeq !== null ? ` · change #${stream.stateChangeSeq}` : ''}` : 'No agent'],
         ['Agent name', info?.agent?.name],

@@ -84,7 +84,7 @@
             <span class={['tree-tile', ws.focused && 'brand']} aria-hidden="true"><Icon name="folder" size={20} /></span>
             <span class="tree-label">
               <span class="tree-title">{ws.name}</span>
-              {#if open && ws.cwd}<span class="tree-sub mono">{shortPath(ws.cwd)}</span>{:else}<span class="tree-sub">{projects.length} project{projects.length === 1 ? '' : 's'} · {all.length} stream{all.length === 1 ? '' : 's'}</span>{/if}
+              {#if open && ws.cwd}<span class="tree-sub mono">{ws.machine ? `${ws.machine}: ` : ''}{shortPath(ws.cwd)}</span>{:else}<span class="tree-sub">{ws.machine ? `On ${ws.machine} · ` : ''}{projects.length} project{projects.length === 1 ? '' : 's'} · {all.length} stream{all.length === 1 ? '' : 's'}</span>{/if}
             </span>
           </button>
           <StateBadge state={urgent(all)} filled />

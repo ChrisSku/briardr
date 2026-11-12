@@ -33,6 +33,9 @@ pub struct Workspace {
     pub focused: bool,
     pub active_project_id: Option<String>,
     pub cwd: Option<String>,
+    /// The machine it lives on, as herdr-core names it (`hc machine ls`); none for this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,6 +72,10 @@ pub struct Stream {
     pub focused: bool,
     pub title: Option<String>,
     pub rows: Option<u64>,
+    /// The machine its terminal runs on, as herdr-core names it; none for this computer. `cwd` is
+    /// only ever this computer's: a terminal elsewhere has none, so its files aren't looked for here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -240,6 +247,7 @@ pub fn normalize(
         };
         streams.push(Stream {
             id: pane_id.to_string(),
+            machine: None,
             workspace_id: p
                 .get("workspace_id")
                 .and_then(Value::as_str)
@@ -286,6 +294,7 @@ pub fn normalize(
             let number = w.get("number").and_then(Value::as_u64).unwrap_or(0);
             Workspace {
                 id: id.to_string(),
+                machine: None,
                 name: non_empty(w.get("label"))
                     .map_or_else(|| format!("Workspace {number}"), String::from),
                 number,

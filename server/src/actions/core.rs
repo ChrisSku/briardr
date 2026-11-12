@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use super::{err, from_herdr, ActionError, Actions};
 use crate::herdr::core::layout;
-use crate::herdr::core::model::OTHER;
+use crate::herdr::core::model::{qualify, split_machine, OTHER};
 use crate::herdr::core::state::CoreState;
 use crate::herdr::model::{Project, Stream, StreamKind, Workspace};
 use crate::herdr::state::HerdrReader;
@@ -38,6 +38,20 @@ fn agent_argv(program: &str, shell: Option<String>) -> Vec<String> {
     vec![sh.clone(), flags.into(), script.into(), sh, program.into()]
 }
 
+/// An agent on another machine, started as the app starts one there: in that machine's shell (it
+/// may run with a bare PATH, so through its login profile), which stays when the agent exits.
+fn remote_agent_argv(program: &str) -> Vec<String> {
+    let script = r#"shell=${SHELL:-/bin/sh}
+case "${shell##*/}" in
+  fish) exec "$shell" -lic 'command $argv[2..]; exec $argv[1] -li' "$shell" "$@" ;;
+  sh|bash|zsh|dash|ksh) exec "$shell" -lic '"$@"; exec "$0" -li' "$shell" "$@" ;;
+  *) exec sh -c '"$@"; exec "${SHELL:-sh}" -i' sh "$@" ;;
+esac"#;
+    ["sh", "-c", script, "sh", program]
+        .map(String::from)
+        .to_vec()
+}
+
 fn not_a_space() -> ActionError {
     err(
         409,
@@ -62,9 +76,11 @@ impl Actions {
         }
     }
 
-    /// Starts a terminal, labelled for the space and tab `place` names (none: Other terminals).
+    /// Starts a terminal on `machine` ("": this computer), labelled for the space and tab `place`
+    /// names as that machine knows them (none: Other terminals). Returns its address from here.
     async fn start(
         &self,
+        machine: &str,
         argv: Vec<String>,
         cwd: Option<&str>,
         place: Option<(&str, &str)>,
@@ -74,8 +90,11 @@ impl Actions {
             labels["herdr.space"] = json!(space);
             labels["herdr.tab"] = json!(tab);
         }
-        let params =
+        let mut params =
             json!({"argv": argv, "cwd": cwd, "env": env(), "labels": labels, "keep": true});
+        if !machine.is_empty() {
+            params["on"] = json!(machine);
+        }
         let r = self.core_call("terminal.run", params).await?;
         r.get("address")
             .and_then(Value::as_str)
@@ -86,9 +105,10 @@ impl Actions {
     async fn edit_layout(
         &self,
         c: &CoreState,
+        machine: &str,
         change: impl Fn(&mut Value) -> bool,
     ) -> Result<bool, ActionError> {
-        c.edit_layout(change)
+        c.edit_layout(machine, change)
             .await
             .map_err(|e| from_herdr(&e, &self.host))
     }
@@ -119,10 +139,10 @@ impl Actions {
             layout::fresh_id("p"),
         );
         let terminal = self
-            .start(Vec::new(), Some(&cwd), Some((&space, &tab)))
+            .start("", Vec::new(), Some(&cwd), Some((&space, &tab)))
             .await?;
         let name = name.unwrap_or_default();
-        self.edit_layout(c, |doc| {
+        self.edit_layout(c, "", |doc| {
             layout::add_space(doc, &space, &name, &cwd, &tab, &pane, &terminal);
             true
         })
@@ -143,16 +163,20 @@ impl Actions {
             return Err(not_a_space());
         }
         // The app adopts a labelled terminal only into a tab it has: a new tab is written here.
-        if !layout::has_space(c.layout().as_ref(), &ws.id) {
+        let (machine, space) = split_machine(&ws.id);
+        if !layout::has_space(c.layout(machine).as_ref(), space) {
             return Err(not_in_layout());
         }
         let (tab, pane) = (layout::fresh_id("tb"), layout::fresh_id("p"));
         let cwd = ws.cwd.as_deref().filter(|c| !c.is_empty());
-        let terminal = self.start(Vec::new(), cwd, Some((&ws.id, &tab))).await?;
+        let terminal = self
+            .start(machine, Vec::new(), cwd, Some((space, &tab)))
+            .await?;
         let name = name.unwrap_or_default();
+        let shown = split_machine(&terminal).1;
         let added = self
-            .edit_layout(c, |doc| {
-                layout::add_tab(doc, &ws.id, &tab, &name, &pane, &terminal)
+            .edit_layout(c, machine, |doc| {
+                layout::add_tab(doc, space, &tab, &name, &pane, shown)
             })
             .await?;
         if !added {
@@ -164,7 +188,9 @@ impl Actions {
             ));
         }
         self.refresh().await?;
-        Ok(json!({"projectId": tab, "streamId": terminal, "focusUnchanged": true}))
+        Ok(
+            json!({"projectId": qualify(machine, &tab), "streamId": terminal, "focusUnchanged": true}),
+        )
     }
 
     pub(super) async fn core_create_stream(
@@ -173,13 +199,16 @@ impl Actions {
         cwd: Option<String>,
         kind: &str,
     ) -> Result<Value, ActionError> {
+        let (machine, tab) = split_machine(&project.id);
+        let machine = if project.id == OTHER { "" } else { machine };
         let argv = match kind {
             "shell" => Vec::new(),
-            program => agent_argv(program, std::env::var("SHELL").ok()),
+            program if machine.is_empty() => agent_argv(program, std::env::var("SHELL").ok()),
+            program => remote_agent_argv(program),
         };
-        let place =
-            (project.id != OTHER).then_some((project.workspace_id.as_str(), project.id.as_str()));
-        let terminal = self.start(argv, cwd.as_deref(), place).await?;
+        let space = split_machine(&project.workspace_id).1;
+        let place = (project.id != OTHER).then_some((space, tab));
+        let terminal = self.start(machine, argv, cwd.as_deref(), place).await?;
         self.refresh().await?;
         Ok(json!({"streamId": terminal, "note": null, "focusUnchanged": true}))
     }
@@ -194,8 +223,9 @@ impl Actions {
         if id == OTHER {
             return Err(not_a_space());
         }
+        let (machine, local) = split_machine(id);
         if !self
-            .edit_layout(c, |doc| layout::rename(doc, id, name))
+            .edit_layout(c, machine, |doc| layout::rename(doc, local, name))
             .await?
         {
             return Err(not_in_layout());
@@ -277,5 +307,11 @@ mod tests {
         assert_eq!(argv, ["/bin/zsh", flags, script, "/bin/zsh", "claude"]);
         assert_eq!(agent_argv("codex", None)[0], "/bin/sh");
         assert!(agent_argv("codex", Some("/opt/bin/fish".into()))[2].starts_with("command $argv"));
+        let remote = remote_agent_argv("claude");
+        assert_eq!(
+            (remote[0].as_str(), remote[4].as_str()),
+            ("sh", "claude"),
+            "that machine's shell, found there"
+        );
     }
 }

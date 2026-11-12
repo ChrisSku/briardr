@@ -125,6 +125,15 @@ pub fn stream_gone() -> ApiError {
     action_err(404, "stream_gone", "That stream no longer exists.")
 }
 
+/// A stream whose terminal runs on another machine (herdr-core): its files aren't on this host.
+fn elsewhere(machine: &str, host: &str) -> ApiError {
+    action_err(
+        409,
+        "on_another_machine",
+        format!("This terminal runs on {machine}, so its files aren’t on {host}."),
+    )
+}
+
 // ---------- responses ----------
 
 fn header_map(extra: &[(&str, String)]) -> HeaderMap {
@@ -1433,6 +1442,9 @@ impl App {
             .model()
             .and_then(|m| m.streams.into_iter().find(|s| s.id == id))
             .ok_or_else(stream_gone)?;
+        if let Some(machine) = &s.machine {
+            return Err(elsewhere(machine, &self.host()));
+        }
         if s.cwd.as_deref().is_none_or(str::is_empty) {
             return Err(action_err(
                 409,
@@ -1441,6 +1453,20 @@ impl App {
             ));
         }
         Ok(s)
+    }
+
+    /// A stream this host can hand files to: it exists, and its terminal runs here.
+    pub fn stream_here(&self, id: &str) -> Result<(), ApiError> {
+        let s = self
+            .d
+            .herdr
+            .model()
+            .and_then(|m| m.streams.into_iter().find(|s| s.id == id))
+            .ok_or_else(stream_gone)?;
+        match &s.machine {
+            Some(machine) => Err(elsewhere(machine, &self.host())),
+            None => Ok(()),
+        }
     }
 
     pub fn stream_exists(&self, id: &str) -> bool {

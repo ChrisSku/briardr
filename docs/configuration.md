@@ -30,7 +30,9 @@ devices are kept. A failed save leaves the running configuration unchanged.
 
 | Setting | Purpose |
 | --- | --- |
-| `herdrPath`, `herdrSession` | Herdr executable and local session. An empty session uses Herdr's default. The path is also editable in Settings. |
+| `herdrBackend` | Which Herdr Briardr talks to: `tui` (default, Herdr's terminal app) or `core` (herdr-core, under the Herdr desktop app). Also switchable in Settings, where it takes effect at once. |
+| `herdrPath`, `herdrSession` | Herdr TUI: its executable and local session. An empty session uses Herdr's default. The path is also editable in Settings. |
+| `herdrCoreSession`, `herdrCoreSocket` | herdr-core: its session (empty: `HC_SESSION`, else `default`) and, to override how `hc` finds it, its socket. Briardr never starts a core. |
 | `herdrTimeoutMs` | Deadline for each request to Herdr; default 8000. |
 | `port` | Main port; default 7443. |
 | `listen` | Direct-mode listeners besides loopback: `tailscale` or specific host IPv4 addresses. Default: `["tailscale"]`. |

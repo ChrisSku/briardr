@@ -10,6 +10,8 @@ export interface TabInfo {
   label: string;
   /** One of Briardr's icon names (ui/icons); unknown names show a generic icon. */
   icon?: string;
+  /** A stream tab that works only for a stream on this computer (it reads its folder, or serves its localhost): hidden for a terminal on another machine. */
+  local?: boolean;
 }
 
 export interface SectionInfo {

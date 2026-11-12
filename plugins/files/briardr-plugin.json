@@ -4,5 +4,5 @@
   "description": "Browse the stream’s folder, read code with syntax highlighting and PDFs page by page, and ask the agent about lines you pick.",
   "briardr": 1,
   "client": "src/index.ts",
-  "contributes": { "streamTabs": [{ "id": "files", "label": "Files", "icon": "folder" }] }
+  "contributes": { "streamTabs": [{ "id": "files", "label": "Files", "icon": "folder", "local": true }] }
 }

@@ -1,6 +1,6 @@
 // Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory (uploads
-// too) and the test run's own Herdr session. Nothing here touches the developer's real panes, and runs in
-// parallel (other worktrees, other agents) don't share anything.
+// too) and the test run's own Herdr session, or herdr-cores of its own. Nothing here touches the developer's
+// real panes or terminals, and runs in parallel (other worktrees, other agents) don't share anything.
 // The binary is `BRIARDR_SERVER_BIN`, else server/target/debug/briardr (`mise run build:test-server`): a build
 // with the loopback test hooks (/__test/*), which stand in for reaching into the server from a test.
 import { execFileSync, spawn } from 'node:child_process';
@@ -74,11 +74,84 @@ export function ensureSession(): void {
   }
 }
 
-/** When the run ends: stop and delete its session (unless BRIARDR_TEST_SESSION named one to keep), then remove
- *  the folders it made. */
+/** When the run ends: stop and delete its session (unless BRIARDR_TEST_SESSION named one to keep) and its
+ *  herdr-cores, then remove the folders it made. */
 export function endRun(): void {
   if (OWN_SESSION && started) removeSession(SESSION);
+  for (const core of cores.splice(0)) core.stop();
   removeDirs(MADE);
+}
+
+/** herdr-core's `hc`: BRIARDR_TEST_HC, else the one on PATH (deploy/versions.env pins its version). */
+const HC = process.env.BRIARDR_TEST_HC || 'hc';
+
+export interface TestCore {
+  /** The socket Briardr connects to (its `herdrCoreSocket`). */
+  socket: string;
+  /** Runs `hc` against this core and returns what it printed. */
+  hc(...args: string[]): string;
+  /** One JSON-RPC call on the core's socket, as Briardr makes them. */
+  call(method: string, params?: object): Promise<any>;
+  /** A connection command that reaches this core from another one (`hc machine add --via`). */
+  via: string;
+  stop(): void;
+}
+
+const cores: TestCore[] = [];
+
+/** The environment that points `hc` at the core whose folders are in `dir`. */
+function coreEnv(dir: string, session: string): NodeJS.ProcessEnv {
+  const env = scrubbed();
+  for (const k of Object.keys(env)) if (k.startsWith('HC_')) delete env[k];
+  return { ...env, HC_SESSION: session, XDG_STATE_HOME: `${dir}/s`, XDG_CONFIG_HOME: `${dir}/c`, XDG_RUNTIME_DIR: `${dir}/r` };
+}
+
+/**
+ * A herdr-core of this run's own (the Herdr app's runtime), with its session, state and socket in a folder of
+ * the run, stopped when the run ends: it never touches your core. Its terminals start without your zsh startup
+ * files, as the Herdr session's panes do. The folder is short: a Unix socket's path has a limit (104 bytes on
+ * macOS), and macOS's temp directory alone is half of it.
+ */
+export function startCore(name = 'a'): TestCore {
+  const dir = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'bh-'));
+  fs.appendFileSync(MADE, `${dir}\n`);
+  const session = `briardr-test-${process.pid}-${name}`;
+  for (const sub of ['s', 'c', 'r']) fs.mkdirSync(path.join(dir, sub));
+  const env = { ...coreEnv(dir, session), ZDOTDIR: tmpDir('briardr-zdotdir-') };
+  // What a later run needs to stop this core if this run is killed (removeDirs).
+  fs.writeFileSync(path.join(dir, 'session'), session);
+  const hc = (...args: string[]) => execFileSync(HC, args, { env, encoding: 'utf8', cwd: dir });
+  hc('server', 'start');
+  const socket = path.join(dir, 'r', 'herdr-core', `${session}.sock`);
+  const core: TestCore = {
+    socket,
+    hc,
+    call: (method, params = {}) =>
+      new Promise((resolve, reject) => {
+        const c = net.createConnection(socket);
+        let buf = '';
+        c.on('error', reject);
+        c.on('data', (d) => {
+          buf += d;
+          if (!buf.includes('\n')) return;
+          c.destroy();
+          const msg = JSON.parse(buf.slice(0, buf.indexOf('\n')));
+          if (msg.error) reject(new Error(`${method}: ${msg.error.message}`));
+          else resolve(msg.result);
+        });
+        c.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })}\n`);
+      }),
+    via: `env HC_SESSION=${session} XDG_STATE_HOME=${dir}/s XDG_CONFIG_HOME=${dir}/c XDG_RUNTIME_DIR=${dir}/r PATH=${process.env.PATH} sh -c`,
+    stop: () => stopCore(dir, session),
+  };
+  cores.push(core);
+  return core;
+}
+
+function stopCore(dir: string, session: string) {
+  try {
+    execFileSync(HC, ['server', 'stop'], { env: coreEnv(dir, session), stdio: 'ignore', cwd: dir });
+  } catch {}
 }
 
 /** Removes the folders a list names, then the list. Only a list this user wrote, and not a link: the temp
@@ -92,7 +165,13 @@ function removeDirs(list: string) {
   } catch {
     return;
   }
-  for (const dir of dirs.split('\n')) if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.split('\n')) {
+    if (!dir) continue;
+    // A herdr-core a killed run left running: stopped before its folder goes.
+    const session = path.join(dir, 'session');
+    if (fs.existsSync(session)) stopCore(dir, fs.readFileSync(session, 'utf8'));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   fs.rmSync(list, { force: true });
 }
 

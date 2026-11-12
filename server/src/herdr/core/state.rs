@@ -1,8 +1,9 @@
 // Live, cached view of herdr-core. One connection subscribes to every event: its snapshot and the
-// events after it keep the terminal records (herdr-core's schema/README.md, Events), and the Herdr
-// app's layout document is read again whenever it changes. The model is rebuilt from both after
+// events after it keep the terminal records (herdr-core's schema/README.md, Events), including other
+// machines' (`rohan/t7`), and the Herdr app's layout documents, one per machine, are read again
+// whenever one changes, and all of them after missed events. The model is rebuilt from both after
 // each change and published only when it differs. A lost or refused connection retries with backoff.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -82,7 +83,8 @@ struct Inner {
     terminals: Vec<Value>,
     /// Events up to this one are in `terminals`.
     seq: u64,
-    doc: Option<Value>,
+    /// The layout documents by machine ("" for this computer).
+    docs: BTreeMap<String, Value>,
     model: Option<Model>,
     health: HerdrHealth,
     task: Option<JoinHandle<()>>,
@@ -113,7 +115,7 @@ impl CoreState {
                     conn: None,
                     terminals: Vec::new(),
                     seq: 0,
-                    doc: None,
+                    docs: BTreeMap::new(),
                     model: None,
                     health: HerdrHealth {
                         backend: "core",
@@ -156,7 +158,7 @@ impl CoreState {
             let mut i = self.lock();
             i.target = target;
             i.terminals.clear();
-            i.doc = None;
+            i.docs.clear();
             i.model = None;
         }
         self.start().await;
@@ -174,7 +176,7 @@ impl CoreState {
     /// Reads the terminals and the layout document again, so the model shows a change just made.
     pub async fn refresh(&self) -> Result<(), HerdrError> {
         let list = self.request("terminal.list", json!({})).await?;
-        let doc = self.read_doc().await;
+        let docs = self.read_docs().await;
         let terminals = list
             .get("terminals")
             .and_then(Value::as_array)
@@ -186,15 +188,15 @@ impl CoreState {
             i.terminals
                 .retain(|t| t.get("state").and_then(Value::as_str) != Some("live"));
             i.terminals.extend(terminals);
-            i.doc = doc;
+            i.docs = docs;
         }
         self.rebuild();
         Ok(())
     }
 
-    /// The layout document as last read.
-    pub fn layout(&self) -> Option<Value> {
-        self.lock().doc.clone()
+    /// The layout document of `machine` ("" for this computer) as last read.
+    pub fn layout(&self, machine: &str) -> Option<Value> {
+        self.lock().docs.get(machine).cloned()
     }
 
     /// A terminal's record as last seen.
@@ -206,15 +208,16 @@ impl CoreState {
             .cloned()
     }
 
-    /// Changes the layout document with `change` and writes it over the version it read, so a
-    /// change from another screen meanwhile is never lost: that write fails, and this one reads
+    /// Changes `machine`'s layout document with `change` and writes it over the version it read, so
+    /// a change from another screen meanwhile is never lost: that write fails, and this one reads
     /// again and changes the newer document. False when `change` found nothing to change.
     pub async fn edit_layout(
         &self,
+        machine: &str,
         change: impl Fn(&mut Value) -> bool,
     ) -> Result<bool, HerdrError> {
         for _ in 0..EDIT_TRIES {
-            let read = self.request("doc.get", json!({"name": LAYOUT_DOC})).await?;
+            let read = self.request("doc.get", doc_params(machine)).await?;
             let version = read.get("version").and_then(Value::as_u64).unwrap_or(0);
             let before = read.get("value").cloned().unwrap_or(Value::Null);
             let mut doc = before.clone();
@@ -224,7 +227,9 @@ impl CoreState {
             if doc == before {
                 return Ok(true);
             }
-            let write = json!({"name": LAYOUT_DOC, "value": doc, "version": version});
+            let mut write = doc_params(machine);
+            write["value"] = doc;
+            write["version"] = json!(version);
             match self.request("doc.set", write).await {
                 Err(e) if e.code == "conflict" => continue,
                 done => return done.map(|_| true),
@@ -236,12 +241,51 @@ impl CoreState {
         })
     }
 
-    async fn read_doc(&self) -> Option<Value> {
-        let r = self
-            .request("doc.get", json!({"name": LAYOUT_DOC}))
-            .await
-            .ok()?;
+    async fn read_doc(&self, machine: &str) -> Option<Value> {
+        let r = self.request("doc.get", doc_params(machine)).await.ok()?;
         r.get("value").filter(|v| v.is_object()).cloned()
+    }
+
+    /// This computer's layout, and each machine's that the core reaches now.
+    async fn read_docs(&self) -> BTreeMap<String, Value> {
+        let mut docs = BTreeMap::new();
+        for machine in std::iter::once(String::new()).chain(self.machines().await) {
+            if let Some(doc) = self.read_doc(&machine).await {
+                docs.insert(machine, doc);
+            }
+        }
+        docs
+    }
+
+    /// The machines the core added and reaches now, but not temporary ones (agents' sandboxes),
+    /// which the Herdr app leaves out too.
+    async fn machines(&self) -> Vec<String> {
+        let Ok(r) = self.request("machine.list", json!({})).await else {
+            return Vec::new();
+        };
+        list(&r, "machines")
+            .iter()
+            .filter(|m| m.get("temporary") != Some(&Value::Bool(true)))
+            .filter(|m| m.get("state").and_then(Value::as_str) == Some("connected"))
+            .filter_map(|m| m.get("name").and_then(Value::as_str).map(String::from))
+            .collect()
+    }
+
+    /// Reads again the layouts `changed` names, or all of them.
+    async fn reread(&self, changed: &Changed) {
+        if changed.all_docs {
+            let docs = self.read_docs().await;
+            self.lock().docs = docs;
+            return;
+        }
+        for machine in &changed.docs {
+            let doc = self.read_doc(machine).await;
+            let mut i = self.lock();
+            match doc {
+                Some(doc) => i.docs.insert(machine.clone(), doc),
+                None => i.docs.remove(machine),
+            };
+        }
     }
 
     async fn run(self) {
@@ -277,8 +321,8 @@ impl CoreState {
             i.seq = sub.get("seq").and_then(Value::as_u64).unwrap_or(0);
         }
         // Subscribed first, then read: a change in between arrives as an event.
-        let doc = self.read_doc().await;
-        self.lock().doc = doc;
+        let docs = self.read_docs().await;
+        self.lock().docs = docs;
         let version = hello
             .get("version")
             .and_then(Value::as_str)
@@ -308,15 +352,12 @@ impl CoreState {
                 let mut i = self.lock();
                 let Inner { terminals, seq, .. } = &mut *i;
                 changed.merge(apply(terminals, seq, &msg));
-                if changed.terminals || changed.doc {
+                if changed.any() {
                     i.health.last_ok_at = Some(now_ms());
                 }
             }
-            if changed.doc {
-                let doc = self.read_doc().await;
-                self.lock().doc = doc;
-            }
-            if changed.terminals || changed.doc {
+            self.reread(&changed).await;
+            if changed.any() {
                 self.rebuild();
             }
         }
@@ -334,7 +375,7 @@ impl CoreState {
             let mut i = self.lock();
             let mut next = normalize(
                 &i.terminals,
-                i.doc.as_ref(),
+                &i.docs,
                 i.model.as_ref(),
                 i.health.version.as_deref(),
                 now_ms(),
@@ -411,15 +452,31 @@ fn list(v: &Value, key: &str) -> Vec<Value> {
 #[derive(Debug, Default, PartialEq)]
 pub struct Changed {
     pub terminals: bool,
-    /// The layout document changed (or events were missed): read it again.
-    pub doc: bool,
+    /// Machines whose layout document changed ("" for this computer): read again.
+    pub docs: BTreeSet<String>,
+    /// Events were missed, or a machine (re)connected: every layout is read again.
+    pub all_docs: bool,
 }
 
 impl Changed {
     fn merge(&mut self, other: Changed) {
         self.terminals |= other.terminals;
-        self.doc |= other.doc;
+        self.docs.extend(other.docs);
+        self.all_docs |= other.all_docs;
     }
+
+    fn any(&self) -> bool {
+        self.terminals || self.all_docs || !self.docs.is_empty()
+    }
+}
+
+/// `doc.get` and `doc.set`'s params for `machine`'s layout ("": this computer's).
+fn doc_params(machine: &str) -> Value {
+    let mut params = json!({"name": LAYOUT_DOC});
+    if !machine.is_empty() {
+        params["on"] = json!(machine);
+    }
+    params
 }
 
 /// Applies one notification to the records, as herdr-core's schema/README.md (Events) says.
@@ -432,7 +489,8 @@ pub fn apply(terminals: &mut Vec<Value>, seq: &mut u64, msg: &Value) -> Changed 
             *seq = at;
             return Changed {
                 terminals: true,
-                doc: true,
+                all_docs: true,
+                ..Changed::default()
             };
         }
         Some("event") if at > *seq => *seq = at,
@@ -441,12 +499,14 @@ pub fn apply(terminals: &mut Vec<Value>, seq: &mut u64, msg: &Value) -> Changed 
     let data = params.get("data").unwrap_or(&Value::Null);
     let kind = params.get("type").and_then(Value::as_str).unwrap_or("");
     if kind == "doc" {
-        // Another machine's documents come with `machine`; only this one's layout is read.
-        let ours = params.get("machine").is_none_or(Value::is_null)
-            && data.get("name").and_then(Value::as_str) == Some(LAYOUT_DOC);
+        // Another machine's documents come with `machine`.
+        if data.get("name").and_then(Value::as_str) != Some(LAYOUT_DOC) {
+            return Changed::default();
+        }
+        let machine = params.get("machine").and_then(Value::as_str).unwrap_or("");
         return Changed {
-            terminals: false,
-            doc: ours,
+            docs: BTreeSet::from([machine.to_string()]),
+            ..Changed::default()
         };
     }
     let Some(address) = params.get("terminal").and_then(Value::as_str) else {
@@ -508,7 +568,7 @@ pub fn apply(terminals: &mut Vec<Value>, seq: &mut u64, msg: &Value) -> Changed 
     }
     Changed {
         terminals: true,
-        doc: false,
+        ..Changed::default()
     }
 }
 
@@ -542,7 +602,7 @@ mod tests {
             changed,
             Changed {
                 terminals: true,
-                doc: false
+                ..Changed::default()
             }
         );
         apply(
@@ -627,23 +687,29 @@ mod tests {
         let mut seq = 3;
         let doc = json!({"jsonrpc": "2.0", "method": "event",
             "params": {"seq": 4, "type": "doc", "data": {"name": "herdr-app", "version": 2}}});
-        assert_eq!(
-            apply(&mut ts, &mut seq, &doc),
-            Changed {
-                terminals: false,
-                doc: true
-            }
-        );
+        let read = |machine: &str| Changed {
+            docs: BTreeSet::from([machine.to_string()]),
+            ..Changed::default()
+        };
+        assert_eq!(apply(&mut ts, &mut seq, &doc), read(""));
         let remote = json!({"jsonrpc": "2.0", "method": "event",
             "params": {"seq": 5, "type": "doc", "machine": "box", "data": {"name": "herdr-app", "version": 2}}});
-        assert_eq!(apply(&mut ts, &mut seq, &remote), Changed::default());
+        assert_eq!(apply(&mut ts, &mut seq, &remote), read("box"));
+        let other = json!({"jsonrpc": "2.0", "method": "event",
+            "params": {"seq": 6, "type": "doc", "data": {"name": "notes", "version": 1}}});
+        assert_eq!(
+            apply(&mut ts, &mut seq, &other),
+            Changed::default(),
+            "not the layout"
+        );
         let missed = json!({"jsonrpc": "2.0", "method": "missed",
             "params": {"seq": 40, "terminals": [record("t7")]}});
         assert_eq!(
             apply(&mut ts, &mut seq, &missed),
             Changed {
                 terminals: true,
-                doc: true
+                all_docs: true,
+                ..Changed::default()
             }
         );
         assert_eq!((ts[0]["address"].clone(), seq), (json!("t7"), 40));

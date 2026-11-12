@@ -319,8 +319,13 @@
       [
         { label: 'Paste from clipboard', icon: 'clipboard', onSelect: pasteFromClipboard, hint: 'Text or image' },
         { label: 'Paste text…', icon: 'clipboard', onSelect: () => (sheet = { k: 'paste', text: '' }) },
-        { label: 'Select image…', icon: 'image', onSelect: () => pickFile('image/*', 'image'), hint: acceptsImages(stream) ? undefined : 'Inserts a path' },
-        { label: 'Select file…', icon: 'file', onSelect: () => pickFile('*/*', 'file') },
+        // An upload lands on this host, where a terminal on another machine can't open it.
+        ...(stream.machine
+          ? []
+          : [
+              { label: 'Select image…', icon: 'image' as const, onSelect: () => pickFile('image/*', 'image'), hint: acceptsImages(stream) ? undefined : 'Inserts a path' },
+              { label: 'Select file…', icon: 'file' as const, onSelect: () => pickFile('*/*', 'file') },
+            ]),
       ],
       anchor,
       'Insert',

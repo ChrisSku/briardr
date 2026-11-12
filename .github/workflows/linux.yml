@@ -53,6 +53,15 @@ jobs:
           install -D -m 0755 herdr "$HOME/.local/bin/herdr"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: herdr-core (the version and checksum the tests run against)
+        run: |
+          . deploy/versions.env
+          curl -fsSL "https://releases.herdr.dev/core/$HERDR_CORE_VERSION/herdr-core-linux-x86_64.tar.gz" -o hc.tar.gz
+          echo "$HERDR_CORE_SHA256_LINUX_X86_64  hc.tar.gz" | sha256sum -c -
+          mkdir hc && tar -xzf hc.tar.gz -C hc
+          install -D -m 0755 hc/herdr-core "$HOME/.local/bin/hc"
+          hc --version
+
       - run: mise run check
       - run: mise run test
 
