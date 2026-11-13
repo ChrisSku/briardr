@@ -5,7 +5,7 @@
   import type { Project } from '../../types.ts';
   import { ToolIcon } from '../../ui/icons/index.ts';
   import { Sheet } from '../../ui/kit.ts';
-  import { openStream } from '../streams.ts';
+  import { onHerdrApp, openStream } from '../streams.ts';
   import { Submit } from '../submit.svelte.ts';
 
   let { project, onClose }: { project: Project; onClose: () => void } = $props();
@@ -32,11 +32,15 @@
         </label>
       {/each}
     </fieldset>
-    <label class="field-label">
-      Stream name (optional)
-      <input class="field" bind:value={name} placeholder="e.g. refactor auth" />
-    </label>
-    <p class="hint">Briardr splits the largest pane in this project. {TheHost()} keeps its current focus.</p>
+    {#if onHerdrApp()}
+      <p class="hint">The Herdr app puts it beside this project’s last pane, and keeps its current focus.</p>
+    {:else}
+      <label class="field-label">
+        Stream name (optional)
+        <input class="field" bind:value={name} placeholder="e.g. refactor auth" />
+      </label>
+      <p class="hint">Briardr splits the largest pane in this project. {TheHost()} keeps its current focus.</p>
+    {/if}
     {#if s.error}<p class="error" role="alert">{s.error}</p>{/if}
     <div class="form-actions">
       <button type="button" class="btn" onclick={onClose}>Cancel</button>

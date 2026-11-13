@@ -8,6 +8,8 @@ export interface Workspace {
   focused: boolean;
   activeProjectId: string | null;
   cwd: string | null;
+  /** The machine it lives on (herdr-core's `hc machine` name); missing for this computer. */
+  machine?: string;
 }
 
 export interface Project {
@@ -35,6 +37,8 @@ export interface Stream {
   focused: boolean;
   title: string | null;
   rows: number | null;
+  /** The machine its terminal runs on (herdr-core); missing for this computer. Such a stream has no `cwd` here. */
+  machine?: string;
 }
 
 export interface Model {
@@ -47,6 +51,8 @@ export interface Model {
 }
 
 export interface HerdrHealth {
+  /** Herdr TUI, or herdr-core under the Herdr app (missing in a cache an older Briardr wrote). */
+  backend?: 'tui' | 'core';
   ok: boolean;
   problem: string | null;
   version: string | null;

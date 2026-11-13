@@ -70,7 +70,10 @@ so runs in parallel don't collide and your sessions are never touched. They igno
 its hooks (`GIT_DIR` and the like, unset in `mise.toml`), so a push from a worktree can't send the suites'
 scratch commits into the branch. Its pane shells start without your zsh startup files, as in CI. To watch
 the tests in Herdr, run them in the development session with `BRIARDR_TEST_SESSION=briardr-dev`. The tests require `herdr`, `curl`, Git, and
-Python 3 on PATH.
+Python 3 on PATH, and herdr-core's `hc` (`HERDR_CORE_VERSION` in `deploy/versions.env`; the Herdr app
+installs it, or run `curl -fsSL https://releases.herdr.dev/core/install.sh | sh`) for `test/core.test.ts`,
+which starts throwaway cores of the run's own and stops them when it ends (`BRIARDR_TEST_HC` picks
+another `hc`).
 
 For Rust-only changes, a narrower check is:
 

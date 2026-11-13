@@ -14,6 +14,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use crate::config::BriardrConfig;
+use crate::herdr::core::state::{core_status, CoreTarget};
 use crate::herdr::rpc::{herdr_status, HerdrTarget};
 
 pub const HELP: &str = r#"Usage: briardr setup [--yes]
@@ -84,6 +85,18 @@ pub fn herdr_hint(problem: &str, session: &str) -> String {
                 .to_string()
         }
         _ => "not reachable: check `herdr status`".to_string(),
+    }
+}
+
+/// What to do about herdr-core, for `briardr serve` and setup.
+pub fn core_hint(problem: &str) -> String {
+    match problem {
+        "not_running" => "not running: open the Herdr app".to_string(),
+        "timeout" => {
+            "not answering: on macOS, look for a privacy prompt for Herdr Core".to_string()
+        }
+        "incompatible" => "a herdr-core this Briardr can't use".to_string(),
+        _ => "not reachable".to_string(),
     }
 }
 
@@ -212,10 +225,55 @@ pub fn intro() {
     );
 }
 
-/// Herdr: there and usable, else installed when the person agrees (or `yes`).
+/// Whether herdr-core `version` is older than `tested` (x.y.z; anything unreadable counts as not older).
+fn older(version: &str, tested: &str) -> bool {
+    let parts = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|n| n.parse().ok()).collect() };
+    matches!((parts(version), parts(tested)), (Some(v), Some(t)) if v < t)
+}
+
+/// herdr-core, which the Herdr app brings and keeps updated: Briardr only says whether it can use it.
+async fn herdr_core(cfg: &BriardrConfig) -> HerdrOutcome {
+    let out = out();
+    let status = core_status(&CoreTarget::of(cfg)).await;
+    let tested = pin("HERDR_CORE_VERSION").unwrap_or("?");
+    let usable = match (status.problem.as_deref(), status.version.as_deref()) {
+        (None, Some(v)) if older(v, tested) => {
+            out.warn(&format!("herdr-core {v} is running; this Briardr is tested with {tested} and newer. Update the Herdr app."));
+            true
+        }
+        (None, v) => {
+            out.ok(&format!(
+                "herdr-core {} is running (the Herdr app’s).",
+                v.unwrap_or("?")
+            ));
+            true
+        }
+        (Some("incompatible"), _) => {
+            out.fail(&format!("This herdr-core doesn’t work with this Briardr, which is tested with {tested}. Update the Herdr app."));
+            false
+        }
+        (Some(problem), _) => {
+            out.warn(&format!(
+                "herdr-core is {}; Briardr connects when it’s up.",
+                core_hint(problem)
+            ));
+            true
+        }
+    };
+    HerdrOutcome {
+        installed: None,
+        usable,
+    }
+}
+
+/// Herdr: there and usable, else installed when the person agrees (or `yes`). With the Herdr app
+/// (`herdrBackend` "core"), its herdr-core instead.
 pub async fn herdr(cfg: &BriardrConfig, home: &Path, yes: bool) -> Result<HerdrOutcome, String> {
     let out = out();
     out.step("Herdr");
+    if cfg.herdr_backend == "core" {
+        return Ok(herdr_core(cfg).await);
+    }
     let release = herdr_release(std::env::consts::OS, std::env::consts::ARCH);
     let pinned = release.as_ref().map_or("", |r| r.version);
     let mut target = HerdrTarget::of(cfg);
@@ -524,5 +582,14 @@ mod tests {
         assert_eq!(tilde(&home.join(".local/bin"), home), "~/.local/bin");
         assert_eq!(tilde(Path::new("/opt/bin"), home), "/opt/bin");
         assert_eq!(tilde(Path::new("/x"), Path::new("/")), "/x");
+    }
+
+    #[test]
+    fn older_cores_are_told_to_update() {
+        assert!(older("0.1.9", "0.1.20"));
+        assert!(!older("0.1.20", "0.1.20"));
+        assert!(!older("0.2.0", "0.1.20"));
+        assert!(!older("dev", "0.1.20"), "unreadable is not older");
+        assert!(pin("HERDR_CORE_VERSION").is_some());
     }
 }

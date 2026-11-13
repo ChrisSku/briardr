@@ -26,6 +26,15 @@ pub enum ConfigError {
 pub struct BriardrConfig {
     pub herdr_path: String,
     pub herdr_session: String,
+    /// Which Herdr to talk to: "tui" (Herdr TUI's server) or "core" (herdr-core, which the Herdr app runs on).
+    #[serde(default = "tui_backend")]
+    pub herdr_backend: String,
+    /// herdr-core's session; empty means its default one.
+    #[serde(default)]
+    pub herdr_core_session: String,
+    /// herdr-core's socket; empty means the one `hc` itself finds.
+    #[serde(default)]
+    pub herdr_core_socket: String,
     pub port: u16,
     pub preview_port_start: u16,
     pub preview_port_count: u16,
@@ -96,6 +105,10 @@ impl Default for UpdatesConfig {
     fn default() -> Self {
         UpdatesConfig { check: true }
     }
+}
+
+fn tui_backend() -> String {
+    "tui".to_string()
 }
 
 /// Unset strings are written as "" in the config file.
@@ -268,6 +281,9 @@ pub fn default_config(
     BriardrConfig {
         herdr_path: which("herdr", env, &herdr_fallbacks),
         herdr_session: String::new(),
+        herdr_backend: tui_backend(),
+        herdr_core_session: String::new(),
+        herdr_core_socket: String::new(),
         port: 7443,
         preview_port_start: 7444,
         preview_port_count: 16,
@@ -386,6 +402,12 @@ fn is_ip_or_ipv4_cidr(p: &str) -> bool {
 /// Check the settings that decide how Briardr is reached. Throws a ConfigError Briardr reports at
 /// startup rather than serving with a half-working setup.
 pub fn validate_config(cfg: &mut BriardrConfig) -> Result<(), ConfigError> {
+    if !matches!(cfg.herdr_backend.as_str(), "tui" | "core") {
+        return Err(ConfigError::Invalid(format!(
+            "herdrBackend must be tui or core (got {}).",
+            json_string(&cfg.herdr_backend)
+        )));
+    }
     let mode = cfg.tls.mode.as_str();
     if !matches!(mode, "tailscale" | "local-ca" | "files" | "proxy") {
         return Err(ConfigError::Invalid(format!(

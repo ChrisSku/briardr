@@ -56,6 +56,9 @@ A folder with a manifest, `briardr-plugin.json`:
 }
 ```
 
+- **Stream tabs** can say `"local": true`: they work only for a stream on this computer (they read its
+  folder or serve its localhost), so they're hidden for a terminal on another machine (herdr-core's
+  machines). Files, Changes, Docs and Preview are.
 - **Client**: Svelte 5 components behind `definePlugin({ streamTabs, appTabs, settings, onTerminalLink })`.
   Stream tabs get `{ stream, visible, compact, briardr }`; `briardr` (`web/src/plugins/context.ts`) is the
   plugin's way into Briardr: its backend, Briardr's API, toasts, menus, navigation, backend events,

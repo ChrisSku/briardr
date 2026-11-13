@@ -1,5 +1,8 @@
 // Create, rename and close workspace/project/stream; history, info.
-// Every Herdr creation passes focus:false so the Mac's focused pane never changes.
+// Every Herdr creation passes focus:false so the Mac's focused pane never changes. herdr-core's
+// are in `core`.
+mod core;
+
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -7,6 +10,7 @@ use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::time::sleep;
 
+use crate::herdr::backend::{Backend, Herdr};
 use crate::herdr::model::{Model, Stream, StreamKind};
 use crate::herdr::rpc::HerdrError;
 use crate::herdr::state::{HerdrReader, HerdrState};
@@ -248,13 +252,13 @@ pub fn from_herdr(e: &HerdrError, host: &str) -> ActionError {
 }
 
 pub struct Actions {
-    herdr: HerdrState,
+    herdr: Herdr,
     /// The host as messages name it, e.g. "the Mac" or "the server".
     host: String,
 }
 
 impl Actions {
-    pub fn new(herdr: HerdrState, host: String) -> Self {
+    pub fn new(herdr: Herdr, host: String) -> Self {
         Actions { herdr, host }
     }
 
@@ -266,9 +270,30 @@ impl Actions {
         )
     }
 
+    /// Herdr TUI, for the actions herdr-core has no form of.
+    fn tui(&self) -> Result<HerdrState, ActionError> {
+        match self.herdr.backend() {
+            Backend::Tui(h) => Ok(h),
+            Backend::Core(_) => Err(err(
+                501,
+                "not_supported",
+                "This isn’t available with the Herdr app.",
+            )),
+        }
+    }
+
     async fn call(&self, method: &str, params: Value) -> Result<Value, ActionError> {
-        self.herdr
+        self.tui()?
             .request(method, params)
+            .await
+            .map_err(|e| from_herdr(&e, &self.host))
+    }
+
+    async fn core_call(&self, method: &str, params: Value) -> Result<Value, ActionError> {
+        let Backend::Core(c) = self.herdr.backend() else {
+            return Err(self.internal());
+        };
+        c.request(method, params)
             .await
             .map_err(|e| from_herdr(&e, &self.host))
     }
@@ -331,6 +356,9 @@ impl Actions {
             }
             Ok(_) => {}
         }
+        if let Some(c) = self.core() {
+            return self.core_create_workspace(&c, label, cwd).await;
+        }
         let before = self.focus_ids().await?;
         let r = self
             .call(
@@ -366,6 +394,11 @@ impl Actions {
                     .find(|w| workspace_id.as_str() == Some(w.id.as_str()))
             })
             .ok_or_else(|| err(404, "workspace_gone", "That workspace no longer exists."))?;
+        if let Some(c) = self.core() {
+            return self
+                .core_create_project(&c, ws, clean_label(label_in, 60))
+                .await;
+        }
         let before = self.focus_ids().await?;
         let cwd = ws.cwd.as_deref().filter(|c| !c.is_empty());
         let r = self
@@ -414,6 +447,21 @@ impl Actions {
             .iter()
             .filter(|s| s.project_id == project.id)
             .collect();
+        // Herdr app terminals have no names: the app places a new one beside the tab's last.
+        if self.core().is_some() {
+            let cwd = in_project
+                .iter()
+                .find_map(|s| s.cwd.clone())
+                .or_else(|| {
+                    let ws = model
+                        .workspaces
+                        .iter()
+                        .find(|w| w.id == project.workspace_id);
+                    ws.and_then(|w| w.cwd.clone())
+                })
+                .filter(|c| !c.is_empty());
+            return self.core_create_stream(project, cwd, &kind).await;
+        }
         let first = in_project
             .first()
             .map(|s| s.id.clone())
@@ -494,7 +542,7 @@ impl Actions {
             loop {
                 let params =
                     json!({ "name": name, "kind": kind, "pane_id": pane_id, "timeout_ms": 30_000 });
-                let Err(e) = self.herdr.request("agent.start", params).await else {
+                let Err(e) = self.tui()?.request("agent.start", params).await else {
                     break;
                 };
                 if e.code == "agent_not_ready" {
@@ -537,6 +585,13 @@ impl Actions {
         if !known {
             return Err(err(404, "stream_gone", "That stream no longer exists."));
         }
+        if self.core().is_some() {
+            return Err(err(
+                501,
+                "not_supported",
+                "Terminals in the Herdr app have no names.",
+            ));
+        }
         self.call(
             "pane.rename",
             json!({ "pane_id": stream_id, "label": clean_label(label_in, 60) }),
@@ -555,6 +610,9 @@ impl Actions {
             ));
         }
         let label = required_label(label_in)?;
+        if let Some(c) = self.core() {
+            return self.core_rename(&c, id, &label).await;
+        }
         self.call(
             "workspace.rename",
             json!({ "workspace_id": id, "label": label }),
@@ -569,6 +627,9 @@ impl Actions {
             return Err(err(404, "project_gone", "That project no longer exists."));
         }
         let label = required_label(label_in)?;
+        if let Some(c) = self.core() {
+            return self.core_rename(&c, id, &label).await;
+        }
         self.call("tab.rename", json!({ "tab_id": id, "label": label }))
             .await?;
         self.refresh().await?;
@@ -585,6 +646,9 @@ impl Actions {
                 "That workspace no longer exists.",
             ));
         }
+        if self.core().is_some() {
+            return self.core_close(|s| s.workspace_id == id).await;
+        }
         self.call("workspace.close", json!({ "workspace_id": id }))
             .await?;
         self.refresh().await?;
@@ -595,6 +659,9 @@ impl Actions {
         if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
             return Err(err(404, "project_gone", "That project no longer exists."));
         }
+        if self.core().is_some() {
+            return self.core_close(|s| s.project_id == id).await;
+        }
         self.call("tab.close", json!({ "tab_id": id })).await?;
         self.refresh().await?;
         Ok(Value::Null)
@@ -603,6 +670,9 @@ impl Actions {
     pub async fn close_stream(&self, id: &str) -> Result<Value, ActionError> {
         if !self.has(|m| m.streams.iter().any(|s| s.id == id)) {
             return Err(err(404, "stream_gone", "That stream no longer exists."));
+        }
+        if self.core().is_some() {
+            return self.core_close(|s| s.id == id).await;
         }
         self.call("pane.close", json!({ "pane_id": id })).await?;
         self.refresh().await?;
@@ -622,6 +692,19 @@ impl Actions {
         } else {
             rounded.clamp(100.0, 20000.0) as u64
         };
+        if let Backend::Core(_) = self.herdr.backend() {
+            let r = self
+                .core_call(
+                    "terminal.read",
+                    json!({ "terminal": stream_id, "lines": n }),
+                )
+                .await?;
+            let text = r.get("text").and_then(Value::as_str).unwrap_or("");
+            let truncated = r.get("complete").and_then(Value::as_bool) == Some(false);
+            return Ok(
+                json!({ "text": text, "truncated": truncated, "lines": n, "asOf": now_ms() }),
+            );
+        }
         let r = self
             .call(
                 "pane.read",
@@ -644,9 +727,8 @@ impl Actions {
             .and_then(|m| m.streams.iter().find(|s| s.id == stream_id))
             .ok_or_else(|| err(404, "stream_gone", "That stream no longer exists."))?;
         let mut agent: Option<Value> = None;
-        if stream.kind == StreamKind::Agent {
-            agent = self
-                .herdr
+        if let (StreamKind::Agent, Backend::Tui(h)) = (stream.kind, self.herdr.backend()) {
+            agent = h
                 .request("agent.get", json!({ "target": stream_id }))
                 .await
                 .ok()
@@ -710,7 +792,10 @@ mod tests {
             timeout: Duration::from_secs(1),
         };
         (
-            Actions::new(HerdrState::new(target, diag), host.to_string()),
+            Actions::new(
+                Herdr::new(crate::herdr::backend::Target::Tui(target), diag),
+                host.to_string(),
+            ),
             dir,
         )
     }

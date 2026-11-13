@@ -66,6 +66,10 @@ pub struct Tab {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// A stream tab that works only for a stream on this computer (it reads its folder, or serves
+    /// its localhost): hidden for a terminal on another machine.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

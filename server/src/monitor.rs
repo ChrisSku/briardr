@@ -468,6 +468,7 @@ mod tests {
     fn stream(id: &str, state: AgentState, seq: u64) -> Stream {
         Stream {
             id: id.to_string(),
+            machine: None,
             workspace_id: "w1".to_string(),
             project_id: "w1:t1".to_string(),
             terminal_id: format!("term_{id}"),
@@ -504,6 +505,7 @@ mod tests {
             Model {
                 workspaces: vec![Workspace {
                     id: "w1".to_string(),
+                    machine: None,
                     name: "api".to_string(),
                     number: 1,
                     focused: true,
@@ -562,6 +564,7 @@ mod tests {
 
         fn health(&self) -> HerdrHealth {
             HerdrHealth {
+                backend: "tui",
                 ok: true,
                 problem: None,
                 version: Some("0.9.3".to_string()),

@@ -18,15 +18,20 @@ use tokio::sync::mpsc;
 
 use crate::app::{js_number, now_ms, Query};
 use crate::diag::Diagnostics;
+use crate::herdr::backend::{Backend, Herdr};
+use crate::herdr::core::stream::CoreSession;
 use crate::herdr::model::Model;
-use crate::herdr::state::{HerdrReader, HerdrState};
+use crate::herdr::rpc::HerdrError;
+use crate::herdr::state::HerdrReader;
 use crate::herdr::stream::{
-    CloseCategory, Direction, Frame, MouseAction, MouseButton, SessionEvent, StreamMode,
+    CloseCategory, Direction, Frame, Input, MouseAction, MouseButton, SessionEvent, StreamMode,
     TerminalSession,
 };
 
 pub const PROTOCOL: u32 = 1;
 const MAX_INPUT_CHARS: usize = 128 * 1024;
+/// A terminal's reply to a query is short.
+const MAX_REPLY_CHARS: usize = 4096;
 const HEARTBEAT: Duration = Duration::from_secs(10);
 /// A pane's input worker exits after this long without input.
 const QUEUE_IDLE: Duration = Duration::from_secs(60);
@@ -138,8 +143,80 @@ fn public_reason(c: CloseCategory, host: &str) -> String {
 /// What the hub asks a connection's socket task to send.
 enum Out {
     Text(String),
-    Binary(Vec<u8>),
+    /// A frame, and the stream bytes to credit once it is sent.
+    Binary(Vec<u8>, usize),
     Close(u16, String),
+}
+
+/// A pane's stream from Herdr TUI or herdr-core. herdr-core's is the program's raw output, so the
+/// browser's terminal keeps the scrollback and answers the program's queries.
+enum Session {
+    Tui(TerminalSession),
+    Core(CoreSession),
+}
+
+impl Session {
+    fn is_connecting(&self) -> bool {
+        match self {
+            Session::Tui(s) => s.is_connecting(),
+            Session::Core(s) => s.is_connecting(),
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        match self {
+            Session::Tui(s) => s.is_live(),
+            Session::Core(s) => s.is_live(),
+        }
+    }
+
+    fn resize(&self, cols: i64, rows: i64) {
+        match self {
+            Session::Tui(s) => {
+                s.resize(cols, rows);
+            }
+            Session::Core(s) => s.resize(cols, rows),
+        }
+    }
+
+    fn scroll(&self, direction: Direction, column: i64, row: i64) {
+        match self {
+            Session::Tui(s) => {
+                s.scroll(direction, column, row);
+            }
+            Session::Core(s) => s.scroll(direction, column, row),
+        }
+    }
+
+    fn mouse(
+        &self,
+        action: MouseAction,
+        button: MouseButton,
+        column: i64,
+        row: i64,
+        modifiers: i64,
+    ) {
+        match self {
+            Session::Tui(s) => {
+                s.mouse(action, button, column, row, modifiers);
+            }
+            Session::Core(s) => s.mouse(action, button, column, row, modifiers),
+        }
+    }
+
+    /// The viewer has `bytes` more of the stream; herdr-core sends more as they're written out.
+    fn credit(&self, bytes: usize) {
+        if let Session::Core(s) = self {
+            s.credit(bytes);
+        }
+    }
+
+    async fn release(&self) {
+        match self {
+            Session::Tui(s) => s.release().await,
+            Session::Core(s) => s.release().await,
+        }
+    }
 }
 
 struct Conn {
@@ -148,7 +225,7 @@ struct Conn {
     pane_id: String,
     client_session: String,
     mode: StreamMode,
-    session: TerminalSession,
+    session: Session,
     tx: mpsc::UnboundedSender<Out>,
 }
 
@@ -167,7 +244,7 @@ struct Job {
 }
 
 pub struct TerminalHub {
-    herdr: HerdrState,
+    herdr: Herdr,
     diag: Arc<Diagnostics>,
     /// "the Mac" or "the server", for the `released` reason.
     host: String,
@@ -192,7 +269,7 @@ fn fields(v: Value) -> BTreeMap<String, Value> {
 }
 
 impl TerminalHub {
-    pub fn new(herdr: HerdrState, diag: Arc<Diagnostics>, host: String) -> Self {
+    pub fn new(herdr: Herdr, diag: Arc<Diagnostics>, host: String) -> Self {
         TerminalHub {
             herdr,
             diag,
@@ -215,6 +292,16 @@ impl TerminalHub {
             .filter(|c| c.device_id == device_id)
         {
             let _ = c.tx.send(Out::Close(code, "revoked".into()));
+        }
+    }
+
+    /// Ends every stream: Briardr now talks to another Herdr, whose streams these aren't.
+    pub fn close_all(&self) {
+        let reason = public_reason(CloseCategory::PaneGone, &self.host);
+        for c in lock(&self.conns).values() {
+            c.send_text(json!({"t": "closed", "category": "pane_gone", "reason": reason}));
+            let code = 4000 + close_code(CloseCategory::PaneGone);
+            let _ = c.tx.send(Out::Close(code, "pane_gone".into()));
         }
     }
 
@@ -242,11 +329,13 @@ impl TerminalHub {
     /// Runs one /ws/term connection until it closes.
     pub async fn attach(self: &Arc<Self>, mut ws: WebSocket, device_id: String, q: Query) {
         let pane_id = q.get("pane").unwrap_or("").to_string();
+        let backend = self.herdr.backend();
         let mode = if q.get("mode") == Some("control") {
             StreamMode::Control
         } else {
             StreamMode::Observe
         };
+        // herdr-core lets every viewer type, so no one is ever busy and taking over does nothing.
         let takeover = mode == StreamMode::Control && q.get("takeover") == Some("1");
         let client_session: String = {
             let s = q.get("session").unwrap_or("");
@@ -297,8 +386,18 @@ impl TerminalHub {
             (StreamMode::Control, Some(c), Some(r)) => Some((c, r)),
             _ => None,
         };
-        let target = self.herdr.herdr_target();
-        let (session, mut events) = TerminalSession::start(&target, &pane_id, mode, size, takeover);
+        let (session, mut events) = match &backend {
+            Backend::Tui(h) => {
+                let (s, e) =
+                    TerminalSession::start(&h.herdr_target(), &pane_id, mode, size, takeover);
+                (Session::Tui(s), e)
+            }
+            Backend::Core(c) => {
+                let (s, e) = CoreSession::start(&c.target(), &pane_id, mode, size);
+                (Session::Core(s), e)
+            }
+        };
+        let raw = matches!(session, Session::Core(_));
         let (tx, mut out_rx) = mpsc::unbounded_channel();
         let mut id_bytes = [0u8; 6];
         rand::fill(&mut id_bytes);
@@ -318,7 +417,7 @@ impl TerminalHub {
             json!({"mode": mode.as_str(), "takeover": takeover, "stream": self.diag.anon(&pane_id)}),
         );
         conn.send_text(
-            json!({"t": "hello", "conn": conn.id, "mode": mode.as_str(), "protocol": PROTOCOL}),
+            json!({"t": "hello", "conn": conn.id, "mode": mode.as_str(), "protocol": PROTOCOL, "raw": raw}),
         );
 
         let mut alive = true;
@@ -347,8 +446,9 @@ impl TerminalHub {
                             self.event("term_live", json!({"mode": mode.as_str(), "ms": now_ms().saturating_sub(t0)}));
                             conn.send_text(json!({"t": "live", "mode": mode.as_str(), "width": f.width, "height": f.height}));
                         }
-                        let _ = conn.tx.send(Out::Binary(encode_frame(&f)));
+                        let _ = conn.tx.send(Out::Binary(encode_frame(&f), f.credit));
                     }
+                    Some(SessionEvent::Mouse(on)) => conn.send_text(json!({"t": "modes", "mouse": on})),
                     Some(SessionEvent::Warning(code)) => conn.send_text(json!({"t": "warning", "code": code})),
                     Some(SessionEvent::Closed { category, .. }) => {
                         self.event("term_closed", json!({"mode": mode.as_str(), "category": category.as_str()}));
@@ -373,10 +473,11 @@ impl TerminalHub {
                             break;
                         }
                     }
-                    Some(Out::Binary(b)) => {
+                    Some(Out::Binary(b, credit)) => {
                         if ws.send(Message::Binary(b.into())).await.is_err() {
                             break;
                         }
+                        conn.session.credit(credit);
                     }
                     Some(Out::Close(code, reason)) => {
                         close(&mut ws, code, &reason).await;
@@ -490,6 +591,19 @@ impl TerminalHub {
                 }
             }
             Some("input") => self.input(c, msg),
+            // The browser terminal's own reply to a program's query (herdr-core streams only).
+            Some("reply") => {
+                let data = msg
+                    .get("data")
+                    .and_then(Value::as_str)
+                    .filter(|d| js_len(d) <= MAX_REPLY_CHARS);
+                match (&c.session, data) {
+                    (Session::Core(s), Some(data)) if self.can_input(c).is_none() => {
+                        s.reply(data.as_bytes());
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
     }
@@ -516,52 +630,46 @@ impl TerminalHub {
         if let Some(why) = self.can_input(c) {
             return self.reject(c, m.get("id"), why);
         }
-        let pane = c.pane_id.as_str();
-        let text_call = |text: &str| ("pane.send_text", json!({"pane_id": pane, "text": text}));
-        let call = if let Some(text) = m
-            .get("text")
-            .and_then(Value::as_str)
-            .filter(|t| js_len(t) <= MAX_INPUT_CHARS)
-        {
-            Some(text_call(text))
-        } else if let Some(keys) = m.get("keys").and_then(Value::as_array).filter(|k| {
-            k.len() <= 64
-                && k.iter()
-                    .all(|k| k.as_str().is_some_and(|k| valid_key(&k.to_lowercase())))
-        }) {
-            let keys: Vec<String> = keys
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_lowercase)
-                .collect();
-            Some(("pane.send_keys", json!({"pane_id": pane, "keys": keys})))
-        } else if let Some(raw) = m.get("key").and_then(Value::as_str).and_then(raw_key) {
-            Some(text_call(raw))
-        } else if let Some(paste) = m.get("paste").filter(|p| {
-            p.get("text")
-                .and_then(Value::as_str)
-                .is_some_and(|t| js_len(t) <= MAX_INPUT_CHARS)
-        }) {
-            let text = sanitize_paste(paste.get("text").and_then(Value::as_str).unwrap_or(""));
-            // send_input applies the program's live bracketed-paste mode; send_text sends it unwrapped.
-            if paste.get("bracketed").is_some_and(crate::app::js_truthy) {
-                Some(("pane.send_input", json!({"pane_id": pane, "text": text})))
-            } else {
-                Some(text_call(&text))
-            }
-        } else {
-            None
-        };
-        let Some((method, params)) = call else {
+        let Some(input) = parse_input(m) else {
             return self.reject(c, m.get("id"), "invalid");
         };
-        let job = Job {
-            conn: c.clone(),
-            id: m.get("id").cloned(),
-            method,
-            params,
-        };
-        self.enqueue(job);
+        match &c.session {
+            Session::Tui(_) => {
+                let (method, params) = tui_call(&c.pane_id, input);
+                self.enqueue(Job {
+                    conn: c.clone(),
+                    id: m.get("id").cloned(),
+                    method,
+                    params,
+                });
+            }
+            // Written on this connection's own stream, in order: nothing to queue.
+            Session::Core(s) => {
+                self.record_sent(c, "terminal.input");
+                if s.input(&input) {
+                    self.ack(c, m.get("id").cloned());
+                } else {
+                    self.reject(c, m.get("id"), "not_controlling");
+                }
+            }
+        }
+    }
+
+    fn record_sent(&self, c: &Conn, method: &str) {
+        let mut sent = lock(&self.sent);
+        sent.push((c.id.clone(), method.to_string()));
+        if sent.len() > 1000 {
+            sent.drain(..500);
+        }
+    }
+
+    fn ack(&self, c: &Conn, id: Option<Value>) {
+        let mut ok = Map::new();
+        ok.insert("t".into(), json!("input_ok"));
+        if let Some(id) = id {
+            ok.insert("id".into(), id);
+        }
+        c.send_text(Value::Object(ok));
     }
 
     /// Hands the job to the pane's worker, starting one if needed. Enqueueing happens under the
@@ -603,22 +711,16 @@ impl TerminalHub {
                 self.reject(&job.conn, job.id.as_ref(), late);
                 continue;
             }
-            {
-                let mut sent = lock(&self.sent);
-                sent.push((job.conn.id.clone(), job.method.to_string()));
-                if sent.len() > 1000 {
-                    sent.drain(..500);
-                }
-            }
-            match self.herdr.request(job.method, job.params).await {
-                Ok(_) => {
-                    let mut ok = Map::new();
-                    ok.insert("t".into(), json!("input_ok"));
-                    if let Some(id) = job.id {
-                        ok.insert("id".into(), id);
-                    }
-                    job.conn.send_text(Value::Object(ok));
-                }
+            self.record_sent(&job.conn, job.method);
+            let sent = match self.herdr.backend() {
+                Backend::Tui(h) => h.request(job.method, job.params).await,
+                Backend::Core(_) => Err(HerdrError {
+                    code: "not_controlling".to_string(),
+                    message: String::new(),
+                }),
+            };
+            match sent {
+                Ok(_) => self.ack(&job.conn, job.id),
                 Err(e) => {
                     let reason = if e.code.is_empty() {
                         "failed"
@@ -629,6 +731,50 @@ impl TerminalHub {
                 }
             }
         }
+    }
+}
+
+/// One `input` message's text, keys, key or paste, checked; None when it is none of them.
+fn parse_input(m: &Value) -> Option<Input> {
+    let short = |t: &&str| js_len(t) <= MAX_INPUT_CHARS;
+    if let Some(text) = m.get("text").and_then(Value::as_str).filter(short) {
+        return Some(Input::Text(text.to_string()));
+    }
+    if let Some(keys) = m.get("keys").and_then(Value::as_array).filter(|k| {
+        k.len() <= 64
+            && k.iter()
+                .all(|k| k.as_str().is_some_and(|k| valid_key(&k.to_lowercase())))
+    }) {
+        let keys = keys
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_lowercase)
+            .collect();
+        return Some(Input::Keys(keys));
+    }
+    if let Some(raw) = m.get("key").and_then(Value::as_str).and_then(raw_key) {
+        return Some(Input::Raw(raw));
+    }
+    let paste = m.get("paste")?;
+    let text = paste.get("text").and_then(Value::as_str).filter(short)?;
+    Some(Input::Paste {
+        text: sanitize_paste(text),
+        bracketed: paste.get("bracketed").is_some_and(crate::app::js_truthy),
+    })
+}
+
+/// The Herdr TUI call that sends `input` to `pane`.
+fn tui_call(pane: &str, input: Input) -> (&'static str, Value) {
+    match input {
+        Input::Text(text) => ("pane.send_text", json!({"pane_id": pane, "text": text})),
+        Input::Keys(keys) => ("pane.send_keys", json!({"pane_id": pane, "keys": keys})),
+        Input::Raw(raw) => ("pane.send_text", json!({"pane_id": pane, "text": raw})),
+        // send_input applies the program's live bracketed-paste mode; send_text sends it unwrapped.
+        Input::Paste {
+            text,
+            bracketed: true,
+        } => ("pane.send_input", json!({"pane_id": pane, "text": text})),
+        Input::Paste { text, .. } => ("pane.send_text", json!({"pane_id": pane, "text": text})),
     }
 }
 
@@ -653,6 +799,7 @@ mod tests {
             height: 24,
             full: true,
             bytes: vec![0xaa, 0xbb],
+            credit: 0,
         };
         assert_eq!(
             encode_frame(&f),

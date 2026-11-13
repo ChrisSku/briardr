@@ -17,7 +17,7 @@
   import { Empty, openMenu, StateBadge } from '../ui/kit.ts';
   import { peekSheet } from './lazy.svelte.ts';
   import StreamRow from './StreamRow.svelte';
-  import { projectItems, workspaceItems } from './streams.ts';
+  import { projectItems, takesProjects, workspaceItems } from './streams.ts';
   import NewProject from './workspaces/NewProject.svelte';
   import NewStream from './workspaces/NewStream.svelte';
   import NewWorkspace from './workspaces/NewWorkspace.svelte';
@@ -84,7 +84,7 @@
             <span class={['tree-tile', ws.focused && 'brand']} aria-hidden="true"><Icon name="folder" size={20} /></span>
             <span class="tree-label">
               <span class="tree-title">{ws.name}</span>
-              {#if open && ws.cwd}<span class="tree-sub mono">{shortPath(ws.cwd)}</span>{:else}<span class="tree-sub">{projects.length} project{projects.length === 1 ? '' : 's'} · {all.length} stream{all.length === 1 ? '' : 's'}</span>{/if}
+              {#if open && ws.cwd}<span class="tree-sub mono">{ws.machine ? `${ws.machine}: ` : ''}{shortPath(ws.cwd)}</span>{:else}<span class="tree-sub">{ws.machine ? `On ${ws.machine} · ` : ''}{projects.length} project{projects.length === 1 ? '' : 's'} · {all.length} stream{all.length === 1 ? '' : 's'}</span>{/if}
             </span>
           </button>
           <StateBadge state={urgent(all)} filled />
@@ -92,7 +92,7 @@
             class="icon-btn"
             aria-label="Actions for {ws.name}"
             disabled={!live.value}
-            onclick={(e) => openMenu([{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }, ...workspaceItems(ws)], e.currentTarget, ws.name)}
+            onclick={(e) => openMenu([...(takesProjects(ws) ? [{ label: 'New project', onSelect: () => (create = { kind: 'project', ws }) }] : []), ...workspaceItems(ws)], e.currentTarget, ws.name)}
           >
             <Icon name="more" />
           </button>

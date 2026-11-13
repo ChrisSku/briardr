@@ -59,6 +59,27 @@ If Herdr is installed outside PATH, configure its absolute path and restart Bria
 briardr configure --herdr-path /absolute/path/to/herdr
 ```
 
+## Use the Herdr app
+
+Briardr also works with the Herdr desktop app, through herdr-core (`hc`), the runtime it runs on and
+keeps updated. Choose **Herdr app** in Settings → Herdr, or run `briardr configure --herdr-backend core`;
+**Herdr TUI** switches back. The switch takes effect at once, and open terminals close, since they belong
+to the other Herdr. Briardr connects to the core's socket the way `hc` finds it, and never starts a core:
+open the Herdr app, and Briardr connects when its core is up. On a core that doesn't answer, look for a
+macOS privacy prompt for Herdr Core.
+
+With the Herdr app:
+
+- Workspaces and projects are its spaces and tabs. Renaming them, and new ones, change its layout as the
+  app would; a new stream goes beside the tab's last pane. Its terminals have no names, so streams can't
+  be renamed.
+- An agent shows as needing you, working, finished or idle as it reports itself to the app. Opening a
+  finished one in Briardr marks it seen in the app too (and **Mark as not seen** makes it finished again
+  everywhere).
+- The terminal you type in gets your device's size; when you leave, it goes back to the Herdr app's.
+- Terminals on machines the app added (`hc machine ls`) are there too, marked with their machine. Their
+  files aren't on this Mac, so Changes, Docs, Files, Preview and uploads aren't offered for them.
+
 ## Start at login
 
 Stop the foreground Briardr server with Ctrl-C, then:

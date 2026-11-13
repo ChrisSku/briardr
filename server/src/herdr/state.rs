@@ -44,11 +44,12 @@ const MIN_RETRY: Duration = Duration::from_millis(500);
 const MAX_RETRY: Duration = Duration::from_secs(15);
 const RESUBSCRIBE_DELAY: Duration = Duration::from_millis(300);
 const EVENT_DEBOUNCE: Duration = Duration::from_millis(120);
-const EVENT_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HerdrHealth {
+    /// Which Herdr this is: "tui" (Herdr TUI) or "core" (herdr-core, under the Herdr app).
+    pub backend: &'static str,
     pub ok: bool,
     pub problem: Option<String>,
     pub version: Option<String>,
@@ -118,8 +119,11 @@ pub struct HerdrState {
 }
 
 impl HerdrState {
-    pub fn new(target: HerdrTarget, diag: Arc<Diagnostics>) -> Self {
-        let (events, _) = broadcast::channel(EVENT_CAPACITY);
+    pub fn new(
+        target: HerdrTarget,
+        diag: Arc<Diagnostics>,
+        events: broadcast::Sender<HerdrEvent>,
+    ) -> Self {
         HerdrState {
             shared: Arc::new(Shared {
                 inner: Mutex::new(Inner {
@@ -127,6 +131,7 @@ impl HerdrState {
                     socket: None,
                     model: None,
                     health: HerdrHealth {
+                        backend: "tui",
                         ok: false,
                         problem: None,
                         version: None,

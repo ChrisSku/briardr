@@ -28,11 +28,12 @@
 
   let { id, surface, compact }: { id: string; surface: Surface; compact: boolean } = $props();
 
-  const tabs = $derived([{ id: 'terminal', label: 'Terminal', icon: 'terminal' }, ...streamTabs.value]);
+  const stream = $derived(model.value?.streams.find((s) => s.id === id) || null);
+  // Tabs that work in the stream's folder, or its localhost, don't for a terminal on another machine.
+  const tabs = $derived([{ id: 'terminal', label: 'Terminal', icon: 'terminal' }, ...streamTabs.value.filter((t) => !(t.local && stream?.machine))]);
   // A tab whose plugin is off (or a stale link) shows the terminal.
   const shown = $derived(tabs.some((t) => t.id === surface) ? surface : 'terminal');
 
-  const stream = $derived(model.value?.streams.find((s) => s.id === id) || null);
   // A stream that disappears from the model keeps showing as it was last seen.
   let lastKnown: Stream | null = null;
   const s = $derived.by(() => {

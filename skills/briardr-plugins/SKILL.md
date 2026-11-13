@@ -54,6 +54,9 @@ device; you can't see their screen. To try a backend without a device, run it an
   after `id`; don't change `id` once installed (unlink and link again if you must).
 - Tab and section IDs must not clash with other plugins (`files`, `changes`, `preview`, `docs`,
   `notes`, `usage` are taken) or Briardr's routes (`terminal`, `settings`, `agents`, …).
+- `"local": true` on a stream tab: it only works for a stream on this computer (it reads the stream's
+  folder or opens its localhost), so Briardr hides it for a terminal on another machine. A stream there
+  has `machine` set and no `cwd`.
 - `icon`: one of Briardr's icons: agents, bell, bolt, changes, check, clipboard, copy, device, docs,
   editor, file, folder, image, keyboard, link, mic, notes, plug, preview, program, refresh, search,
   settings, terminal, trash, usage, warning, wifi, workspaces. Anything else shows a plug.

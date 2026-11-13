@@ -4,5 +4,5 @@
   "description": "Review uncommitted Git changes against HEAD. Read-only.",
   "briardr": 1,
   "client": "src/index.ts",
-  "contributes": { "streamTabs": [{ "id": "changes", "label": "Changes", "icon": "changes" }] }
+  "contributes": { "streamTabs": [{ "id": "changes", "label": "Changes", "icon": "changes", "local": true }] }
 }

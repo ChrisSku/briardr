@@ -29,8 +29,9 @@ use crate::actions::{from_herdr, ActionError, Actions};
 use crate::auth::{Auth, Device, RateLimiter};
 use crate::config::{preview_origins, save_config, BriardrConfig, Paths};
 use crate::diag::Diagnostics;
+use crate::herdr::backend::Herdr;
 use crate::herdr::rpc::HerdrError;
-use crate::herdr::state::{HerdrEvent, HerdrReader, HerdrState};
+use crate::herdr::state::{HerdrEvent, HerdrReader};
 use crate::net::{forwarded_client, is_allowed_peer, is_trusted_proxy};
 use crate::notes::Notes;
 use crate::platform::{HostCapabilities, HostPlatform};
@@ -122,6 +123,15 @@ pub fn action_err(status: u16, code: &str, message: impl Into<String>) -> ApiErr
 
 pub fn stream_gone() -> ApiError {
     action_err(404, "stream_gone", "That stream no longer exists.")
+}
+
+/// A stream whose terminal runs on another machine (herdr-core): its files aren't on this host.
+fn elsewhere(machine: &str, host: &str) -> ApiError {
+    action_err(
+        409,
+        "on_another_machine",
+        format!("This terminal runs on {machine}, so its files aren’t on {host}."),
+    )
 }
 
 // ---------- responses ----------
@@ -571,7 +581,7 @@ impl ConfigCell {
 pub struct AppDeps {
     pub cfg: Arc<ConfigCell>,
     pub auth: Arc<Auth>,
-    pub herdr: HerdrState,
+    pub herdr: Herdr,
     pub actions: Arc<Actions>,
     pub hub: Arc<TerminalHub>,
     pub diag: Arc<Diagnostics>,
@@ -1432,6 +1442,9 @@ impl App {
             .model()
             .and_then(|m| m.streams.into_iter().find(|s| s.id == id))
             .ok_or_else(stream_gone)?;
+        if let Some(machine) = &s.machine {
+            return Err(elsewhere(machine, &self.host()));
+        }
         if s.cwd.as_deref().is_none_or(str::is_empty) {
             return Err(action_err(
                 409,
@@ -1440,6 +1453,20 @@ impl App {
             ));
         }
         Ok(s)
+    }
+
+    /// A stream this host can hand files to: it exists, and its terminal runs here.
+    pub fn stream_here(&self, id: &str) -> Result<(), ApiError> {
+        let s = self
+            .d
+            .herdr
+            .model()
+            .and_then(|m| m.streams.into_iter().find(|s| s.id == id))
+            .ok_or_else(stream_gone)?;
+        match &s.machine {
+            Some(machine) => Err(elsewhere(machine, &self.host())),
+            None => Ok(()),
+        }
     }
 
     pub fn stream_exists(&self, id: &str) -> bool {

@@ -30,14 +30,6 @@ where
         .map_err(|_| ApiError::Internal)
 }
 
-fn require_stream(app: &App, id: &str) -> Result<(), ApiError> {
-    if app.stream_exists(id) {
-        Ok(())
-    } else {
-        Err(stream_gone())
-    }
-}
-
 /// A body field: a missing key is treated like null.
 fn field(body: &Value, key: &str) -> Value {
     body.get(key).cloned().unwrap_or(Value::Null)
@@ -326,6 +318,17 @@ pub(super) fn register(r: &mut Routes) {
     );
 
     r.add(
+        Method::POST,
+        "/api/streams/:id/seen",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let seen = field(&b, "seen") != json!(false);
+            ok(app.d.actions.mark_seen(ctx.param("id"), seen).await?)
+        },
+    );
+
+    r.add(
         Method::GET,
         "/api/streams/:id/info",
         false,
@@ -591,7 +594,8 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let id = ctx.param("id").to_string();
-            require_stream(&app, &id)?;
+            // The upload lands on this host, where a terminal on another machine can't open it.
+            app.stream_here(&id)?;
             let kind = if ctx.query.get("kind") == Some("image") {
                 UploadKind::Image
             } else {

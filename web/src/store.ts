@@ -76,7 +76,7 @@ export const sidebarCollapsed = persisted<boolean>('briardr.nav.sidebarCollapsed
 /** iPad and Mac: the list beside an open stream is hidden. */
 export const listHidden = persisted<boolean>('briardr.nav.listHidden', false);
 
-/** Local "seen" markers for finished work: streamId -> the state marker that was seen. Never sent to Herdr. */
+/** This device's "seen" markers for finished work: streamId -> the state marker that was seen. Herdr TUI never gets them; the Herdr app's clients share theirs (`markSeen`). */
 export const seen = persisted<Record<string, string>>('briardr.seen', {});
 export function seenKey(s: { terminalId: string; stateChangeSeq: number | null; stateSince: number | null }) {
   return `${s.terminalId}|${s.stateChangeSeq ?? s.stateSince ?? 0}`;

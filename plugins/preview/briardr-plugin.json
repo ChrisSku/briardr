@@ -4,5 +4,5 @@
   "description": "Open the web apps your agents serve on localhost. Tapping a localhost link in the terminal opens it here.",
   "briardr": 1,
   "client": "src/index.ts",
-  "contributes": { "streamTabs": [{ "id": "preview", "label": "Preview", "icon": "preview" }] }
+  "contributes": { "streamTabs": [{ "id": "preview", "label": "Preview", "icon": "preview", "local": true }] }
 }

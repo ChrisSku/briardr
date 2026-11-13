@@ -4,5 +4,5 @@
   "description": "Read the Markdown files in the stream’s folder.",
   "briardr": 1,
   "client": "src/index.ts",
-  "contributes": { "streamTabs": [{ "id": "docs", "label": "Docs", "icon": "docs" }] }
+  "contributes": { "streamTabs": [{ "id": "docs", "label": "Docs", "icon": "docs", "local": true }] }
 }

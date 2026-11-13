@@ -11,6 +11,8 @@ use super::{
     action_err, caps_json, js_number, js_truthy, json_body, lock, now_ms, ok, response, send,
     str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
 };
+use crate::herdr::backend::Target;
+use crate::herdr::core::state::CoreTarget;
 use crate::herdr::rpc::{herdr_status, HerdrTarget};
 use crate::preview::{OpenError, PreviewInfo};
 
@@ -397,7 +399,7 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, _ctx: Ctx| async move {
             let cfg = app.cfg();
-            let st = herdr_status(&HerdrTarget::of(&cfg)).await;
+            let st = Target::of(&cfg).status().await;
             let (wanted, effective) = app
                 .d
                 .tls_mode
@@ -411,8 +413,10 @@ pub(super) fn register(r: &mut Routes) {
                 .unwrap_or_else(|e| e.into_inner())
                 .is_some();
             ok(json!({
+                "herdrBackend": cfg.herdr_backend,
                 "herdrPath": cfg.herdr_path,
                 "herdrSession": cfg.herdr_session,
+                "herdrCoreSocket": CoreTarget::of(&cfg).socket.display().to_string(),
                 "herdr": {"running": st.running, "version": st.version, "problem": st.problem},
                 "notifications": cfg.notifications,
                 "usage": {
@@ -439,7 +443,17 @@ pub(super) fn register(r: &mut Routes) {
             let b = json_body(&mut ctx, JSON_LIMIT).await?;
             let _change = app.d.cfg.lock_changes().await;
             let mut cfg = app.cfg();
-            let mut retarget = None;
+            let before = Target::of(&cfg);
+            if let Some(raw) = b.get("herdrBackend").and_then(Value::as_str) {
+                if !matches!(raw, "tui" | "core") {
+                    return Err(action_err(
+                        400,
+                        "invalid_backend",
+                        "Choose Herdr TUI or herdr-core.",
+                    ));
+                }
+                cfg.herdr_backend = raw.to_string();
+            }
             if let Some(raw) = b.get("herdrPath").and_then(Value::as_str) {
                 let path = raw.trim().to_string();
                 if !Path::new(&path).is_absolute() {
@@ -458,7 +472,6 @@ pub(super) fn register(r: &mut Routes) {
                     return Err(action_err(400, "not_found", "No executable at that path."));
                 }
                 cfg.herdr_path = path;
-                retarget = Some(target);
             }
             if let Some(n) = b.get("notifications").filter(|v| v.is_object()) {
                 if bool_field(n, "lowBattery") == Some(true) && !app.d.caps.battery {
@@ -495,10 +508,13 @@ pub(super) fn register(r: &mut Routes) {
             if let Some(v) = b.get("updates").and_then(|u| bool_field(u, "check")) {
                 cfg.updates.check = v;
             }
+            let after = Target::of(&cfg);
             let cell = app.d.cfg.clone();
             blocking(move || cell.set(cfg)).await??;
-            if let Some(target) = retarget {
-                app.d.herdr.retarget(target).await;
+            if after != before {
+                app.d.herdr.retarget(after).await;
+                // Open streams are the other Herdr's: their screens are told they're gone.
+                app.d.hub.close_all();
             }
             ok(json!({"ok": true}))
         },
