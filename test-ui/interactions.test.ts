@@ -191,11 +191,18 @@ async function swipe(page: Page, x: number, y0: number, rows: number): Promise<s
 }
 
 /** Taps the terminal as iOS delivers a tap: the finger's pointer events, then a mousedown, which moves
- *  the focus unless it's cancelled. Returns whether it was. */
+ *  the focus unless it's cancelled. Returns whether it was. The tap misses links (a tap opens one), so
+ *  what earlier tests left on the screen doesn't matter. */
 async function tapTerminal(page: Page): Promise<boolean> {
   const screen = page.locator('.term-screen .xterm-screen'); // xterm's own element, where a tap lands
-  const b = (await screen.boundingBox())!;
-  const at = { pointerId: 4, clientX: b.x + 60, clientY: b.y + 10, pointerType: 'touch', isPrimary: true };
+  const at = await screen.evaluate((el) => {
+    const ctl = (el.closest('.term-host') as any).briardrTerminal;
+    const r = el.getBoundingClientRect();
+    const { w, h } = ctl.cell();
+    let row = 0;
+    while (row < ctl.term.rows - 1 && ctl.linkAt(2, row)) row++;
+    return { pointerId: 4, clientX: r.x + 2.5 * w, clientY: r.y + (row + 0.5) * h, pointerType: 'touch', isPrimary: true };
+  });
   await screen.dispatchEvent('pointerdown', at);
   await screen.dispatchEvent('pointerup', at);
   return screen.evaluate((el, { clientX, clientY }) => !el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY })), at);
