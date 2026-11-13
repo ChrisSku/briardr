@@ -28,6 +28,11 @@ On iPhone and iPad, Web Push requires the Home Screen app. Use a current OS vers
 Home Screen Web Push (iOS/iPadOS 16.4 or later). Browser automation covers layouts and interactions;
 it does not establish real push delivery on a physical device.
 
+On a touch screen, the keyboard key in the key bar opens and closes the on-screen keyboard. A tap on
+the terminal opens a link or does nothing, and a swipe scrolls, so you can scroll back while the
+keyboard is up. Where a hardware keyboard hides the key bar (on an iPad), a tap puts the focus in the
+terminal.
+
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for

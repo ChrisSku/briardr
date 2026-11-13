@@ -174,6 +174,35 @@ async function aboveKeyboard(page: Page, height: number, els: Record<string, Loc
   }
 }
 
+/** Swipes a finger down the terminal from (x, y0) across `rows` row boundaries; returns the wheel events
+ *  the program got. */
+async function swipe(page: Page, x: number, y0: number, rows: number): Promise<string[]> {
+  const host = page.locator('.term-host');
+  const cellH = await page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.cell().h);
+  const at = (y: number) => ({ pointerId: 3, clientX: x, clientY: y, pointerType: 'touch', isPrimary: true });
+  const before = (await bytesSeen()).join('');
+  await host.dispatchEvent('pointerdown', at(y0));
+  const total = (rows + 0.5) * cellH; // cross exactly `rows` row boundaries
+  for (let i = 1; i <= 10; i++) await host.dispatchEvent('pointermove', at(y0 + (i * total) / 10));
+  await host.dispatchEvent('pointerup', at(y0 + total));
+  await sleep(600);
+  const added = (await bytesSeen()).join('').slice(before.length);
+  return Buffer.from(added, 'hex').toString('latin1').match(/\x1b\[<64;(\d+);(\d+)M/g) || [];
+}
+
+/** Taps the terminal as iOS delivers a tap: the finger's pointer events, then a mousedown, which moves
+ *  the focus unless it's cancelled. Returns whether it was. */
+async function tapTerminal(page: Page): Promise<boolean> {
+  const screen = page.locator('.term-screen .xterm-screen'); // xterm's own element, where a tap lands
+  const b = (await screen.boundingBox())!;
+  const at = { pointerId: 4, clientX: b.x + 60, clientY: b.y + 10, pointerType: 'touch', isPrimary: true };
+  await screen.dispatchEvent('pointerdown', at);
+  await screen.dispatchEvent('pointerup', at);
+  return screen.evaluate((el, { clientX, clientY }) => !el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX, clientY })), at);
+}
+
+const typingInTerminal = (page: Page) => page.evaluate(() => !!document.activeElement?.classList.contains('xterm-helper-textarea'));
+
 describe('terminal input (iPhone)', () => {
   let page: Page;
   let ctx: BrowserContext;
@@ -184,6 +213,8 @@ describe('terminal input (iPhone)', () => {
   afterAll(async () => {
     await ctx.close();
   });
+  // On a phone, the key bar's keyboard key is the way to type in the terminal.
+  const openKeyboard = () => page.getByRole('button', { name: 'Show keyboard' }).click();
   // Each test gets its own echo program, so no test depends on what an earlier one typed.
   beforeEach(() => startEcho());
   // These tests share one page: close anything a test (or its failure) left open, so it can't block
@@ -199,7 +230,7 @@ describe('terminal input (iPhone)', () => {
   });
 
   test('typing goes to the program; the bar’s Enter is a carriage return', async () => {
-    await page.locator('.term-host').click();
+    await openKeyboard();
     await page.keyboard.type('hi');
     await expectBytes(hex('h'));
     await expectBytes(hex('i'));
@@ -209,7 +240,7 @@ describe('terminal input (iPhone)', () => {
 
   test('a tapped Control modifier applies to the next key only', async () => {
     await page.getByRole('button', { name: 'Control', exact: true }).click();
-    await page.locator('.term-host').click();
+    await openKeyboard();
     await page.keyboard.type('c');
     await expectBytes('03'); // ctrl+c
     await page.keyboard.type('c');
@@ -221,7 +252,7 @@ describe('terminal input (iPhone)', () => {
     await stopEcho();
     await startEcho('--kitty');
     await page.getByRole('button', { name: 'Command', exact: true }).click();
-    await page.locator('.term-host').click();
+    await openKeyboard();
     await page.keyboard.type('a');
     await expectBytes(hex('\x1b[97;9u')); // kitty protocol: a, modifiers 1 + super(8)
     await page.getByRole('button', { name: 'Command', exact: true }).click();
@@ -369,7 +400,7 @@ describe('terminal input (iPhone)', () => {
     await ctrl.click();
     await ctrl.click(); // double tap → locked
     assert.equal(await ctrl.getAttribute('aria-label'), 'Control, locked');
-    await page.locator('.term-host').click();
+    await openKeyboard();
     await page.keyboard.type('a');
     await page.keyboard.type('b');
     await expectBytes('0102'); // ctrl+a, ctrl+b: still locked
@@ -403,7 +434,7 @@ describe('terminal input (iPhone)', () => {
   });
 
   test('a tap between the bar’s keys, on its edge or on the arrow pad leaves focus in the terminal (the keyboard stays up)', async () => {
-    await page.locator('.term-host').click();
+    await openKeyboard();
     const typing = () => page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea'));
     assert.ok(await typing(), 'the terminal has focus');
     const [a, b] = [(await page.locator('.keys-top .key').nth(0).boundingBox())!, (await page.locator('.keys-top .key').nth(1).boundingBox())!];
@@ -510,22 +541,37 @@ describe('terminal input (iPhone)', () => {
   });
 
   test('a vertical swipe sends one wheel event per row crossed, anchored at the start cell', async () => {
-    const host = page.locator('.term-host');
-    const box = (await host.boundingBox())!;
-    const cellH = await page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.cell().h);
-    const x = box.x + 60;
-    const y0 = box.y + 200;
-    const rows = 5;
-    const before = (await bytesSeen()).join('');
-    await host.dispatchEvent('pointerdown', { pointerId: 3, clientX: x, clientY: y0, pointerType: 'touch', isPrimary: true });
-    const total = (rows + 0.5) * cellH; // cross exactly `rows` row boundaries
-    for (let i = 1; i <= 10; i++) await host.dispatchEvent('pointermove', { pointerId: 3, clientX: x, clientY: y0 + (i * total) / 10, pointerType: 'touch', isPrimary: true });
-    await host.dispatchEvent('pointerup', { pointerId: 3, clientX: x, clientY: y0 + total, pointerType: 'touch', isPrimary: true });
-    await sleep(600);
-    const added = (await bytesSeen()).join('').slice(before.length);
-    const wheel = Buffer.from(added, 'hex').toString('latin1').match(/\x1b\[<64;(\d+);(\d+)M/g) || [];
-    assert.equal(wheel.length, rows, `one wheel-up per row crossed (${wheel.length})`);
+    const box = (await page.locator('.term-host').boundingBox())!;
+    const wheel = await swipe(page, box.x + 60, box.y + 200, 5);
+    assert.equal(wheel.length, 5, `one wheel-up per row crossed (${wheel.length})`);
     assert.equal(new Set(wheel).size, 1, 'all anchored at the cell where the gesture started');
+  });
+
+  test('only the keyboard key opens and closes the on-screen keyboard: a tap or a swipe on the terminal leaves it as it is', async () => {
+    const typing = () => typingInTerminal(page);
+    const tap = () => tapTerminal(page);
+    const rows = () => page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.rows as number);
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    assert.ok(await tap(), 'a tap’s mousedown would move the focus');
+    assert.ok(!(await typing()), 'a tap on the terminal opened the keyboard');
+    const full = await rows();
+    await page.getByRole('button', { name: 'Show keyboard' }).click();
+    assert.ok(await typing(), 'the keyboard key didn’t put the focus in the terminal');
+    await showKeyboard(page, 300);
+    try {
+      await waitUntil('the pane to take the rows above the keyboard', async () => (await rows()) < full);
+      assert.ok(await tap(), 'a tap’s mousedown would take the focus from the terminal');
+      assert.ok(await typing(), 'a tap on the terminal closed the keyboard');
+      const box = (await page.locator('.term-host').boundingBox())!;
+      const wheel = await swipe(page, box.x + 60, box.y + 10, 2);
+      assert.equal(wheel.length, 2, `a swipe with the keyboard up scrolls (${wheel.length} wheel events)`);
+      assert.ok(await typing(), 'a swipe closed the keyboard');
+      await page.getByRole('button', { name: 'Hide keyboard' }).click();
+      assert.ok(!(await typing()), 'the keyboard key didn’t take the focus from the terminal');
+    } finally {
+      await showKeyboard(page, 0);
+      await waitUntil('the pane to take its full size back', async () => (await rows()) === full);
+    }
   });
 
   test('a trackpad wheel over the terminal scrolls one row per row crossed and never sends arrow keys', async () => {
@@ -1210,6 +1256,11 @@ describe('the on-screen keyboard (iPad)', () => {
       // emulation reports one touch point, so it starts this way too).
       await page.keyboard.type('a');
       await bar.waitFor({ state: 'detached' });
+      // With the bar and its keyboard key gone, a tap puts the focus in the terminal: no on-screen
+      // keyboard shows while a hardware one is in use.
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await tapTerminal(page);
+      assert.ok(await typingInTerminal(page), 'a tap with a hardware keyboard didn’t put the focus in the terminal');
       await showKeyboard(page, 300);
       await bar.waitFor();
     } finally {
