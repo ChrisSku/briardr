@@ -59,7 +59,9 @@ jobs:
           curl -fsSL "https://releases.herdr.dev/core/$HERDR_CORE_VERSION/herdr-core-linux-x86_64.tar.gz" -o hc.tar.gz
           echo "$HERDR_CORE_SHA256_LINUX_X86_64  hc.tar.gz" | sha256sum -c -
           mkdir hc && tar -xzf hc.tar.gz -C hc
-          install -D -m 0755 hc/herdr-core "$HOME/.local/bin/hc"
+          # As its installer lays it out: another machine is reached through `herdr-core connect`.
+          install -D -m 0755 hc/herdr-core "$HOME/.local/bin/herdr-core"
+          ln -s herdr-core "$HOME/.local/bin/hc"
           hc --version
 
       - run: mise run check
