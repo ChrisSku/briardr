@@ -5,6 +5,17 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.20
+
+- **Briardr works with the Herdr desktop app too, through its herdr-core.** Choose **Herdr app** in
+  Settings → Herdr (or `briardr configure --herdr-backend core`); **Herdr TUI** stays the default and
+  switches back. With the Herdr app you watch, peek and type in its terminals, and Briardr encodes your
+  keys, pastes and clicks the way the app's own terminal does. You rename, create and close its spaces and
+  tabs as workspaces and projects. Opening a finished agent marks it seen in the app too, and terminals
+  on machines the app added show up without their file tools. Briardr never starts a herdr-core: open the
+  Herdr app first. Plugin stream tabs can say `"local": true` to hide themselves for terminals on another
+  machine. ([#31](https://github.com/ChrisSku/briardr/pull/31))
+
 ## 0.3.19
 
 - **The key bar comes back on an iPad when the on-screen keyboard opens.** A key press with no on-screen keyboard up counts as a hardware keyboard and hides the bar; opening the on-screen keyboard now shows it again. ([#30](https://github.com/ChrisSku/briardr/pull/30))
