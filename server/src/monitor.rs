@@ -69,10 +69,20 @@ type SendFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 /// Where alerts go: Web Push in production, a recorder in tests.
 pub trait AlertSink: Send + Sync {
+    /// Whether an alert of this kind should be made at all. `host` is the host's own setting; a sink
+    /// that knows its devices says yes when one of them chose to get the kind anyway.
+    fn wanted(&self, _kind: &str, host: bool) -> bool {
+        host
+    }
+
     fn send(&self, payload: AlertPayload, ttl_secs: u32) -> SendFuture<'_>;
 }
 
 impl AlertSink for Push {
+    fn wanted(&self, kind: &str, _host: bool) -> bool {
+        Push::wanted(self, kind)
+    }
+
     fn send(&self, payload: AlertPayload, ttl_secs: u32) -> SendFuture<'_> {
         Box::pin(async move {
             Push::send_counted(
@@ -311,11 +321,12 @@ impl Monitor {
         let (Some(kind), Some(to)) = (alert_kind_for(t.from, t.to, t.kind), t.to) else {
             return;
         };
-        let enabled = match kind {
+        let host = match kind {
             AlertKind::NeedsYou => cfg.needs_you,
             AlertKind::Finished => cfg.finished,
             AlertKind::Ready => cfg.ready,
         };
+        let enabled = self.inner.sink.wanted(kind.as_str(), host);
         let key = alert_key(&t.terminal_id, to, t.state_change_seq);
         if !enabled {
             st.log.push((key, "disabled"));

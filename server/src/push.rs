@@ -49,7 +49,79 @@ pub struct PushSub {
     pub endpoint: String,
     pub keys: PushKeys,
     pub created_at: u64,
+    /// What this device chose for its alerts; left out of the file while it chose nothing.
+    #[serde(default, skip_serializing_if = "DevicePrefs::is_unset")]
+    pub prefs: DevicePrefs,
 }
+
+/// A device's own choices for its alerts, kept with its subscription. A kind it didn't choose follows
+/// the host's setting (`notifications` in the configuration).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DevicePrefs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needs_you: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub low_battery: Option<bool>,
+    /// Hours of the day when the device gets no alerts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<QuietHours>,
+}
+
+/// A span of the device's day, in minutes after its midnight; `from` after `to` runs over midnight.
+/// The host knows the device's clock by the offset the device last reported, so a change to or from
+/// summer time shifts the span by an hour until the device opens Briardr again.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuietHours {
+    pub from: u16,
+    pub to: u16,
+    /// Minutes the device's clock is ahead of UTC.
+    pub utc_offset: i32,
+}
+
+impl QuietHours {
+    pub fn covers(&self, now_ms: u64) -> bool {
+        let minute = ((now_ms / 60_000) as i64 + i64::from(self.utc_offset)).rem_euclid(1440);
+        let (from, to) = (i64::from(self.from), i64::from(self.to));
+        if from <= to {
+            (from..to).contains(&minute)
+        } else {
+            minute >= from || minute < to
+        }
+    }
+}
+
+impl DevicePrefs {
+    fn is_unset(&self) -> bool {
+        *self == DevicePrefs::default()
+    }
+
+    /// The device's own choice for a kind of alert ("needs_you", "finished", "ready", "battery"), if
+    /// it made one.
+    pub fn choice(&self, kind: &str) -> Option<bool> {
+        match kind {
+            "needs_you" => self.needs_you,
+            "finished" => self.finished,
+            "ready" => self.ready,
+            "battery" => self.low_battery,
+            _ => None,
+        }
+    }
+
+    /// Whether the device gets an alert of this kind now: its own choice, else the host's setting
+    /// (`host`), and nothing in its quiet hours.
+    pub fn takes(&self, kind: &str, host: bool, now_ms: u64) -> bool {
+        self.choice(kind).unwrap_or(host) && !self.quiet.is_some_and(|q| q.covers(now_ms))
+    }
+}
+
+/// The host's own setting for a kind of alert, which devices follow unless they chose otherwise.
+pub type HostSetting = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PushKeys {
@@ -140,6 +212,7 @@ pub struct Push {
     diag: Arc<Diagnostics>,
     inner: Arc<Inner>,
     sender: Mutex<Sender>,
+    host: Mutex<HostSetting>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -177,7 +250,46 @@ impl Push {
                 save_lock: Mutex::new(()),
             }),
             sender: Mutex::new(default_sender(client)),
+            host: Mutex::new(Arc::new(|_| true)),
         })
+    }
+
+    /// Where the host's own alert settings are read from (until set, every kind is on).
+    pub fn set_host_setting(&self, host: HostSetting) {
+        *lock(&self.host) = host;
+    }
+
+    /// Whether an alert of this kind is worth making: the host has it on, or a device chose to get it
+    /// anyway. Which devices it reaches, quiet hours included, is decided when it is sent.
+    pub fn wanted(&self, kind: &str) -> bool {
+        let host = lock(&self.host).clone();
+        host(kind)
+            || lock(&self.inner.state)
+                .subs
+                .iter()
+                .any(|s| s.prefs.choice(kind) == Some(true))
+    }
+
+    /// What this device chose for its alerts; None when it isn't subscribed.
+    pub fn prefs(&self, device_id: &str) -> Option<DevicePrefs> {
+        lock(&self.inner.state)
+            .subs
+            .iter()
+            .find(|s| s.device_id == device_id)
+            .map(|s| s.prefs.clone())
+    }
+
+    /// Saves a device's choices. `Ok(false)` when it isn't subscribed: there is nothing to choose for.
+    pub fn set_prefs(&self, device_id: &str, prefs: DevicePrefs) -> Result<bool, PushError> {
+        {
+            let mut st = lock(&self.inner.state);
+            let Some(sub) = st.subs.iter_mut().find(|s| s.device_id == device_id) else {
+                return Ok(false);
+            };
+            sub.prefs = prefs;
+        }
+        persist(&self.inner)?;
+        Ok(true)
     }
 
     pub fn public_key(&self) -> String {
@@ -210,6 +322,13 @@ impl Push {
         }
         {
             let mut st = lock(&self.inner.state);
+            // A device that subscribes again (a repair, a new endpoint) keeps what it chose.
+            let prefs = st
+                .subs
+                .iter()
+                .find(|s| s.device_id == device_id)
+                .map(|s| s.prefs.clone())
+                .unwrap_or_default();
             st.subs
                 .retain(|s| s.endpoint != endpoint && s.device_id != device_id);
             st.subs.push(PushSub {
@@ -220,6 +339,7 @@ impl Push {
                     auth: auth.to_string(),
                 },
                 created_at: now_ms(),
+                prefs,
             });
         }
         persist(&self.inner)?;
@@ -254,8 +374,9 @@ impl Push {
             .map(|s| s.endpoint.clone())
     }
 
-    /// Send to every subscribed device (or one device). Resolves with one delivery record per
-    /// device, in subscription order.
+    /// Send to every subscribed device that takes this kind of alert now (`DevicePrefs::takes`), or to
+    /// one device whatever it chose (a test). Resolves with one delivery record per device, in
+    /// subscription order.
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
@@ -295,12 +416,17 @@ impl Push {
     ) -> Vec<DeliveryRecord> {
         let only_device = only_device.filter(|d| !d.is_empty());
         let sender = lock(&self.sender).clone();
+        let host = lock(&self.host).clone()(kind);
+        let now = now_ms();
         let (targets, subject) = {
             let st = lock(&self.inner.state);
             let targets: Vec<PushSub> = st
                 .subs
                 .iter()
-                .filter(|s| only_device.is_none_or(|d| s.device_id == d))
+                .filter(|s| match only_device {
+                    Some(d) => s.device_id == d,
+                    None => s.prefs.takes(kind, host, now),
+                })
                 .cloned()
                 .collect();
             (targets, st.subject.clone())
@@ -813,6 +939,111 @@ mod tests {
         assert_eq!(seen[0].1.ttl, DEFAULT_TTL_SECS);
     }
 
+    #[test]
+    fn quiet_hours_follow_the_device_clock_and_run_over_midnight() {
+        // 22:00 to 07:00 on a device two hours ahead of UTC.
+        let night = QuietHours {
+            from: 22 * 60,
+            to: 7 * 60,
+            utc_offset: 120,
+        };
+        let at = |h: u64, m: u64| (h * 60 + m) * 60_000; // UTC, on day 0
+        assert!(night.covers(at(20, 0)), "22:00 there");
+        assert!(night.covers(at(23, 30)), "01:30 there");
+        assert!(night.covers(at(4, 59)), "06:59 there");
+        assert!(!night.covers(at(5, 0)), "07:00 there");
+        assert!(!night.covers(at(19, 59)), "21:59 there");
+        // A span within one day, on a device behind UTC; an empty span covers nothing.
+        let nap = QuietHours {
+            from: 13 * 60,
+            to: 14 * 60,
+            utc_offset: -300,
+        };
+        assert!(nap.covers(at(18, 30)) && !nap.covers(at(19, 0)) && !nap.covers(at(13, 30)));
+        let none = QuietHours {
+            from: 600,
+            to: 600,
+            utc_offset: 0,
+        };
+        assert!(!none.covers(at(10, 0)));
+    }
+
+    #[tokio::test]
+    async fn each_device_gets_the_alerts_it_chose_and_none_in_its_quiet_hours() {
+        let dir = Scratch::new("push-prefs");
+        let push = new_push(&dir);
+        let (_, p256dh, auth) = receiver_keys();
+        for dev in ["follows", "muted", "eager", "asleep"] {
+            push.subscribe(dev, &format!("https://push.test/{dev}"), &p256dh, &auth)
+                .expect("subscribe");
+        }
+        // The host sends "finished" and not "ready".
+        push.set_host_setting(Arc::new(|kind| kind != "ready"));
+        push.set_sender(fake_sender(Ok(201)).0);
+        let set =
+            |dev: &str, prefs: DevicePrefs| assert!(push.set_prefs(dev, prefs).expect("save"));
+        set(
+            "muted",
+            DevicePrefs {
+                finished: Some(false),
+                ..Default::default()
+            },
+        );
+        set(
+            "eager",
+            DevicePrefs {
+                ready: Some(true),
+                ..Default::default()
+            },
+        );
+        // Quiet all day but for a minute, wherever the clock is.
+        let minute = ((now_ms() / 60_000) % 1440) as u16;
+        set(
+            "asleep",
+            DevicePrefs {
+                quiet: Some(QuietHours {
+                    from: (minute + 720) % 1440,
+                    to: (minute + 719) % 1440,
+                    utc_offset: 0,
+                }),
+                ..Default::default()
+            },
+        );
+        assert!(!push
+            .set_prefs("unknown", DevicePrefs::default())
+            .expect("save"));
+
+        let devices = |records: Vec<DeliveryRecord>| -> Vec<String> {
+            records.into_iter().map(|r| r.device_id).collect()
+        };
+        let finished = push.send("finished", "t", "b", None, "x", None, 60).await;
+        assert_eq!(devices(finished), ["follows", "eager"]);
+        let ready = push.send("ready", "t", "b", None, "x", None, 60).await;
+        assert_eq!(devices(ready), ["eager"]);
+        assert!(push.wanted("ready"), "one device chose it");
+        assert!(push.wanted("finished"));
+        // A test goes to the device that asked, whatever it chose.
+        let test = push
+            .send("test", "t", "b", None, "x", Some("asleep"), 60)
+            .await;
+        assert_eq!(devices(test), ["asleep"]);
+
+        // The choices are saved with the subscription and survive subscribing again and a restart.
+        push.subscribe("eager", "https://push.test/eager-2", &p256dh, &auth)
+            .expect("subscribe again");
+        assert_eq!(push.prefs("eager").and_then(|p| p.ready), Some(true));
+        let again = new_push(&dir);
+        assert_eq!(again.prefs("muted").and_then(|p| p.finished), Some(false));
+        assert_eq!(again.prefs("follows"), Some(DevicePrefs::default()));
+        assert_eq!(again.prefs("unknown"), None);
+        let saved = fs::read_to_string(dir.join("subs.json")).expect("subs file");
+        assert_eq!(
+            saved.matches("\"prefs\"").count(),
+            3,
+            "only devices that chose something"
+        );
+    }
+
     #[tokio::test]
     async fn refused_push_is_not_sent_and_expired_subscription_is_removed() {
         let dir = Scratch::new("push-gone");
@@ -1225,6 +1456,7 @@ mod tests {
             endpoint,
             keys: PushKeys { p256dh, auth },
             created_at: 0,
+            prefs: DevicePrefs::default(),
         };
         let client = http::client(SEND_TIMEOUT).expect("client");
         let public = b64(&[4u8; 65]);
@@ -1271,6 +1503,7 @@ mod tests {
                 auth: auth.clone(),
             },
             created_at: 0,
+            prefs: DevicePrefs::default(),
         };
         let client = http::client(SEND_TIMEOUT).expect("client");
         let opts = SendOpts {

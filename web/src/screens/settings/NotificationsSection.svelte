@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { api, ApiError } from '../../api.ts';
   import { standalone } from '../../install.ts';
-  import { checkPush, disablePush, enablePush, pushStatus, type PushProblem } from '../../push.ts';
+  import { alertPrefs, checkPush, disablePush, enablePush, pushStatus, setAlertPrefs, type AlertKind, type PushProblem } from '../../push.ts';
   import { navigate } from '../../router.ts';
   import { toast } from '../../store.ts';
   import { Icon } from '../../ui/icons/index.ts';
@@ -63,13 +63,27 @@
     }
   }
 
-  const SWITCHES = [
+  // Which alerts this device gets is its own choice, kept on the host with its subscription; a kind it
+  // never chose follows the host's setting (`notifications` in the configuration).
+  const KINDS: [AlertKind, string, string][] = [
     ['needsYou', 'Needs you', 'Blocked on an approval or a question'],
     ['finished', 'Finished', 'Work completed'],
     ['ready', 'Ready for input', 'An agent became idle without finishing new work'],
     ['lowBattery', 'Mac low battery', 'At 20%, and at 10% when Always on lets the Mac sleep'],
-    ['includeNames', 'Include names', 'Workspace and stream names in alerts'],
-  ] as const;
+  ];
+  const prefs = $derived(alertPrefs.value);
+  const choosing = $derived(st.state === 'on' && prefs !== null);
+  async function choose(patch: Parameters<typeof setAlertPrefs>[0]) {
+    try {
+      await setAlertPrefs(patch);
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Couldn’t save.');
+    }
+  }
+  const clock = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  const minutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+  /** Quiet hours as first turned on: the night. */
+  const NIGHT = { from: 22 * 60, to: 7 * 60 };
 </script>
 
 <Section id="notifications" title="Notifications">
@@ -115,16 +129,53 @@
   <p class="hint">Alerts come from {theHost()} even while Briardr is closed. They travel through your browser’s push service (Apple’s, on iPhone and iPad), encrypted end to end so the service can’t read them. They never contain terminal text.</p>
   {#if s}
     {@const n = s.notifications}
-    <div class="switches">
-      {#each SWITCHES.filter(([k]) => k !== 'lowBattery' || caps().battery) as [k, label, hint]}
+    <section class="alert-group" aria-labelledby="alerts-device-h">
+      <h3 class="section-head"><span class="overline" id="alerts-device-h">This device</span></h3>
+      {#if !choosing}<p class="hint">Allow notifications on this device to choose which alerts it gets.</p>{/if}
+      <div class="switches">
+        {#each KINDS.filter(([k]) => k !== 'lowBattery' || caps().battery) as [k, label, hint]}
+          <label class="switch-row">
+            <input type="checkbox" role="switch" disabled={!choosing} checked={prefs?.[k] ?? n[k]} onchange={(e) => choose({ [k]: e.currentTarget.checked })} />
+            <span>
+              {label}
+              <small>{hint}</small>
+            </span>
+          </label>
+        {/each}
         <label class="switch-row">
-          <input type="checkbox" role="switch" checked={n[k]} onchange={(e) => save({ notifications: { [k]: e.currentTarget.checked } })} />
+          <input type="checkbox" role="switch" disabled={!choosing} checked={!!prefs?.quiet} onchange={(e) => choose({ quiet: e.currentTarget.checked ? NIGHT : null })} />
           <span>
-            {label}
-            <small>{hint}</small>
+            Quiet hours
+            <small>No alerts on this device between two times of its day</small>
           </span>
         </label>
-      {/each}
-    </div>
+        {#if prefs?.quiet}
+          {@const q = prefs.quiet}
+          <div class="quiet-times">
+            <label>From <input type="time" class="field" value={clock(q.from)} onchange={(e) => e.currentTarget.value && choose({ quiet: { from: minutes(e.currentTarget.value), to: q.to } })} /></label>
+            <label>To <input type="time" class="field" value={clock(q.to)} onchange={(e) => e.currentTarget.value && choose({ quiet: { from: q.from, to: minutes(e.currentTarget.value) } })} /></label>
+          </div>
+        {/if}
+      </div>
+    </section>
+    <section class="alert-group" aria-labelledby="alerts-all-h">
+      <h3 class="section-head"><span class="overline" id="alerts-all-h">Every device</span></h3>
+      <div class="switches">
+        <label class="switch-row">
+          <input type="checkbox" role="switch" checked={n.includeNames} onchange={(e) => save({ notifications: { includeNames: e.currentTarget.checked } })} />
+          <span>
+            Include names
+            <small>Workspace and stream names in alerts</small>
+          </span>
+        </label>
+      </div>
+    </section>
   {/if}
 </Section>
+
+<style>
+  .alert-group { margin-top: 14px; }
+  .alert-group > .hint { margin: 4px 4px 0; }
+  .quiet-times { display: flex; gap: 12px; padding: 4px 0 12px; }
+  .quiet-times label { flex: 1; display: flex; flex-direction: column; gap: 6px; font: var(--type-footnote-strong); color: var(--text-secondary); }
+</style>

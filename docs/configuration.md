@@ -44,7 +44,7 @@ devices are kept. A failed save leaves the running configuration unchanged.
 | `trustedProxies` | Proxy-mode peers whose forwarded client address is accepted. Default: loopback. |
 | `publicPreviewOrigin` | Proxy-mode preview origin pattern, such as `https://p{n}.briardr.example.com`; absent/empty disables proxy previews. |
 | `previewPortStart`, `previewPortCount` | Preview listener range; defaults to 7444 and 16 slots. |
-| `notifications` | Alert categories, names in alerts, and debounce behavior. |
+| `notifications` | Alert categories (what a device gets until it chooses for itself in Settings → Notifications), names in alerts, and debounce behavior. |
 | `usage` | Optional provider usage sources. |
 | `power` | macOS keep-awake settings. |
 | `updates.check` | Ask GitHub once a day whether a newer release is out; default `true`. Settings → About shows it and its switch. |

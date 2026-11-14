@@ -33,4 +33,26 @@ describe('notification endpoints', () => {
     const q = await request(s, 'GET', `/api/notifications/deliveries/${t.json.delivery.id}`);
     assert.ok(q.json.delivery.deliveredAt);
   });
+
+  test('a device chooses its own alerts and quiet hours; the host’s settings stay as they are', async () => {
+    const device = s.run.auth.pair(s.run.auth.createPairingCode().code, 'other device');
+    assert.ok(device.ok);
+    const other = { cookie: `__Host-briardr=${device.cookie}` };
+    const choose = (body: unknown, o = {}) => request(s, 'PUT', '/api/notifications/device', body, o);
+    const prefs = async (o = {}) => (await request(s, 'GET', '/api/notifications', undefined, o)).json.prefs;
+    assert.equal((await choose({ finished: false }, other)).status, 409, 'a device without alerts has nothing to choose');
+    assert.equal(await prefs(other), null);
+    // The first test subscribed this suite's own device.
+    assert.deepEqual(await prefs(), {});
+    const before = (await request(s, 'GET', '/api/settings')).json.notifications;
+
+    assert.deepEqual((await choose({ finished: false, ready: true })).json.prefs, { finished: false, ready: true });
+    assert.deepEqual((await choose({ quiet: { from: 1320, to: 420, utcOffset: 120 } })).json.prefs, { finished: false, ready: true, quiet: { from: 1320, to: 420, utcOffset: 120 } });
+    // null goes back to the host's setting; fields left out stay.
+    assert.deepEqual((await choose({ finished: null })).json.prefs, { ready: true, quiet: { from: 1320, to: 420, utcOffset: 120 } });
+    for (const bad of [{ finished: 'yes' }, { quiet: { from: 1440, to: 0, utcOffset: 0 } }, { quiet: { from: 0, to: 60 } }, { quiet: { from: 0, to: 60, utcOffset: 900 } }]) assert.equal((await choose(bad)).status, 400, JSON.stringify(bad));
+    assert.deepEqual(await prefs(), { ready: true, quiet: { from: 1320, to: 420, utcOffset: 120 } }, 'a refused change changes nothing');
+    assert.deepEqual((await request(s, 'GET', '/api/settings')).json.notifications, before, 'the host’s own settings are untouched');
+    assert.deepEqual((await choose({ ready: null, quiet: null })).json.prefs, {});
+  });
 });

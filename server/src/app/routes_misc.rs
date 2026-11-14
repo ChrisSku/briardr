@@ -244,7 +244,76 @@ pub(super) fn register(r: &mut Routes) {
                 "subscribed": app.d.push.has_device(&device),
                 "endpoint": app.d.push.device_endpoint(&device),
                 "settings": app.cfg().notifications,
+                "prefs": app.d.push.prefs(&device),
             }))
+        },
+    );
+
+    // What this device wants of its alerts: a kind set to true or false is its own choice, null goes
+    // back to the host's setting; `quiet` is its quiet hours or null. Fields left out stay as they are.
+    r.add(
+        Method::PUT,
+        "/api/notifications/device",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let device = ctx.device()?.id.clone();
+            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let Some(mut prefs) = app.d.push.prefs(&device) else {
+                return Err(action_err(
+                    409,
+                    "not_subscribed",
+                    "Turn on notifications on this device first.",
+                ));
+            };
+            let invalid = || action_err(400, "invalid", "Those alert settings aren’t valid.");
+            let choices = [
+                ("needsYou", &mut prefs.needs_you),
+                ("finished", &mut prefs.finished),
+                ("ready", &mut prefs.ready),
+                ("lowBattery", &mut prefs.low_battery),
+            ];
+            for (key, choice) in choices {
+                match b.get(key) {
+                    None => {}
+                    Some(Value::Null) => *choice = None,
+                    Some(Value::Bool(on)) => *choice = Some(*on),
+                    Some(_) => return Err(invalid()),
+                }
+            }
+            match b.get("quiet") {
+                None => {}
+                Some(Value::Null) => prefs.quiet = None,
+                Some(q) => {
+                    let minute = |key: &str| {
+                        q.get(key)
+                            .and_then(Value::as_u64)
+                            .filter(|m| *m < 1440)
+                            .map(|m| m as u16)
+                    };
+                    // UTC−12 to UTC+14.
+                    let offset = q
+                        .get("utcOffset")
+                        .and_then(Value::as_i64)
+                        .filter(|o| (-720..=840).contains(o))
+                        .map(|o| o as i32);
+                    let (Some(from), Some(to), Some(utc_offset)) =
+                        (minute("from"), minute("to"), offset)
+                    else {
+                        return Err(invalid());
+                    };
+                    prefs.quiet = Some(crate::push::QuietHours {
+                        from,
+                        to,
+                        utc_offset,
+                    });
+                }
+            }
+            let push = app.d.push.clone();
+            let saved = prefs.clone();
+            blocking(move || push.set_prefs(&device, saved))
+                .await?
+                .map_err(|_| ApiError::Internal)?;
+            ok(json!({"prefs": prefs}))
         },
     );
 

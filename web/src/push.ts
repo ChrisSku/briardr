@@ -29,6 +29,24 @@ export type PushStatus =
   | { state: 'broken'; problem: PushProblem };
 
 export const pushStatus = state<PushStatus>({ state: 'unknown' });
+
+/** A kind of alert a device can choose for itself. */
+export type AlertKind = 'needsYou' | 'finished' | 'ready' | 'lowBattery';
+/**
+ * What this device chose for its alerts, kept on the host with its subscription: a kind it didn't choose
+ * follows the host's setting. `quiet` is a span of this device's day (minutes after midnight) without
+ * alerts; the host tells the time here by `utcOffset`, minutes ahead of UTC.
+ */
+export type AlertPrefs = Partial<Record<AlertKind, boolean>> & { quiet?: { from: number; to: number; utcOffset: number } };
+/** null while the host has no subscription of this device (alerts are off here), or isn't reached yet. */
+export const alertPrefs = state<AlertPrefs | null>(null);
+const utcOffset = () => -new Date().getTimezoneOffset();
+
+/** Changes this device's choices: a kind set to null follows the host's setting again, `quiet: null` ends the quiet hours. */
+export async function setAlertPrefs(patch: Partial<Record<AlertKind, boolean | null>> & { quiet?: { from: number; to: number } | null }): Promise<void> {
+  const body = patch.quiet ? { ...patch, quiet: { ...patch.quiet, utcOffset: utcOffset() } } : patch;
+  alertPrefs.value = (await api<{ prefs: AlertPrefs }>('PUT', '/api/notifications/device', body)).prefs;
+}
 /** Whether the user turned notifications on here (null: not known, from before this was recorded). */
 const wanted = persisted<boolean | null>('briardr.push.wanted', null);
 
@@ -80,6 +98,8 @@ async function activeRegistration(): Promise<ServiceWorkerRegistration | null> {
 
 async function register(sub: PushSubscription) {
   await api('POST', '/api/notifications/subscribe', { subscription: sub.toJSON() });
+  // The host keeps the device's choices over a new subscription; a first one has none yet.
+  alertPrefs.value ??= {};
 }
 
 let checking: Promise<void> | null = null;
@@ -92,7 +112,7 @@ export function checkPush(): Promise<void> {
 async function reconcile() {
   if (!pushSupported) return void (pushStatus.value = { state: 'unsupported' });
   if (isApple && !standalone) return void (pushStatus.value = { state: 'needs_install' });
-  let server: { subscribed: boolean; endpoint?: string | null; publicKey: string };
+  let server: { subscribed: boolean; endpoint?: string | null; publicKey: string; prefs?: AlertPrefs | null };
   try {
     server = await api('GET', '/api/notifications', undefined, { timeout: 8000 });
   } catch {
@@ -100,6 +120,10 @@ async function reconcile() {
     return void (pushStatus.value = { state: 'unknown' });
   }
   publicKey = server.publicKey;
+  alertPrefs.value = server.prefs ?? null;
+  // The quiet hours are this device's: the host is told when its clock moved (summer time, travel).
+  const quiet = server.prefs?.quiet;
+  if (quiet && quiet.utcOffset !== utcOffset()) void setAlertPrefs({ quiet: { from: quiet.from, to: quiet.to } }).catch(() => {});
   // Before this was recorded, the host knowing a subscription meant the user turned them on.
   wanted.value ??= server.subscribed;
   const permission = Notification.permission;

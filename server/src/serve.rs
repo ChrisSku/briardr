@@ -350,6 +350,20 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         updates: updates.clone(),
     });
 
+    {
+        // Devices follow the host's alert settings unless they chose otherwise.
+        let c = cell.clone();
+        push.set_host_setting(Arc::new(move |kind| {
+            let n = c.get().notifications;
+            match kind {
+                "needs_you" => n.needs_you,
+                "finished" => n.finished,
+                "ready" => n.ready,
+                "battery" => n.low_battery,
+                _ => true,
+            }
+        }));
+    }
     let monitor = {
         let c = cell.clone();
         Monitor::new(
