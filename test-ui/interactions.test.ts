@@ -729,6 +729,33 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('a banner that shows again stays its full time: the first one’s timer doesn’t take it down', async () => {
+    const a = await device('iphone', 'phone-banner-again');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    onTestFinished(() => void herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude'));
+    // The agent's state changes as the page hears of them, with the time.
+    const heard: { to: string; at: number }[] = [];
+    a.page.on('websocket', (sock) => sock.on('framereceived', ({ payload }) => {
+      if (typeof payload !== 'string' || !payload.includes('"transition"')) return;
+      const m = JSON.parse(payload);
+      if (m.t === 'transition' && m.streamId === ws.pane) heard.push({ to: m.to, at: Date.now() });
+    }));
+    await a.page.reload(); // a new live connection, which the listener above hears
+    await a.page.waitForSelector('.count-strip');
+    const report = (state: string) => herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', state);
+    const banner = a.page.locator('.banner-attention', { hasText: 'ui target needs you' });
+    report('blocked');
+    await banner.waitFor();
+    await sleep(2000);
+    report('working');
+    await waitUntil('the agent to work again', () => heard.at(-1)?.to === 'working');
+    report('blocked');
+    await waitUntil('the agent to need you again', () => heard.at(-1)?.to === 'blocked');
+    await banner.waitFor({ state: 'detached' });
+    const shown = Date.now() - heard.at(-1)!.at;
+    assert.ok(shown > 5000, `the second banner stayed ${shown} ms of its 6 seconds`);
+  });
+
   test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined; text in a link’s place isn’t one', async () => {
     const opened: string[] = [];
     const a = await device('mac', 'mac-osc8');
