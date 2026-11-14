@@ -5,6 +5,13 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.21
+
+- **On a touch screen, only the key bar's keyboard key opens and closes the on-screen keyboard.** Tapping
+  the terminal no longer opens it, and swiping to scroll while it's up no longer closes it: the terminal
+  scrolls and the keyboard stays. Where a hardware keyboard hides the key bar (on an iPad), a tap still
+  puts the focus in the terminal. ([#32](https://github.com/ChrisSku/briardr/pull/32))
+
 ## 0.3.20
 
 - **Briardr works with the Herdr desktop app too, through its herdr-core.** Choose **Herdr app** in
