@@ -5,6 +5,8 @@
 //    refreshes or locks the index while an agent is using the repository;
 //  - tracked changes are diffed with the plumbing command `diff-index`, which never refreshes the
 //    index. Porcelain `git diff <commit>` is allowed only as `diff --no-index`;
+//  - the branch the work started from is found with `symbolic-ref`, `rev-parse`, `merge-base` and
+//    `rev-list`, which only read refs and commits;
 //  - external diff drivers, textconv, fsmonitor hooks and pagers are disabled, so repository
 //    config can't make Briardr run programs.
 use std::collections::HashMap;
@@ -30,6 +32,8 @@ pub const READ_ONLY_SUBCOMMANDS: &[&str] = &[
     "diff",
     "ls-files",
     "symbolic-ref",
+    "merge-base",
+    "rev-list",
 ];
 pub const MAX_FILES: usize = 500;
 pub const MAX_DIFF_LINES: usize = 2000;
@@ -283,6 +287,21 @@ pub struct ChangesReport {
     pub total_files: usize,
     pub truncated: bool,
     pub as_of: u64,
+    /// The branch this work started from, when HEAD has commits of its own since then.
+    pub base: Option<Base>,
+    /// The files are everything since `base` (commits and uncommitted work), not only what's uncommitted.
+    pub since_base: bool,
+}
+
+/// Where the work on HEAD started: the newest commit it shares with the repository's main branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Base {
+    /// The main branch as Git names it here: "origin/main", "main".
+    pub name: String,
+    /// The shared commit (the merge base), which the working tree is compared with.
+    pub commit: String,
+    /// HEAD's commits since then.
+    pub ahead: u64,
 }
 
 /// `lstat` summary of a file: size, mtime in ms (as JS computes `mtimeMs`) and mode.
@@ -326,6 +345,8 @@ pub fn changes(cwd: &Path, git_path: &str) -> ChangesReport {
         total_files: 0,
         truncated: false,
         as_of: now_ms(),
+        base: None,
+        since_base: false,
     };
     let root = match run_git(
         cwd,
@@ -518,11 +539,7 @@ pub fn changes(cwd: &Path, git_path: &str) -> ChangesReport {
 
     // Line counts and binary detection for tracked changes against HEAD (or the empty tree).
     // Failures here are not fatal: the list still shows, just without counts.
-    let against = if report.no_commits {
-        EMPTY_TREE
-    } else {
-        "HEAD"
-    };
+    let against = head_tree(report.no_commits);
     if let Ok(res) = run_git(
         &root,
         &["diff-index", "--numstat", "-z", "-M", against],
@@ -538,6 +555,219 @@ pub fn changes(cwd: &Path, git_path: &str) -> ChangesReport {
         }
     }
     report
+}
+
+/// What uncommitted work is compared with: HEAD, or the empty tree before the first commit.
+pub fn head_tree(no_commits: bool) -> &'static str {
+    if no_commits {
+        EMPTY_TREE
+    } else {
+        "HEAD"
+    }
+}
+
+/// One line of output, trimmed; None when the command fails or prints nothing.
+fn git_line(root: &Path, args: &[&str], git_path: &str) -> Option<String> {
+    let res = run_git(root, args, &[], GIT_TIMEOUT, git_path).ok()?;
+    let line = String::from_utf8_lossy(&res.stdout).trim().to_string();
+    (!line.is_empty()).then_some(line)
+}
+
+/// The branch the work on HEAD started from: the remote's default branch, else `main` or `master`
+/// (the remote's first). None when there is none, or HEAD has no commits of its own since it.
+pub fn base_of(root: &Path, git_path: &str) -> Option<Base> {
+    let head = git_line(
+        root,
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+        git_path,
+    )?;
+    let default = git_line(
+        root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+        git_path,
+    );
+    let candidates = default.iter().map(String::as_str).chain([
+        "origin/main",
+        "origin/master",
+        "main",
+        "master",
+    ]);
+    for name in candidates {
+        let commit = format!("{name}^{{commit}}");
+        if git_line(
+            root,
+            &["rev-parse", "--verify", "--quiet", &commit],
+            git_path,
+        )
+        .is_none()
+        {
+            continue;
+        }
+        let commit = git_line(root, &["merge-base", "HEAD", name], git_path)?;
+        if commit == head {
+            // Nothing committed since: try no other branch, the first that exists is the main one.
+            return None;
+        }
+        let range = format!("{commit}..HEAD");
+        let ahead = git_line(root, &["rev-list", "--count", &range], git_path)?
+            .parse()
+            .ok()?;
+        return Some(Base {
+            name: name.to_string(),
+            commit,
+            ahead,
+        });
+    }
+    None
+}
+
+/// Everything since the branch the work started from: HEAD's commits and the uncommitted work, as one
+/// set of changes against `base_of`. Without such a branch, the uncommitted changes as `changes` gives
+/// them (`since_base` stays false).
+pub fn changes_since_base(cwd: &Path, git_path: &str) -> ChangesReport {
+    let mut report = changes(cwd, git_path);
+    let Some(root) = report.root.clone() else {
+        return report;
+    };
+    if !matches!(report.state, ChangesState::Ok | ChangesState::Clean) {
+        return report;
+    }
+    let Some(base) = base_of(&root, git_path) else {
+        return report;
+    };
+    let raw = match run_git(
+        &root,
+        &[
+            "diff-index",
+            "--raw",
+            "-z",
+            "-M",
+            "--abbrev=40",
+            &base.commit,
+        ],
+        &[],
+        GIT_TIMEOUT,
+        git_path,
+    ) {
+        Ok(res) => res.stdout,
+        Err(e) => {
+            report.state = ChangesState::Error;
+            report.message = Some(e.to_string());
+            report.files.clear();
+            return report;
+        }
+    };
+    let mut files = parse_raw(&String::from_utf8_lossy(&raw), &root, &base.commit);
+    // Untracked files are new since the base too; conflicts keep their mark.
+    for f in std::mem::take(&mut report.files) {
+        if f.untracked {
+            files.push(f);
+        } else if f.conflicted {
+            if let Some(same) = files.iter_mut().find(|x| x.path == f.path) {
+                same.conflicted = true;
+                same.change = ChangeKind::Conflict;
+            }
+        }
+    }
+    report.total_files = files.len();
+    report.truncated = files.len() > MAX_FILES;
+    files.truncate(MAX_FILES);
+    report.files = files;
+    report.state = if report.files.is_empty() {
+        ChangesState::Clean
+    } else {
+        ChangesState::Ok
+    };
+    if let Ok(res) = run_git(
+        &root,
+        &["diff-index", "--numstat", "-z", "-M", &base.commit],
+        &[],
+        GIT_TIMEOUT,
+        git_path,
+    ) {
+        apply_numstat(&mut report.files, &res.stdout);
+    }
+    report.base = Some(base);
+    report.since_base = true;
+    report
+}
+
+/// `diff-index --raw -z` records: `:<mode> <mode> <sha> <sha> <status>\0<path>\0`, a rename or copy
+/// with the old path and then the new one.
+fn parse_raw(text: &str, root: &Path, base: &str) -> Vec<ChangedFile> {
+    let parts: Vec<&str> = text.split('\0').collect();
+    let mut files = Vec::new();
+    let mut i = 0;
+    while i < parts.len() {
+        let head = parts[i];
+        i += 1;
+        let Some(head) = head.strip_prefix(':') else {
+            continue;
+        };
+        let f: Vec<&str> = head.split(' ').collect();
+        if f.len() < 5 {
+            continue;
+        }
+        let (mode_from, mode_to, sha_from, sha_to, status) = (f[0], f[1], f[2], f[3], f[4]);
+        let letter = status.chars().next().unwrap_or('M');
+        let two_paths = matches!(letter, 'R' | 'C');
+        let first = parts.get(i).copied().unwrap_or("");
+        i += 1;
+        let (path, orig_path) = if two_paths {
+            let new = parts.get(i).copied().unwrap_or("");
+            i += 1;
+            (new, Some(first.to_string()))
+        } else {
+            (first, None)
+        };
+        if path.is_empty() {
+            continue;
+        }
+        let change = match letter {
+            'A' => ChangeKind::Added,
+            'D' => ChangeKind::Deleted,
+            'R' => ChangeKind::Renamed,
+            'C' => ChangeKind::Copied,
+            'T' => ChangeKind::TypeChanged,
+            'U' => ChangeKind::Conflict,
+            _ => ChangeKind::Modified,
+        };
+        let mode_change = if mode_from != mode_to && mode_from != "000000" && mode_to != "000000" {
+            Some(ModeChange {
+                from: mode_from.to_string(),
+                to: mode_to.to_string(),
+            })
+        } else {
+            None
+        };
+        // An uncommitted change has no object name yet (zeros), so the file on disk counts too.
+        let sig = signature(&format!(
+            "{base}|{status}|{mode_from}|{mode_to}|{sha_from}|{sha_to}|{}",
+            stat_sig(&root.join(path))
+        ));
+        files.push(ChangedFile {
+            path: path.to_string(),
+            orig_path,
+            index: '.',
+            worktree: '.',
+            staged: false,
+            unstaged: false,
+            untracked: false,
+            conflicted: change == ChangeKind::Conflict,
+            change,
+            mode_change,
+            binary: false,
+            additions: None,
+            deletions: None,
+            signature: sig,
+        });
+    }
+    files
 }
 
 /// One `--numstat -z` record: `added\tdeleted\tpath`, where `-` marks binary.
@@ -645,11 +875,12 @@ fn is_binary_line(line: &str) -> bool {
         .is_some()
 }
 
-/// Unified diff for one file against HEAD, capped at MAX_DIFF_LINES lines.
+/// Unified diff for one file against a commit or tree (`head_tree`, or a `Base`'s commit), capped at
+/// MAX_DIFF_LINES lines.
 pub fn file_diff(
     root: &Path,
     file: &FileRef,
-    no_commits: bool,
+    against: &str,
     git_path: &str,
 ) -> Result<FileDiff, GitError> {
     let root_abs = normalize(root);
@@ -679,7 +910,6 @@ pub fn file_diff(
             git_path,
         )?
     } else {
-        let against = if no_commits { EMPTY_TREE } else { "HEAD" };
         let mut args = vec!["diff-index", "-p", "--no-color", "-M", against, "--"];
         if let Some(orig) = &file.orig_path {
             args.push(orig.as_str());
@@ -832,7 +1062,7 @@ mod tests {
                 orig_path: None,
                 untracked: false,
             },
-            false,
+            "HEAD",
             "git",
         )
         .unwrap();
@@ -846,7 +1076,7 @@ mod tests {
                 orig_path: None,
                 untracked: true,
             },
-            false,
+            "HEAD",
             "git",
         )
         .unwrap();
@@ -858,11 +1088,135 @@ mod tests {
                 orig_path: None,
                 untracked: true,
             },
-            false,
+            "HEAD",
             "git",
         )
         .unwrap();
         assert!(ub.binary);
+    }
+
+    #[test]
+    fn work_since_the_main_branch_includes_commits_and_uncommitted_changes() {
+        let scratch = Scratch::new("git-base");
+        let dir = scratch.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        fs::write(dir.join("keep.txt"), "one\n").unwrap();
+        fs::write(dir.join("old.txt"), "x\n").unwrap();
+        fs::write(dir.join("same.txt"), "same\n").unwrap();
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-q", "-m", "init"]);
+
+        // On main itself nothing was committed since, so there's nothing to compare with.
+        assert_eq!(base_of(dir, "git"), None);
+        let on_main = changes_since_base(dir, "git");
+        assert!(!on_main.since_base);
+        assert_eq!(on_main.state, ChangesState::Clean);
+
+        git(dir, &["checkout", "-q", "-b", "feature"]);
+        fs::write(dir.join("keep.txt"), "one\ntwo\n").unwrap();
+        git(dir, &["mv", "old.txt", "renamed.txt"]);
+        fs::write(dir.join("added.txt"), "new\n").unwrap();
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-q", "-m", "work"]);
+        git(dir, &["commit", "-q", "--allow-empty", "-m", "more"]);
+        // Main moved on meanwhile: that isn't this branch's work.
+        git(dir, &["checkout", "-q", "main"]);
+        fs::write(dir.join("same.txt"), "changed on main\n").unwrap();
+        git(dir, &["commit", "-q", "-am", "main moves"]);
+        git(dir, &["checkout", "-q", "feature"]);
+        fs::write(dir.join("keep.txt"), "one\ntwo\nthree\n").unwrap();
+        fs::write(dir.join("untracked.txt"), "a\n").unwrap();
+
+        let base = base_of(dir, "git").expect("a base");
+        assert_eq!(base.name, "main");
+        assert_eq!(base.ahead, 2);
+        assert_eq!(base.commit.len(), 40);
+
+        // The uncommitted view is unchanged by all this.
+        let uncommitted = changes(dir, "git");
+        let paths = |r: &ChangesReport| {
+            let mut p: Vec<String> = r.files.iter().map(|f| f.path.clone()).collect();
+            p.sort();
+            p
+        };
+        assert_eq!(paths(&uncommitted), ["keep.txt", "untracked.txt"]);
+        assert!(!uncommitted.since_base);
+
+        let report = changes_since_base(dir, "git");
+        assert_eq!(report.state, ChangesState::Ok, "{:?}", report.message);
+        assert!(report.since_base);
+        assert_eq!(report.base, Some(base.clone()));
+        assert_eq!(
+            paths(&report),
+            ["added.txt", "keep.txt", "renamed.txt", "untracked.txt"]
+        );
+        let by = |p: &str| report.files.iter().find(|f| f.path == p).unwrap();
+        let keep = by("keep.txt");
+        assert_eq!(keep.change, ChangeKind::Modified);
+        assert_eq!((keep.additions, keep.deletions), (Some(2), Some(0)));
+        assert_eq!(by("added.txt").change, ChangeKind::Added);
+        let renamed = by("renamed.txt");
+        assert_eq!(renamed.change, ChangeKind::Renamed);
+        assert_eq!(renamed.orig_path.as_deref(), Some("old.txt"));
+        assert!(by("untracked.txt").untracked);
+        assert!(report.files.iter().all(|f| f.signature.len() == 16));
+
+        // The diff against the base has the committed line and the uncommitted one.
+        let file = FileRef {
+            path: "keep.txt".into(),
+            orig_path: None,
+            untracked: false,
+        };
+        let diff = file_diff(dir, &file, &base.commit, "git").unwrap();
+        assert!(
+            diff.text.contains("+two") && diff.text.contains("+three"),
+            "{}",
+            diff.text
+        );
+        let head = file_diff(dir, &file, "HEAD", "git").unwrap();
+        assert!(
+            !head.text.contains("+two") && head.text.contains("+three"),
+            "{}",
+            head.text
+        );
+
+        // A change to a file's content changes its signature, so "reviewed" marks don't outlive it.
+        let before = keep.signature.clone();
+        fs::write(dir.join("keep.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+        let again = changes_since_base(dir, "git");
+        assert_ne!(
+            again
+                .files
+                .iter()
+                .find(|f| f.path == "keep.txt")
+                .unwrap()
+                .signature,
+            before
+        );
+    }
+
+    #[test]
+    fn raw_records_parse_renames_and_skip_what_is_not_a_record() {
+        let zero = "0".repeat(40);
+        let text = format!(
+            ":100644 100755 {zero} {zero} M\0run.sh\0:100644 100644 {zero} {zero} R087\0old name.txt\0new name.txt\0noise\0:000000 100644 {zero} {zero} A\0added.txt\0"
+        );
+        let files = parse_raw(&text, Path::new("/nonexistent"), "base");
+        assert_eq!(
+            files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+            ["run.sh", "new name.txt", "added.txt"]
+        );
+        assert_eq!(
+            files[0].mode_change,
+            Some(ModeChange {
+                from: "100644".into(),
+                to: "100755".into()
+            })
+        );
+        assert_eq!(files[1].change, ChangeKind::Renamed);
+        assert_eq!(files[1].orig_path.as_deref(), Some("old name.txt"));
+        assert_eq!(files[2].change, ChangeKind::Added);
+        assert_eq!(files[2].mode_change, None);
     }
 
     #[test]
@@ -875,7 +1229,7 @@ mod tests {
                 untracked: false,
             };
             assert_eq!(
-                file_diff(root, &file, false, "git").unwrap_err(),
+                file_diff(root, &file, "HEAD", "git").unwrap_err(),
                 GitError::Forbidden("Path outside repository".into()),
                 "{p}"
             );
@@ -921,7 +1275,7 @@ mod tests {
                 orig_path: None,
                 untracked: true,
             },
-            true,
+            head_tree(true),
             "git",
         )
         .unwrap();

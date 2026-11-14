@@ -1588,4 +1588,46 @@ describe('Changes review', () => {
     assert.deepEqual(pastes, ['Small review\n\na.txt 2-3\n```diff\n+TWO\n three\n```\nUse a constant'], 'one paste and no Enter');
     assert.equal(await a.page.evaluate(() => localStorage.getItem('briardr.changes.review')), '{}');
   });
+
+  test('on a branch with commits of its own, Changes also shows everything since the branch it started from', async () => {
+    const fs = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const repo = testPane('briardr-ui-changes-base');
+    onTestFinished(() => closeWorkspace(repo.workspace));
+    herdr('pane', 'rename', repo.pane, 'branch target');
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir });
+    git('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'first');
+    git('checkout', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), 'committed work\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'work');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ntwo\n');
+    await s.run.herdr.refresh();
+
+    const a = await device('iphone', 'phone-changes-base');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.locator('.tree-streams .row-main', { hasText: 'branch target' }).click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    const files = () => a.page.locator('.file-toggle .file-path').allInnerTexts();
+    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).waitFor();
+    assert.deepEqual(await files(), ['a.txt'], 'uncommitted work first');
+    await a.page.getByLabel('Reviewed a.txt on this device').check();
+
+    const compare = a.page.getByRole('group', { name: 'Compare with' });
+    await compare.getByRole('button', { name: 'Since main' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor();
+    assert.deepEqual((await files()).sort(), ['a.txt', 'b.txt']);
+    assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), false, 'a mark on the uncommitted change isn’t one on the whole branch');
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
+    await a.page.getByRole('region', { name: 'Diff of b.txt' }).locator('.dl-add', { hasText: 'committed work' }).waitFor();
+
+    await compare.getByRole('button', { name: 'Uncommitted' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor({ state: 'detached' });
+    assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), true);
+  });
 });

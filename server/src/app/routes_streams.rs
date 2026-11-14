@@ -15,7 +15,8 @@ use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_files, FileEntry};
 use crate::git::{
-    changes, file_diff, ChangeKind, ChangedFile, ChangesReport, ChangesState, FileRef, GitError,
+    base_of, changes, changes_since_base, file_diff, head_tree, ChangeKind, ChangedFile,
+    ChangesReport, ChangesState, FileRef, GitError,
 };
 use crate::uploads::{quote_path, receive_upload, uploads_root, UploadKind};
 
@@ -85,6 +86,21 @@ fn changed_docs(cwd: &Path) -> Result<HashSet<String>, std::io::Error> {
     Ok(changed)
 }
 
+/// What Changes shows: the uncommitted work, which also says whether there is a branch the work
+/// started from, or everything since that branch (`?since=base`).
+fn changes_report(cwd: &Path, since_base: bool) -> ChangesReport {
+    if since_base {
+        return changes_since_base(cwd, "git");
+    }
+    let mut report = changes(cwd, "git");
+    if let Some(root) = &report.root {
+        if matches!(report.state, ChangesState::Ok | ChangesState::Clean) {
+            report.base = base_of(root, "git");
+        }
+    }
+    report
+}
+
 fn state_code(state: ChangesState) -> &'static str {
     match state {
         ChangesState::Ok => "ok",
@@ -140,6 +156,12 @@ fn changes_json(r: &ChangesReport) -> Value {
         "totalFiles": r.total_files,
         "truncated": r.truncated,
         "asOf": r.as_of,
+        "base": r.base.as_ref().map(|b| json!({
+            "name": b.name,
+            "short": b.commit.chars().take(7).collect::<String>(),
+            "ahead": b.ahead,
+        })),
+        "since": if r.since_base { "base" } else { "head" },
     });
     if let (Some(message), Value::Object(map)) = (&r.message, &mut out) {
         map.insert("message".into(), json!(message));
@@ -362,7 +384,8 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
-            let report = blocking(move || changes(&cwd, "git")).await?;
+            let since_base = ctx.query.get("since") == Some("base");
+            let report = blocking(move || changes_report(&cwd, since_base)).await?;
             ok(changes_json(&report))
         },
     );
@@ -374,7 +397,8 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
-            let report = blocking(move || changes(&cwd, "git")).await?;
+            let since_base = ctx.query.get("since") == Some("base");
+            let report = blocking(move || changes_report(&cwd, since_base)).await?;
             let p = ctx.query.get("path").unwrap_or("");
             let found = report.files.iter().find(|x| x.path == p);
             let (Some(root), Some(f)) = (report.root.clone(), found) else {
@@ -390,8 +414,11 @@ pub(super) fn register(r: &mut Routes) {
                 orig_path: f.orig_path.clone(),
                 untracked: f.untracked,
             };
-            let no_commits = report.no_commits;
-            match blocking(move || file_diff(&root, &file, no_commits, "git")).await? {
+            let against = match &report.base {
+                Some(base) if report.since_base => base.commit.clone(),
+                _ => head_tree(report.no_commits).to_string(),
+            };
+            match blocking(move || file_diff(&root, &file, &against, "git")).await? {
                 Ok(d) => ok(json!({
                     "path": d.path,
                     "text": d.text,

@@ -1,10 +1,11 @@
 // Docs, uploads, preview, creating work, and stream actions, end to end against the test run's Herdr session.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, test } from 'bun:test';
+import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
 import { closeWorkspace, herdr, request, sleep, startServer, testPane, tmpDir, type TestServer } from './helpers.ts';
 
 let s: TestServer;
@@ -353,6 +354,45 @@ describe('creating work and stream actions', () => {
   test('changes for the stream’s folder', async () => {
     const r = await api('GET', `/api/streams/${enc(pane)}/changes`);
     assert.equal(r.json.state, 'not_repo');
+  });
+
+  test('changes on a branch: the uncommitted work, or everything since the branch it started from', async () => {
+    const repo = testPane('briardr-test-changes-base');
+    onTestFinished(() => closeWorkspace(repo.workspace));
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir });
+    git('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'first');
+    await s.run.herdr.refresh();
+    const changes = async (query = '') => (await api('GET', `/api/streams/${enc(repo.pane)}/changes${query}`)).json;
+    // On the main branch itself there's nothing to compare with, whichever is asked for.
+    assert.equal((await changes()).base, null);
+    assert.equal((await changes('?since=base')).since, 'head');
+
+    git('checkout', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ncommitted\n');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), 'new file\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'work');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ncommitted\nuncommitted\n');
+
+    const head = await changes();
+    assert.equal(head.since, 'head');
+    assert.equal(head.base.name, 'main');
+    assert.equal(head.base.ahead, 1);
+    assert.match(head.base.short, /^[0-9a-f]{7}$/);
+    assert.deepEqual(head.files.map((f: any) => f.path), ['a.txt']);
+
+    const base = await changes('?since=base');
+    assert.equal(base.since, 'base');
+    assert.deepEqual(base.files.map((f: any) => [f.path, f.change, f.additions]).sort(), [['a.txt', 'modified', 2], ['b.txt', 'added', 1]]);
+    const diff = (query: string) => api('GET', `/api/streams/${enc(repo.pane)}/changes/diff?path=a.txt${query}`);
+    assert.match((await diff('&since=base')).json.text, /\+committed\n\+uncommitted/);
+    assert.doesNotMatch((await diff('')).json.text, /\+committed/);
+    // A file that only changed in a commit has a diff against the base, and none as uncommitted work.
+    assert.equal((await api('GET', `/api/streams/${enc(repo.pane)}/changes/diff?path=b.txt&since=base`)).status, 200);
+    assert.equal((await api('GET', `/api/streams/${enc(repo.pane)}/changes/diff?path=b.txt`)).status, 404);
   });
 });
 

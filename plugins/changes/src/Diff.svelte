@@ -5,22 +5,22 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, Icon, Sheet, type PluginContext, type Stream } from '@briardr/sdk';
-  import { addComment, reviewOf, type ChangedFile } from './changes.ts';
+  import { addComment, reviewOf, type ChangedFile, type Since } from './changes.ts';
   import { lineId, parseDiff, whereOf } from './review.ts';
 
-  let { stream, briardr, file }: { stream: Stream; briardr: PluginContext; file: ChangedFile } = $props();
+  let { stream, briardr, file, since }: { stream: Stream; briardr: PluginContext; file: ChangedFile; since: Since } = $props();
   let d = $state.raw<{ text: string; truncated: boolean; lines: number; binary: boolean } | null>(null);
   let err = $state<string | null>(null);
   /** Lines picked for a comment, as positions in `lines` (inclusive). */
   let sel = $state<{ anchor: number; from: number; to: number } | null>(null);
 
   // Load when opened, and again when the file changes.
-  const key = $derived(`${file.path}\n${file.signature}`);
+  const key = $derived(`${file.path}\n${file.signature}\n${since}`);
   $effect(() => {
     void key;
     untrack(() => {
       sel = null;
-      briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes/diff?path=${encodeURIComponent(file.path)}`, undefined, { timeout: 20_000 }).then(
+      briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes/diff?path=${encodeURIComponent(file.path)}${since === 'base' ? '&since=base' : ''}`, undefined, { timeout: 20_000 }).then(
         (r) => (d = r),
         (e) => (err = e instanceof ApiError ? e.message : 'Couldn’t load the diff.'),
       );
