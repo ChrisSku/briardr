@@ -1,0 +1,32 @@
+# Dependency updates, once a month and grouped: one pull request for the server's crates, one for the
+# client's, the tests' and the scripts' packages, and one for the workflows' actions (pinned to commits;
+# Dependabot moves the commit and the version in its comment). Vulnerable dependencies get a pull request
+# of their own when GitHub learns of them (Dependabot security updates, in the repository's settings).
+# Its pull requests run every check. The changeset check lets them through without a changeset
+# (changeset.yml), so an update ships with the next release. Bun, Rust and the linters (mise.toml) and the
+# versions in deploy/versions.env are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /server
+    schedule:
+      interval: monthly
+    groups:
+      crates:
+        patterns: ["*"]
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      packages:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
