@@ -3,14 +3,9 @@
   most urgent state. Searchable; expansion is remembered; cached rows are dimmed while disconnected.
   Creating work never changes the Mac's focus. Each level's menu also renames and closes it.
 -->
-<script module lang="ts">
-  export function shortPath(p: string): string {
-    return p.replace(/^\/Users\/[^/]+/, '~');
-  }
-</script>
-
 <script lang="ts">
   import { theHost } from '../host.ts';
+  import { shortPath } from '../paths.ts';
   import { expandedNodes, live, model, stale } from '../store.ts';
   import type { AgentState, Project, Stream, Workspace } from '../types.ts';
   import { Icon } from '../ui/icons/index.ts';
