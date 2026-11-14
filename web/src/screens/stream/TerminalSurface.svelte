@@ -78,26 +78,19 @@
     ctl.mount(host, screen);
     const sizes = ctl.term.onResize(() => resized++);
     // Paste from a hardware keyboard / context menu goes through review for files, directly for text.
-    const onText = (e: Event) => {
-      const text = (e as CustomEvent).detail as string;
-      if (text.length > 2000 || text.includes('\n')) sheet = { k: 'paste', text };
-      else ctl.paste(text, prefs.value.bracketedPaste);
-    };
-    const onFile = (e: Event) => {
-      const f = (e as CustomEvent).detail as File | null;
-      if (f) sheet = { k: 'upload', file: f, kind: f.type.startsWith('image/') ? 'image' : 'file' };
+    ctl.onPaste = (p) => {
+      if ('file' in p) sheet = { k: 'upload', file: p.file, kind: p.file.type.startsWith('image/') ? 'image' : 'file' };
+      else if (p.text.length > 2000 || p.text.includes('\n')) sheet = { k: 'paste', text: p.text };
+      else ctl.paste(p.text, prefs.value.bracketedPaste);
     };
     // Physical keyboard detection on touch devices: a keydown while no on-screen keyboard is showing.
     const onKey = () => {
       if ('ontouchstart' in window && kb.current === 0 && document.activeElement === ctl.term.textarea) hardwareKeyboard.value = true;
     };
-    window.addEventListener('briardr:paste-text', onText);
-    window.addEventListener('briardr:paste-file', onFile);
     window.addEventListener('keydown', onKey, true);
     return () => {
       sizes.dispose();
-      window.removeEventListener('briardr:paste-text', onText);
-      window.removeEventListener('briardr:paste-file', onFile);
+      ctl.onPaste = null;
       window.removeEventListener('keydown', onKey, true);
       endPress?.();
     };

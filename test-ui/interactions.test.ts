@@ -694,6 +694,34 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
+    const a = await device('mac', 'mac-peek-paste');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const pastes: string[] = [];
+    a.page.on('websocket', (sock) => sock.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') return;
+      try { const m = JSON.parse(payload); if (m.t === 'input' && m.paste) pastes.push(m.paste.text); } catch {}
+    }));
+    await openTarget(a.page);
+    // Beside an open stream, the sidebar picks the list next to it.
+    await a.page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Workspaces' }).click();
+    await a.page.locator('.list-pane').locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).focus();
+    await a.page.keyboard.press('Enter');
+    await a.page.getByRole('menuitem', { name: /Peek/ }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
+    const paste = (terminal: string, text: string) =>
+      a.page.locator(`${terminal} textarea`).evaluate((el, text) => {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }, text);
+    await paste('.peek-screen', 'into-peek');
+    await a.page.getByRole('button', { name: 'Close' }).click();
+    await paste('.term-screen', 'into-stream');
+    await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
+    assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
+  });
+
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
     const a = await device('iphone', 'phone-swipe');
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
