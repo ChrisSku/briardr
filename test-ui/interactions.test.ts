@@ -720,6 +720,7 @@ describe('agents list, peek, banners and links', () => {
     await paste('.term-screen', 'into-stream');
     await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
     assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
   });
 
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
