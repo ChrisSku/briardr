@@ -1325,6 +1325,34 @@ describe('devices', () => {
   });
 });
 
+describe('pairing by link', () => {
+  test('Add a device shows a QR code; its link opens the pairing screen with the code filled in and out of the address', async () => {
+    const a = await device('iphone', 'phone-add-device');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/settings/devices');
+    const answer = a.page.waitForResponse((r) => r.url().endsWith('/api/devices/pairing-code'));
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    const { code, link } = await (await answer).json();
+    await a.page.getByRole('img', { name: /^QR code/ }).waitFor();
+    assert.equal(await a.page.locator('.pair-code .code').innerText(), code);
+    // A camera reads dark on light, whatever the theme.
+    assert.equal(await a.page.locator('.pair-qr rect').getAttribute('fill'), '#fff');
+    assert.ok((await a.page.locator('.pair-qr path').getAttribute('d'))!.length > 500);
+
+    // The new device: what its camera opens.
+    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, locale: 'en-US' });
+    onTestFinished(() => ctx.close().catch(() => {}));
+    const page = await ctx.newPage();
+    await page.goto(link);
+    assert.equal(await page.getByLabel('Pairing code').inputValue(), code);
+    assert.equal(new URL(page.url()).hash, '', 'the code doesn’t stay in the address');
+    await page.getByText('add Briardr to the Home Screen first').waitFor();
+    await page.getByLabel('Name for this device').fill('scanned');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.waitForURL(/\/agents/);
+  });
+});
+
 describe('key bar settings', () => {
   test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
     const { ctx, page } = await device('iphone', 'phone-keybar');

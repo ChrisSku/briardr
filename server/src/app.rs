@@ -868,6 +868,18 @@ impl App {
         }
     }
 
+    /// Briardr's own origin as this request reached it: the public one behind a proxy, else the Host
+    /// it asked for (which the Host check has allowed).
+    pub fn origin_of(&self, headers: &HeaderMap) -> String {
+        match self.proxy(&self.cfg()) {
+            Some((public_origin, _)) => public_origin,
+            None => format!(
+                "https://{}",
+                header_str(headers, "host").unwrap_or("localhost")
+            ),
+        }
+    }
+
     /// Whether the connecting peer may talk to Briardr at all.
     pub fn peer_allowed(&self, peer: Option<&str>) -> bool {
         let cfg = self.cfg();

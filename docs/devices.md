@@ -19,6 +19,12 @@ device to that server. No native Briardr client is required.
    Safari, so a Safari pairing may not carry over.
 4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
 5. Enter the one-time code and a device name in Briardr. The code expires after ten minutes.
+
+`briardr pair` in a terminal, and **Add a device** in Settings → Devices on a device that is signed in,
+also show a QR code. A camera opens Briardr from it with the code filled in. The code is in the part of
+the link that browsers keep to themselves (after `#`), so it reaches no server log. On an iPhone or
+iPad the camera opens Safari, and the Home Screen app signs in separately: use the QR code to get to
+Briardr, add it to the Home Screen, and enter the code there.
 6. Enable and test notifications in Briardr Settings → Notifications.
 
 If you paired in a browser tab first, Briardr suggests installing it; Settings → Install app has the

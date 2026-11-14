@@ -9,6 +9,7 @@ use super::{
     VERSION,
 };
 use crate::auth::PairError;
+use crate::qr;
 use crate::terminal_hub::PROTOCOL;
 
 /// Runs blocking work (file writes, shelling out) off the async runtime.
@@ -223,10 +224,18 @@ pub(super) fn register(r: &mut Routes) {
         Method::POST,
         "/api/devices/pairing-code",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move {
+        |app: Arc<App>, ctx: Ctx| async move {
             let auth = app.d.auth.clone();
             let (code, expires_at) = blocking(move || auth.create_pairing_code()).await?;
-            ok(json!({"code": code, "expiresAt": expires_at}))
+            // The link opens Briardr where this device reaches it, with the code filled in; `qr` is
+            // the same as a QR code's modules, for the new device's camera.
+            let link = qr::pairing_link(&app.origin_of(&ctx.headers), &code);
+            ok(json!({
+                "code": code,
+                "expiresAt": expires_at,
+                "link": link,
+                "qr": qr::modules(&link),
+            }))
         },
     );
 
