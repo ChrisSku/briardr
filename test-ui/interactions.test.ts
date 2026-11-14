@@ -694,6 +694,23 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('an agent’s row shows what its terminal title says it’s doing, and Jump finds it by that', async () => {
+    await settleShell();
+    herdr('pane', 'run', ws.pane, "printf '\\033]0;Reviewing the parser\\007'");
+    herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
+    onTestFinished(() => {
+      herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
+      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
+    });
+    const a = await device('iphone', 'phone-task');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    await row.locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+    await a.page.getByRole('button', { name: 'Jump to a stream' }).click();
+    await a.page.getByLabel('Search streams').fill('parser');
+    await a.page.locator('#jump-list .row-title', { hasText: 'ui target' }).waitFor();
+  });
+
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
     const a = await device('iphone', 'phone-swipe');
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });

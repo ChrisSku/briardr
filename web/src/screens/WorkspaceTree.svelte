@@ -49,7 +49,7 @@
         const projects = (m?.projects || [])
           .filter((p) => p.workspaceId === ws.id)
           .map((p) => {
-            const streams = (m?.streams || []).filter((s) => s.projectId === p.id && (hit(ws.name, ws.cwd, p.name) || hit(s.name, s.folder, s.cwd, s.tool)));
+            const streams = (m?.streams || []).filter((s) => s.projectId === p.id && (hit(ws.name, ws.cwd, p.name) || hit(s.name, s.title, s.folder, s.cwd, s.tool)));
             return { p, streams, show: hit(ws.name, ws.cwd, p.name) || streams.length > 0 };
           })
           .filter((x) => x.show);

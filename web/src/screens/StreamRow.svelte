@@ -1,10 +1,12 @@
 <!--
-  A stream in a list: its avatar with the state dot, title, where it runs, and how long it has been in
-  its state. In a list of one state (Agents) the time says it; elsewhere a Dot badge sits above it.
+  A stream in a list: its avatar with the state dot, title, where it runs, what an agent says it's doing
+  (its terminal title), and how long it has been in its state. In a list of one state (Agents) the time
+  says it; elsewhere a Dot badge sits above it.
   Actions: "…" on hover with a pointer, a long press, or on touch a swipe to the left (Peek, More).
 -->
 <script lang="ts">
   import { clockSkew, now, visibleStreamId } from '../store.ts';
+  import { taskOf } from '../task.ts';
   import { STATE_LABEL, type Stream } from '../types.ts';
   import { Icon, ToolIcon } from '../ui/icons/index.ts';
   import { longPress, openMenu, since as sinceText, StateBadge } from '../ui/kit.ts';
@@ -26,6 +28,7 @@
   const since = $derived(s.stateSince ? now.value + clockSkew.value - s.stateSince : null);
   const sub = $derived(showContext ? contextOf(s) || s.folder : [s.kind === 'agent' ? null : s.tool, s.folder].filter(Boolean).join(' · '));
   const time = $derived(since !== null && s.state ? sinceText(since) : '');
+  const task = $derived(taskOf(s));
 
   // ---------- swipe (touch): drag the row left to show its actions ----------
   const ACTIONS = 144;
@@ -91,6 +94,7 @@
       <!-- Without the badge, VoiceOver still hears the state: "Fix flaky login test, Needs you, web · auth, 2 min". -->
       {#if !badge && s.state}<span class="sr-only">, {STATE_LABEL[s.state]},</span>{/if}
       <span class="row-sub">{sub}</span>
+      {#if task}<span class="row-sub row-task">{task}</span>{/if}
     </span>
     <span class="row-trail">
       {#if badge}<StateBadge state={s.state} seen={seenDone} />{/if}

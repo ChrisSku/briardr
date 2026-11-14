@@ -1,8 +1,8 @@
 <!--
-  Jump search: open any stream by name, project, workspace or folder. Streams that need input come
-  first; the rest are ordered by their latest activity: opened on this device, finished, or started
-  working. It opens at the top, just under the screen's header, and never reaches under the keyboard,
-  so the field stays in place while the list shrinks.
+  Jump search: open any stream by name, project, workspace, folder or terminal title. Streams that need
+  input come first; the rest are ordered by their latest activity: opened on this device, finished, or
+  started working. It opens at the top, just under the screen's header, and never reaches under the
+  keyboard, so the field stays in place while the list shrinks.
 -->
 <script module lang="ts">
   import { model } from '../store.ts';
@@ -14,7 +14,7 @@
   export function matches(s: Stream, q: string): boolean {
     if (!q) return true;
     const m = model.value;
-    const hay = [s.name, s.folder, s.cwd, s.tool, m?.workspaces.find((w) => w.id === s.workspaceId)?.name, m?.projects.find((p) => p.id === s.projectId)?.name].filter(Boolean).join(' ').toLowerCase();
+    const hay = [s.name, s.title, s.folder, s.cwd, s.tool, m?.workspaces.find((w) => w.id === s.workspaceId)?.name, m?.projects.find((p) => p.id === s.projectId)?.name].filter(Boolean).join(' ').toLowerCase();
     return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
   }
 
