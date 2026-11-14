@@ -1,8 +1,8 @@
 /* Briardr — plain, system-native styling. Light and dark; Dynamic Type via the system body font. */
 /* The design tokens ("Quiet chrome, loud state"): warm stone neutrals, an ink primary, and saturated
-   colour only for state. Light under :root, dark under prefers-color-scheme. */
+   colour only for state. Light under :root, dark under :root[data-theme='dark']. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Geist Mono', Menlo, monospace;
   --bg-canvas: #F6F5F3;
@@ -137,64 +137,64 @@
   /* Layout: the screen gutter, 16 on iPhone (20 on iPad and Mac, below). */
   --gutter: var(--space-4);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-canvas: #0D0C0B;
-    --bg-surface: #171614;
-    --bg-raised: #211F1D;
-    --bg-sunken: #24221F;
-    --bg-selected: #2E2B28;
-    --line-subtle: #24221F;
-    --line-default: #2F2C29;
-    --line-strong: #47423D;
-    --text-primary: #F4F2EF;
-    --text-secondary: #B3ACA4;
-    --text-tertiary: #8F8880;
-    --text-on-ink: #171614;
-    --text-on-state: #1A0F06;
-    --ink-default: #F4F2EF;
-    --ink-pressed: #D9D4CE;
-    --brand-fawn: #D9A066;
-    --brand-fawn-bg: #2A1E13;
-    --state-attention: #FF9A57;
-    --state-attention-bg: #2C1A0D;
-    --state-attention-line: #57321A;
-    --state-working: #6AA8FF;
-    --state-working-bg: #0F1C31;
-    --state-finished: #5AD08A;
-    --state-finished-bg: #0E2517;
-    --state-ready: #A39C95;
-    --state-ready-bg: #26231F;
-    --state-danger: #FF7A6E;
-    --state-danger-bg: #321311;
-    --diff-add: #6EDC9A;
-    --diff-add-bg: #0F2418;
-    --diff-del: #FF8E85;
-    --diff-del-bg: #2D1311;
-    --term-bg: #0A0A09;
-    --term-fg: #E7E3DE;
-    --term-dim: #7F786F;
-    --term-green: #6EDC9A;
-    --term-blue: #7AB2FF;
-    --term-amber: #F2C46B;
-    --term-magenta: #D7A1F5;
-    --shadow-color: #00000099;
-    --hl-keyword: #ff7b72;
-    --hl-title: #d2a8ff;
-    --hl-const: #79c0ff;
-    --hl-string: #a5d6ff;
-    --hl-builtin: #ffa657;
-    --hl-comment: #8e8e93;
-    --hl-tag: #7ee787;
-    --hl-bullet: #f2cc60;
-    --tint-yellow: #e5c07b;
-    --tint-orange: #f0a35e;
-    --tint-blue: #61afef;
-    --tint-teal: #56c8c8;
-    --tint-green: #7fd18a;
-    --tint-purple: #c49bff;
-    --tint-image: #f06292;
-  }
+/* web/public/theme.js sets data-theme before the first paint: this device's choice, else the system's. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-canvas: #0D0C0B;
+  --bg-surface: #171614;
+  --bg-raised: #211F1D;
+  --bg-sunken: #24221F;
+  --bg-selected: #2E2B28;
+  --line-subtle: #24221F;
+  --line-default: #2F2C29;
+  --line-strong: #47423D;
+  --text-primary: #F4F2EF;
+  --text-secondary: #B3ACA4;
+  --text-tertiary: #8F8880;
+  --text-on-ink: #171614;
+  --text-on-state: #1A0F06;
+  --ink-default: #F4F2EF;
+  --ink-pressed: #D9D4CE;
+  --brand-fawn: #D9A066;
+  --brand-fawn-bg: #2A1E13;
+  --state-attention: #FF9A57;
+  --state-attention-bg: #2C1A0D;
+  --state-attention-line: #57321A;
+  --state-working: #6AA8FF;
+  --state-working-bg: #0F1C31;
+  --state-finished: #5AD08A;
+  --state-finished-bg: #0E2517;
+  --state-ready: #A39C95;
+  --state-ready-bg: #26231F;
+  --state-danger: #FF7A6E;
+  --state-danger-bg: #321311;
+  --diff-add: #6EDC9A;
+  --diff-add-bg: #0F2418;
+  --diff-del: #FF8E85;
+  --diff-del-bg: #2D1311;
+  --term-bg: #0A0A09;
+  --term-fg: #E7E3DE;
+  --term-dim: #7F786F;
+  --term-green: #6EDC9A;
+  --term-blue: #7AB2FF;
+  --term-amber: #F2C46B;
+  --term-magenta: #D7A1F5;
+  --shadow-color: #00000099;
+  --hl-keyword: #ff7b72;
+  --hl-title: #d2a8ff;
+  --hl-const: #79c0ff;
+  --hl-string: #a5d6ff;
+  --hl-builtin: #ffa657;
+  --hl-comment: #8e8e93;
+  --hl-tag: #7ee787;
+  --hl-bullet: #f2cc60;
+  --tint-yellow: #e5c07b;
+  --tint-orange: #f0a35e;
+  --tint-blue: #61afef;
+  --tint-teal: #56c8c8;
+  --tint-green: #7fd18a;
+  --tint-purple: #c49bff;
+  --tint-image: #f06292;
 }
 
 * { box-sizing: border-box; }

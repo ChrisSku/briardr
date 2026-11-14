@@ -20,6 +20,7 @@ import { PROTOCOL } from '../live.ts';
 import { activeMods, applyModsToText, consumeMods, fromKeyEvent, type Outgoing } from './keys.ts';
 import { linkAt, registerLinkProvider } from './links.ts';
 import { theHost, TheHost } from '../host.ts';
+import { isDark, onThemeChange } from '../theme.ts';
 import { deferUpdatesWhile } from '../updates.ts';
 
 // An update doesn't reload the app out from under someone typing in a terminal (web/src/updates.ts).
@@ -105,8 +106,7 @@ export class TerminalController {
   private programMouse = false;
   private webgl: WebglAddon | null = null;
   private desired = { cols: 80, rows: 24 };
-  private scheme = matchMedia('(prefers-color-scheme: dark)');
-  private onScheme = (e: MediaQueryListEvent) => (this.term.options.theme = themeFor(e.matches));
+  private themeOff: () => void;
 
   constructor(opts: ControllerOptions) {
     this.opts = opts;
@@ -123,7 +123,7 @@ export class TerminalController {
       disableStdin: opts.mode === 'observe',
       screenReaderMode: opts.screenReader,
       macOptionIsMeta: false,
-      theme: themeFor(this.scheme.matches),
+      theme: themeFor(isDark()),
       linkHandler: {
         activate: (_e, uri) => this.opts.onLink(uri),
         allowNonHttpProtocols: false,
@@ -132,8 +132,8 @@ export class TerminalController {
     this.term.loadAddon(this.serialize);
     this.term.loadAddon(new Unicode11Addon());
     this.term.unicode.activeVersion = '11';
-    // Removed in dispose(): a listener left on the media query keeps the whole terminal reachable.
-    this.scheme.addEventListener('change', this.onScheme);
+    // Removed in dispose(): a listener left on the theme keeps the whole terminal reachable.
+    this.themeOff = onThemeChange((dark) => (this.term.options.theme = themeFor(dark)));
 
     // Typed text (on-screen keyboard or hardware keyboard) arrives here, and so do the terminal's own
     // replies to the program's queries. xterm marks typing just before (a private event); without
@@ -458,7 +458,7 @@ export class TerminalController {
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.saveNow();
       this.netOff?.();
-      this.scheme.removeEventListener('change', this.onScheme);
+      this.themeOff();
       this.resizeObs?.disconnect();
       this.webgl?.dispose();
       this.term.dispose();

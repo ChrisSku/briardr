@@ -58,7 +58,14 @@ export const live = derived(() => conn.value.state === 'online');
 export const stale = derived(() => conn.value.state !== 'online' || !herdr.value?.ok);
 
 // ---------- device-only preferences ----------
-export const prefs = persisted('briardr.prefs', {
+export const prefs = persisted<{
+  fontSize: number;
+  bracketedPaste: boolean;
+  screenReaderTerminal: boolean;
+  lowBatteryInApp: boolean;
+  /** Light or dark whatever the system says (web/src/theme.ts); missing until it's chosen. */
+  theme?: 'system' | 'light' | 'dark';
+}>('briardr.prefs', {
   fontSize: 13,
   bracketedPaste: true,
   screenReaderTerminal: false,

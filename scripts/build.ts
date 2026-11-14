@@ -188,7 +188,7 @@ async function build() {
       __BRIARDR_ICON__: JSON.stringify(icons['/icons/icon-192.png']),
       // Chunks too, so a client still on this version can load them after the next build replaced them.
       // The brand tile's dog is linked from the app by its plain name.
-      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
+      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', '/theme.js', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
     },
   });
 

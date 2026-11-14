@@ -1293,6 +1293,46 @@ describe('settings', () => {
   });
 });
 
+describe('appearance', () => {
+  test('a device can stay light or dark whatever its system says, in the terminal too, and go back to following it', async () => {
+    const a = await device('iphone', 'phone-theme');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const page = () => a.page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      canvas: getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim().toLowerCase(),
+      bar: document.querySelector('meta[name="theme-color"]')!.getAttribute('content'),
+    }));
+    const terminal = () => a.page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background as string);
+    const choose = async (label: string) => {
+      await a.page.goto(s.base + '/settings/appearance');
+      await a.page.locator('#set-appearance label', { hasText: label }).click();
+    };
+    assert.deepEqual(await page(), { theme: 'light', canvas: '#f6f5f3', bar: '#f6f5f3' }, 'the system is light');
+
+    await choose('Dark');
+    assert.deepEqual(await page(), { theme: 'dark', canvas: '#0d0c0b', bar: '#0d0c0b' });
+    await a.page.goto(s.base + '/settings');
+    await a.page.locator('.set-row', { hasText: 'Appearance' }).getByText('Dark').waitFor();
+    await openTarget(a.page);
+    assert.equal(await terminal(), '#0a0a09');
+    // The choice is applied before the page paints, so a launch doesn't flash the system's theme.
+    await a.page.reload();
+    assert.equal((await page()).theme, 'dark');
+
+    await choose('Light');
+    await a.page.emulateMedia({ colorScheme: 'dark' });
+    assert.equal((await page()).theme, 'light', 'light although the system is dark now');
+    await choose('System');
+    assert.equal((await page()).theme, 'dark');
+    // An open terminal follows a change of theme.
+    await openTarget(a.page);
+    assert.equal(await terminal(), '#0a0a09');
+    await a.page.emulateMedia({ colorScheme: 'light' });
+    await a.page.waitForFunction(() => (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background === '#ffffff');
+    assert.equal((await page()).theme, 'light');
+  });
+});
+
 describe('key bar settings', () => {
   test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
     const { ctx, page } = await device('iphone', 'phone-keybar');
