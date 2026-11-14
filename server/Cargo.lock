@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "briardr-server"
-version = "0.3.21"
+version = "0.3.22"
 dependencies = [
  "aes-gcm",
  "anyhow",
