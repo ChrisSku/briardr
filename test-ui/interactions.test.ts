@@ -512,6 +512,40 @@ describe('terminal input (iPhone)', () => {
     assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the paste');
   });
 
+  test('Compose keeps a draft, inserts it as one bracketed paste without Enter, and offers it again', async () => {
+    const compose = page.getByRole('dialog', { name: 'Compose' });
+    const area = compose.getByLabel('Message for ui target');
+    const open = async () => {
+      await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+      await page.getByRole('menuitem', { name: /Compose/ }).click();
+      await page.waitForFunction(() => document.activeElement?.classList.contains('compose-area'));
+    };
+    await open();
+    // A text field of the device: autocorrection and capitals stay on, and iOS doesn't zoom into it.
+    assert.equal(await area.getAttribute('autocorrect'), null);
+    assert.equal(await area.getAttribute('autocapitalize'), null);
+    assert.ok(parseFloat(await area.evaluate((e) => getComputedStyle(e).fontSize)) >= 16);
+    await area.fill('Check the login test,\nthen fix it');
+    await compose.getByRole('button', { name: 'Close' }).click();
+    await sleep(300);
+    assert.ok(!Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1').includes('login test'), 'closing inserts nothing');
+
+    await open();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it', 'the draft is back');
+    await compose.getByRole('button', { name: 'Insert', exact: true }).click();
+    await expectBytes(hex('\x1b[200~Check the login test,\nthen fix it\x1b[201~'));
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the message');
+
+    await open();
+    assert.equal(await area.inputValue(), '', 'an inserted message leaves no draft');
+    await compose.getByRole('button', { name: 'Check the login test, then fix it' }).click();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it');
+    await area.fill('');
+    await compose.getByRole('button', { name: 'Clear', exact: true }).click();
+    assert.equal(await compose.locator('.compose-recent').count(), 0);
+  });
+
   test('an image is reviewed, made a PNG within 4096 px, uploaded privately, and its path inserted without Enter', async () => {
     await page.getByRole('button', { name: 'Insert text, image or file' }).click();
     const chooser = page.waitForEvent('filechooser');

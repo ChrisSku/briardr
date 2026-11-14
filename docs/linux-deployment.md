@@ -313,7 +313,7 @@ Briardr on the internet relies on device pairing rather than on network membersh
   credentials. It is not tested; if you add one, test pairing, WebSockets, the Home Screen app and
   notification taps through it yourself.
 - **Mac-only features are off:** battery, Always on, Sleep Mac, server dictation (use the keyboard's
-  dictation in text fields) and the Keychain usage source. The UI hides them and the API answers
+  dictation in text fields, such as Compose) and the Keychain usage source. The UI hides them and the API answers
   `501 unsupported`.
 
 ## Previews
