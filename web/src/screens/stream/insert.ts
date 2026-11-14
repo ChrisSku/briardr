@@ -8,6 +8,21 @@ export function acceptsImages(s: Stream): boolean {
   return s.kind === 'agent' && (s.tool === 'claude' || s.tool === 'codex');
 }
 
+/** Something picked, pasted or dropped to send: an image is made a PNG first, a file goes as it is. */
+export interface UploadItem {
+  file: File | Blob;
+  kind: 'image' | 'file';
+}
+export const uploadItems = (files: Iterable<File>): UploadItem[] => Array.from(files, (file) => ({ file, kind: file.type.startsWith('image/') ? 'image' : 'file' }));
+
+/**
+ * The uploaded files' quoted paths as one paste. An agent gets each on a line of its own: Claude Code
+ * attaches an image path that has a line to itself. Any other program gets them as a shell's arguments.
+ */
+export function joinPaths(quoted: string[], s: Pick<Stream, 'kind'>): string {
+  return quoted.join(s.kind === 'agent' ? '\n' : ' ');
+}
+
 // ---------- Compose: this device's drafts and the messages inserted last ----------
 
 export const MAX_RECENT = 20;

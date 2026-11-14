@@ -34,7 +34,7 @@
   import { Icon } from '../../ui/icons/index.ts';
   import { openMenu, type MenuItem } from '../../ui/kit.ts';
   import ComposeSheet from './ComposeSheet.svelte';
-  import { acceptsImages } from './insert.ts';
+  import { acceptsImages, uploadItems, type UploadItem } from './insert.ts';
   import KeyBar from './keybar/KeyBar.svelte';
   import { keyboardInset } from '../../keyboard.svelte.ts';
   import PasteSheet from './PasteSheet.svelte';
@@ -61,7 +61,7 @@
     const safeBottom = wrap ? parseFloat(getComputedStyle(wrap).paddingBottom) || 0 : 0;
     return Math.max(0, kb.current - safeBottom);
   });
-  let sheet = $state.raw<null | { k: 'compose' } | { k: 'paste'; text: string } | { k: 'upload'; file: File | Blob; kind: 'image' | 'file' } | { k: 'select'; text: string; start: number; end: number }>(null);
+  let sheet = $state.raw<null | { k: 'compose' } | { k: 'paste'; text: string } | { k: 'upload'; items: UploadItem[] } | { k: 'select'; text: string; start: number; end: number }>(null);
   let dictating = $state(false);
   let level = $state(0);
   let rec: Recorder | null = null;
@@ -80,7 +80,7 @@
     const sizes = ctl.term.onResize(() => resized++);
     // Paste from a hardware keyboard / context menu goes through review for files, directly for text.
     ctl.onPaste = (p) => {
-      if ('file' in p) sheet = { k: 'upload', file: p.file, kind: p.file.type.startsWith('image/') ? 'image' : 'file' };
+      if ('file' in p) sheet = { k: 'upload', items: uploadItems([p.file]) };
       else if (p.text.length > 2000 || p.text.includes('\n')) sheet = { k: 'paste', text: p.text };
       else ctl.paste(p.text, prefs.value.bracketedPaste);
     };
@@ -292,15 +292,34 @@
   }
 
   // ---------- + menu ----------
-  function pickFile(accept: string, kind: 'image' | 'file') {
+  function pickFiles(accept: string, kind: 'image' | 'file') {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
+    input.multiple = true;
     input.onchange = () => {
-      const f = input.files?.[0];
-      if (f) sheet = { k: 'upload', file: f, kind };
+      if (input.files?.length) sheet = { k: 'upload', items: Array.from(input.files, (file) => ({ file, kind })) };
     };
     input.click();
+  }
+
+  // ---------- files dropped on the terminal (a Mac or an iPad with a pointer) ----------
+  let dropping = $state(false);
+  const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
+  function ondragover(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); // or the browser opens the file in place of Briardr
+    dropping = true;
+  }
+  function ondrop(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dropping = false;
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    // An upload lands on this host, where a terminal on another machine can't open it.
+    if (stream.machine) return toast(`Files can’t be sent to a terminal on ${stream.machine}.`);
+    sheet = { k: 'upload', items: uploadItems(files) };
   }
 
   async function pasteFromClipboard() {
@@ -309,7 +328,7 @@
         const items = await navigator.clipboard.read();
         for (const it of items) {
           const img = it.types.find((t) => t.startsWith('image/'));
-          if (img) return (sheet = { k: 'upload', file: await it.getType(img), kind: 'image' });
+          if (img) return (sheet = { k: 'upload', items: [{ file: await it.getType(img), kind: 'image' }] });
         }
       }
       const text = await navigator.clipboard.readText();
@@ -329,8 +348,8 @@
         ...(stream.machine
           ? []
           : [
-              { label: 'Select image…', icon: 'image' as const, onSelect: () => pickFile('image/*', 'image'), hint: acceptsImages(stream) ? undefined : 'Inserts a path' },
-              { label: 'Select file…', icon: 'file' as const, onSelect: () => pickFile('*/*', 'file') },
+              { label: 'Select image…', icon: 'image' as const, onSelect: () => pickFiles('image/*', 'image'), hint: acceptsImages(stream) ? undefined : 'Inserts a path' },
+              { label: 'Select file…', icon: 'file' as const, onSelect: () => pickFiles('*/*', 'file') },
             ]),
       ],
       anchor,
@@ -429,7 +448,7 @@
 <div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
+  <div class={['term-host', !isLive && 'is-stale', dropping && 'is-drop']} bind:this={host} {ondragover} ondragleave={() => (dropping = false)} {ondrop} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
     <div class="term-shift" bind:this={shift}>
       <div class="term-screen" bind:this={screen}></div>
     </div>
@@ -465,6 +484,6 @@
   {/if}
   {#if sheet?.k === 'compose'}<ComposeSheet {ctl} {stream} onClose={() => (sheet = null)} />{/if}
   {#if sheet?.k === 'paste'}<PasteSheet {ctl} {stream} initial={sheet.text} onClose={() => (sheet = null)} />{/if}
-  {#if sheet?.k === 'upload'}<UploadSheet {ctl} {stream} file={sheet.file} kind={sheet.kind} onClose={() => (sheet = null)} />{/if}
+  {#if sheet?.k === 'upload'}<UploadSheet {ctl} {stream} items={sheet.items} onClose={() => (sheet = null)} />{/if}
   {#if sheet?.k === 'select'}<SelectTextSheet text={sheet.text} start={sheet.start} end={sheet.end} onClose={() => (sheet = null)} />{/if}
 </div>
