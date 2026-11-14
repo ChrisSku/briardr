@@ -1293,6 +1293,36 @@ describe('settings', () => {
   });
 });
 
+describe('devices', () => {
+  test('a device can be renamed; a revoke or a pairing code that fails says so and changes nothing', async () => {
+    const a = await device('iphone', 'phone-devices');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const other = s.run.auth.pair(s.run.auth.createPairingCode().code, 'old tablet');
+    assert.ok(other.ok);
+    await a.page.goto(s.base + '/settings/devices');
+    const row = (name: string) => a.page.locator('#set-devices .row', { hasText: name });
+    await row('old tablet').getByRole('button', { name: 'Rename old tablet' }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Rename device' });
+    await sheet.getByLabel('Name').fill('Kitchen tablet');
+    await sheet.getByRole('button', { name: 'Save' }).click();
+    await row('Kitchen tablet').waitFor();
+    assert.equal(await row('old tablet').count(), 0);
+
+    // The host can't do it (here: every change to a device fails).
+    await a.page.route((url) => url.pathname.startsWith('/api/devices/'), (route) =>
+      route.request().method() === 'GET' ? route.continue() : route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal","message":"The host couldn’t save that."}' }),
+    );
+    await row('Kitchen tablet').getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByRole('dialog', { name: 'Revoke Kitchen tablet?' }).getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    await row('Kitchen tablet').waitFor();
+    await a.page.getByText('The host couldn’t save that.').waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    assert.equal(await a.page.locator('.pair-code').count(), 0);
+  });
+});
+
 describe('key bar settings', () => {
   test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
     const { ctx, page } = await device('iphone', 'phone-keybar');

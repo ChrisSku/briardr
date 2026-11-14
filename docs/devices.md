@@ -134,6 +134,11 @@ notes, drafts, pairing, and settings stay. A device keeps this build's offline s
 one, the 200 most recent plugin files, and cached terminal screens of streams opened in the last 30
 days (at most 100).
 
+## Device names
+
+Settings → Devices lists every signed-in device under the name it got at pairing. The pencil beside a
+device renames it, from any signed-in device; the device stays signed in.
+
 ## Lost device or changed URL
 
 Revoke a lost device in Settings → Devices, or run `briardr devices` followed by

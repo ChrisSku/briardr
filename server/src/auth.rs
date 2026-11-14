@@ -201,6 +201,19 @@ impl Auth {
         let _ = self.revoked.send(id.to_string());
         Ok(true)
     }
+    /// Renames a device, with the name cleaned as at pairing. `Ok(false)` when there's no such device.
+    pub fn rename(&self, id: &str, name: &str) -> Result<bool, ConfigError> {
+        let mut devices = self.lock();
+        let mut next = devices.clone();
+        let Some(device) = next.iter_mut().find(|d| d.id == id) else {
+            return Ok(false);
+        };
+        device.name = clean_name(name);
+        // Keep the old name if the change can't be saved, so the file and memory still agree.
+        save_devices(&self.devices_file, &next)?;
+        *devices = next;
+        Ok(true)
+    }
     /// Device for the request's cookie, if any.
     pub fn authenticate(&self, cookie_header: Option<&str>) -> Option<Device> {
         let value = cookie_header.and_then(|h| read_cookie(h, COOKIE))?;
@@ -457,6 +470,27 @@ mod tests {
         assert!(!auth.revoke(&device.id).unwrap());
         assert_eq!(auth.authenticate(Some(&header)), None);
         assert_eq!(revoked.try_recv().ok(), Some(device.id.clone()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_keeps_the_device_signed_in_and_survives_a_restart() {
+        let dir = Scratch::new("auth-rename");
+        let auth = auth_in(&dir);
+        let (code, _) = auth.create_pairing_code();
+        let (device, cookie) = auth
+            .pair(&code, "Phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let header = format!("__Host-briardr={cookie}");
+
+        assert!(auth.rename(&device.id, "Work\u{7} phone").unwrap());
+        assert!(!auth.rename("no-such-device", "x").unwrap());
+        assert_eq!(auth.list()[0].name, "Work phone");
+        assert_eq!(
+            auth.authenticate(Some(&header)).map(|d| d.name),
+            Some("Work phone".to_string())
+        );
+        assert_eq!(auth_in(&dir).list()[0].name, "Work phone");
         let _ = fs::remove_dir_all(&dir);
     }
 

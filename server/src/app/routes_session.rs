@@ -5,7 +5,8 @@ use axum::http::Method;
 use serde_json::{json, Value};
 
 use super::{
-    caps_json, json_body, ok, response, send, str_or_empty, ApiError, App, Ctx, Routes, VERSION,
+    action_err, caps_json, json_body, ok, response, send, str_or_empty, ApiError, App, Ctx, Routes,
+    VERSION,
 };
 use crate::auth::PairError;
 use crate::terminal_hub::PROTOCOL;
@@ -189,6 +190,32 @@ pub(super) fn register(r: &mut Routes) {
                 &json!({"ok": removed}),
                 &[],
             ))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/devices/:id/rename",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let b = json_body(&mut ctx, 4096).await?;
+            let name = str_or_empty(b.get("name")).trim().to_string();
+            if name.is_empty() {
+                return Err(action_err(400, "invalid_name", "Enter a name."));
+            }
+            let id = ctx.param("id").to_string();
+            let auth = app.d.auth.clone();
+            let renamed = blocking(move || auth.rename(&id, &name))
+                .await?
+                .map_err(|_| ApiError::Internal)?;
+            if !renamed {
+                return Err(action_err(
+                    404,
+                    "device_gone",
+                    "That device is no longer signed in.",
+                ));
+            }
+            ok(json!({"ok": true}))
         },
     );
 
