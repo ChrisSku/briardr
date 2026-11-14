@@ -1536,3 +1536,56 @@ describe('Files prompt', () => {
     assert.equal(stored, '{}');
   });
 });
+
+describe('Changes review', () => {
+  test('lines picked in a diff take a comment; the comments go to the terminal as one paste, without Enter', async () => {
+    const fs = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const repo = testPane('briardr-ui-changes');
+    onTestFinished(() => closeWorkspace(repo.workspace));
+    herdr('pane', 'rename', repo.pane, 'changes target');
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir });
+    git('init', '-q');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ntwo\nthree\n');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'first');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\nTWO\nthree\n');
+    await s.run.herdr.refresh();
+
+    const a = await device('iphone', 'phone-changes-review');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const pastes: string[] = [];
+    a.page.on('websocket', (sock) => sock.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') return;
+      try { const m = JSON.parse(payload); if (m.t === 'input') pastes.push(m.paste ? m.paste.text : JSON.stringify(m)); } catch {}
+    }));
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.locator('.tree-streams .row-main', { hasText: 'changes target' }).click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).click();
+    const diff = a.page.getByRole('region', { name: 'Diff of a.txt' });
+    // Tapping a number picks that line, a second number makes a range; tapping the text doesn't.
+    await diff.locator('.dl-add').click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Line 2' }).waitFor();
+    await diff.locator('.dl-ctx').last().click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Lines 2–3' }).waitFor();
+    await diff.locator('.dl-del').click({ position: { x: 120, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Lines 2–3' }).waitFor();
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('Use a constant');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    assert.equal(await diff.locator('.is-noted').count(), 2);
+
+    const bar = a.page.getByRole('region', { name: 'Review', exact: true });
+    await bar.getByText('1 comment for the agent').waitFor();
+    await bar.getByRole('button', { name: 'Review…' }).click();
+    await a.page.getByLabel('Note for the agent (optional)').fill('Small review');
+    await a.page.getByRole('button', { name: 'Send to terminal' }).click();
+    // Sending clears the review and shows the terminal, where Enter is pressed.
+    await a.page.waitForSelector('[role=tab][aria-selected=true]:has-text("Terminal")');
+    await sleep(300);
+    assert.deepEqual(pastes, ['Small review\n\na.txt 2-3\n```diff\n+TWO\n three\n```\nUse a constant'], 'one paste and no Enter');
+    assert.equal(await a.page.evaluate(() => localStorage.getItem('briardr.changes.review')), '{}');
+  });
+});

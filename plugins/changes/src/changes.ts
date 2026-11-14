@@ -1,5 +1,6 @@
 // What the Changes surface shows: uncommitted work against HEAD, as the Mac reports it.
 import { persisted } from '@briardr/sdk';
+import type { Comment, Review } from './review.ts';
 
 /** Files marked reviewed on this device, by stream, with the change they were reviewed at (`signature`). */
 export const reviewed = persisted<Record<string, Record<string, string>>>('briardr.reviewed', {});
@@ -32,3 +33,23 @@ export interface Report {
 }
 
 export const LETTER: Record<string, string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', type: 'T', untracked: 'U', conflict: '!' };
+
+// ---------- review comments, kept on this device per stream until they are sent or cleared ----------
+const reviews = persisted<Record<string, Review>>('briardr.changes.review', {});
+const EMPTY: Review = { note: '', comments: [] };
+
+export const reviewOf = (sid: string): Review => reviews.value[sid] ?? EMPTY;
+
+function put(sid: string, r: Review) {
+  const next = { ...reviews.value };
+  if (r.comments.length || r.note) next[sid] = r;
+  else delete next[sid];
+  reviews.value = next;
+}
+export const addComment = (sid: string, c: Comment) => put(sid, { ...reviewOf(sid), comments: [...reviewOf(sid).comments, c] });
+export function removeComment(sid: string, i: number) {
+  const r = reviewOf(sid);
+  put(sid, { ...r, comments: r.comments.filter((_, j) => j !== i) });
+}
+export const setNote = (sid: string, note: string) => put(sid, { ...reviewOf(sid), note });
+export const clearReview = (sid: string) => put(sid, EMPTY);
