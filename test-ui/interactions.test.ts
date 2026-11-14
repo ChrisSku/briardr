@@ -79,14 +79,21 @@ async function startEcho(mode: '' | '--kitty' = '') {
   echoing = true;
 }
 /** Quit whatever the pane runs and wait until its shell answers: a command typed before the prompt is back
- *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts. */
+ *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts.
+ *  The shell is asked again when no answer shows. An answer can be printed and gone: when the last test's
+ *  page gives up control, the pane goes back to its own size, which on a busy machine can still be under way
+ *  after `ctx.close()` returned, and zsh redraws its prompt after a resize one line too high, over the answer. */
 let syncs = 0;
 async function settleShell() {
-  const n = 1000 + ++syncs;
-  herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-  // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
-  herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
-  await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)));
+  for (const t0 = Date.now(); ; ) {
+    const n = 1000 + ++syncs;
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
+    herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
+    const answered = await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)), 2000).then(() => true, () => false);
+    if (answered) return;
+    if (Date.now() - t0 > WAIT) throw new Error('timed out waiting for the shell to answer');
+  }
 }
 /** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
