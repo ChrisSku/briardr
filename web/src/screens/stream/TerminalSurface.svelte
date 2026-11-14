@@ -206,7 +206,20 @@
     ctl.mouse('move', 'left', c.col, c.row, modifiers(e));
   }
 
+  // On a touch screen the key bar's keyboard key opens and closes the on-screen keyboard: a tap opens a
+  // link and a swipe scrolls, both leaving the keyboard as it is. With the bar hidden for a hardware
+  // keyboard, where no on-screen one shows, a tap puts the focus in the terminal instead. iOS follows a
+  // tap with a mousedown, on which xterm would focus its input (opening the keyboard) or the page would
+  // take focus (closing it), so that mousedown stops here.
+  let lastPointer = 'mouse';
+  function onmousedowncapture(e: MouseEvent) {
+    if (lastPointer === 'mouse') return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
   function onpointerdown(e: PointerEvent) {
+    lastPointer = e.pointerType;
     if (e.pointerType === 'mouse') return mousePress(e);
     const cell = ctl.cellAt(e.clientX, e.clientY);
     const long = window.setTimeout(() => {
@@ -229,8 +242,6 @@
       cur.moved = true;
       if (cur.long) clearTimeout(cur.long);
       cur.long = null;
-      // A swipe while typing dismisses the keyboard and keeps scrolling the same connection.
-      if (kb.current) ctl.blur();
     }
     if (!cur.moved) return;
     const dy = e.clientY - cur.lastY;
@@ -252,7 +263,7 @@
     if (cur.moved) return;
     const link = ctl.linkAt(cur.cell.col, cur.cell.row);
     if (link) return openLink(link);
-    if (controlling) ctl.focus();
+    if (!showKeyBar) ctl.focus();
   }
 
   function onpointercancel() {
@@ -423,7 +434,7 @@
 <div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onwheelcapture} {oncontextmenu}>
+  <div class={['term-host', !isLive && 'is-stale']} bind:this={host} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
     <div class="term-shift" bind:this={shift}>
       <div class="term-screen" bind:this={screen}></div>
     </div>
