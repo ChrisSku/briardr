@@ -20,7 +20,7 @@
   let { ctl, stream, items, onClose }: { ctl: TerminalController; stream: Stream; items: UploadItem[]; onClose: () => void } = $props();
 
   const MAX_FILE_BYTES = 100 * 1024 * 1024;
-  type Phase = { k: 'review' } | { k: 'uploading'; sent: number; total: number } | { k: 'error'; message: string } | { k: 'not_inserted'; paths: string[] };
+  type Phase = { k: 'review' } | { k: 'uploading'; sent: number; total: number } | { k: 'error'; message: string } | { k: 'not_inserted'; why: string; paths: string[] };
   interface Entry extends UploadItem {
     name: string;
     /** An image as it will be sent, once it's ready. */
@@ -38,19 +38,29 @@
   const one = $derived(entries.length === 1 ? entries[0] : null);
   const images = $derived(entries.filter((e) => e.kind === 'image'));
   const noun = $derived(images.length === entries.length ? 'image' : 'file');
-  const ready = $derived(entries.length > 0 && images.every((e) => e.img));
+  const tooLarge = (e: Entry) => e.kind === 'file' && e.file.size > MAX_FILE_BYTES;
+  const ready = $derived(entries.length > 0 && entries.every((e) => (e.kind === 'image' ? e.img : !tooLarge(e))));
   const size = (bytes: number) => `${(bytes / 1024).toFixed(bytes > 1024 * 1024 ? 0 : 1)} KB`;
 
   onMount(() => {
     // A reload would drop the picked files, so an update waits until the sheet closes.
     const release = holdUpdates('you send or close the file');
-    for (const e of entries)
-      if (e.kind === 'image')
-        prepareImage(e.file, e.name).then(
-          (img) => (entries = entries.map((x) => (x.file === e.file ? { ...x, img } : x))),
-          () => (entries = entries.map((x) => (x.file === e.file ? { ...x, prepError: true } : x))),
-        );
+    let closed = false;
+    // One image at a time: each is decoded at full size, and a phone has memory for only a few.
+    (async () => {
+      for (const e of entries.filter((x) => x.kind === 'image')) {
+        if (!entries.includes(e)) continue; // removed before its turn
+        const img = await prepareImage(e.file, e.name).catch(() => null);
+        // Closed or removed meanwhile: nothing will show it.
+        if (closed || !entries.includes(e)) {
+          if (img) URL.revokeObjectURL(img.url);
+        } else entries = entries.map((x) => (x === e ? { ...x, img, prepError: !img } : x));
+        if (closed) return;
+      }
+    })();
     return () => {
+      closed = true;
+      abort?.abort();
       release();
       for (const e of entries) if (e.img) URL.revokeObjectURL(e.img.url);
     };
@@ -63,7 +73,6 @@
 
   async function start() {
     const parts = entries.map((e) => ({ kind: e.kind, blob: e.kind === 'image' ? e.img!.blob : e.file, name: e.kind === 'image' ? e.img!.name : e.name }));
-    if (parts.some((p) => p.kind === 'file' && p.blob.size > MAX_FILE_BYTES)) return (phase = { k: 'error', message: 'Files are limited to 100 MB.' });
     abort = new AbortController();
     const total = parts.reduce((n, p) => n + p.blob.size, 0);
     let done = 0;
@@ -78,7 +87,8 @@
       }
       record('upload_done', { kind: noun, count: parts.length, ms: Math.round(performance.now() - t0) });
       if (gen !== ctl.generation.value || !ctl.canInput) {
-        phase = { k: 'not_inserted', paths: stored.map((r) => r.path) };
+        const why = gen !== ctl.generation.value ? `the connection to ${theHost()} changed since you picked this` : 'you aren’t controlling this stream';
+        phase = { k: 'not_inserted', why, paths: stored.map((r) => r.path) };
         return;
       }
       ctl.paste(joinPaths(stored.map((r) => r.quoted), stream), true, gen);
@@ -99,10 +109,7 @@
 
 <Sheet
   title={one ? (one.kind === 'image' ? 'Send image' : 'Send file') : `Send ${entries.length} ${noun}s`}
-  onClose={() => {
-    abort?.abort();
-    onClose();
-  }}
+  {onClose}
   wide
 >
   {#if one?.kind === 'image'}
@@ -120,6 +127,7 @@
     </div>
   {:else if one}
     <p class="file-line"><strong>{one.name}</strong> · {size(one.file.size)}</p>
+    {#if tooLarge(one)}<p class="error">Files are limited to 100 MB.</p>{/if}
   {:else}
     <ul class="upload-list" aria-label="What will be sent">
       {#each entries as e (e.file)}
@@ -127,8 +135,8 @@
           {#if e.img}<img src={e.img.url} alt="" />{:else}<span class="upload-thumb"><Icon name={e.kind === 'image' ? 'image' : 'file'} size={20} /></span>{/if}
           <span class="upload-text">
             <strong>{e.name}</strong>
-            <span class={e.prepError ? 'error' : 'hint'}>
-              {#if e.kind === 'file'}{size(e.file.size)}{:else if e.img}{@render imageInfo(e.img)}{:else if e.prepError}This image couldn’t be read.{:else}Preparing image…{/if}
+            <span class={e.prepError || tooLarge(e) ? 'error' : 'hint'}>
+              {#if e.kind === 'file'}{size(e.file.size)}{tooLarge(e) ? ' · over the 100 MB limit' : ''}{:else if e.img}{@render imageInfo(e.img)}{:else if e.prepError}This image couldn’t be read.{:else}Preparing image…{/if}
             </span>
           </span>
           {#if phase.k === 'review' || phase.k === 'error'}
@@ -151,7 +159,7 @@
   {#if phase.k === 'error'}<p class="error" role="alert">{phase.message}</p>{/if}
   {#if phase.k === 'not_inserted'}
     <p class="note" role="alert">
-      Uploaded, but not inserted: the connection to {theHost()} changed since you picked this, so Briardr didn’t type into the terminal.
+      Uploaded, but not inserted: {phase.why}, so Briardr didn’t type into the terminal.
       {#if phase.paths.length === 1}The file is at <code>{phase.paths[0]}</code>.{:else}The files are at:{#each phase.paths as p}<br /><code>{p}</code>{/each}{/if}
     </p>
   {/if}

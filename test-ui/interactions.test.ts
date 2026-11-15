@@ -792,28 +792,47 @@ describe('agents list, peek, banners and links', () => {
     herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
   });
 
-  test('files dropped on the terminal are offered for sending, an image as the PNG it becomes', async () => {
+  test('files dropped on a terminal you control are offered for sending, an image as the PNG it becomes', async () => {
+    // A 40 px PNG and a log, and with `huge` a file over the 100 MB limit, dropped on the page's terminal.
+    const drop = (page: Page, huge = false) =>
+      page.locator('.term-host').evaluate(async (host, huge) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d')!.fillRect(0, 0, 40, 40);
+        const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
+        dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        if (huge) dt.items.add(new File([new ArrayBuffer(100 * 1024 * 1024 + 1)], 'huge.bin'));
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+        host.dispatchEvent(over);
+        if (!over.defaultPrevented) throw new Error('the drop was not accepted');
+        host.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      }, huge);
     const a = await device('mac', 'mac-drop');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await openTarget(a.page);
-    await a.page.locator('.term-host').evaluate(async (host) => {
-      const c = document.createElement('canvas');
-      c.width = c.height = 40;
-      c.getContext('2d')!.fillRect(0, 0, 40, 40);
-      const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
-      const dt = new DataTransfer();
-      dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
-      dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
-      const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
-      host.dispatchEvent(over);
-      if (!over.defaultPrevented) throw new Error('the drop was not accepted');
-      host.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-    });
-    const sheet = a.page.getByRole('dialog', { name: 'Send 2 files' });
+    // A window that only watches gets nothing from a drop, not even an upload.
+    const b = await device('mac', 'mac-drop-watching');
+    onTestFinished(() => b.ctx.close().catch(() => {}));
+    await b.page.goto(s.base + '/workspaces');
+    await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
+    await b.page.waitForSelector('[data-ownership=watching]');
+    await drop(b.page);
+    await b.page.getByText('Take control to send files.').waitFor();
+    assert.equal(await b.page.getByRole('dialog').count(), 0, 'nothing is offered for sending');
+    await b.ctx.close();
+
+    await drop(a.page, true);
+    const sheet = a.page.getByRole('dialog', { name: 'Send 3 files' });
     await sheet.getByText('shot.png').waitFor();
     await sheet.getByText('40 × 40 px PNG').waitFor();
     await sheet.getByText('build.log').waitFor();
-    await sheet.getByRole('button', { name: 'Upload and insert 2 paths' }).waitFor();
+    // A file over the limit holds the others back until it's removed.
+    await sheet.getByText('over the 100 MB limit').waitFor();
+    assert.ok(await sheet.getByRole('button', { name: 'Upload and insert 3 paths' }).isDisabled());
+    await sheet.getByRole('button', { name: 'Remove huge.bin' }).click();
+    assert.ok(await a.page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).isEnabled());
     assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
   });
 

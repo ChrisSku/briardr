@@ -45,7 +45,11 @@ export async function prepareImage(file: Blob, name = 'image'): Promise<Prepared
     c2.height = h;
     c2.getContext('2d')!.drawImage(canvas, 0, 0, w, h);
     blob = await new Promise((resolve, reject) => c2.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode PNG'))), 'image/png'));
+    c2.width = c2.height = 0;
   }
+  // Safari caps the memory of all canvases together and frees one only when it's collected, so several
+  // images in a row could run out: free it now.
+  canvas.width = canvas.height = 0;
   const base = (name || 'image').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '-').slice(0, 60) || 'image';
   return { blob, width: w, height: h, name: `${base}.png`, url: URL.createObjectURL(blob), scaled: scaled || w !== width };
 }

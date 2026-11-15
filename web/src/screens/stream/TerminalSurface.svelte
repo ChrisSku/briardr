@@ -34,7 +34,7 @@
   import { Icon } from '../../ui/icons/index.ts';
   import { openMenu, type MenuItem } from '../../ui/kit.ts';
   import ComposeSheet from './ComposeSheet.svelte';
-  import { acceptsImages, uploadItems, type UploadItem } from './insert.ts';
+  import { acceptsImages, droppedFiles, uploadItems, type UploadItem } from './insert.ts';
   import KeyBar from './keybar/KeyBar.svelte';
   import { keyboardInset } from '../../keyboard.svelte.ts';
   import PasteSheet from './PasteSheet.svelte';
@@ -303,23 +303,29 @@
     input.click();
   }
 
-  // ---------- files dropped on the terminal (a Mac or an iPad with a pointer) ----------
+  // ---------- files dropped on the terminal ----------
+  // Offered only to a terminal in your control: one you watch gets nothing, not even an upload.
   let dropping = $state(false);
   const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
   function ondragover(e: DragEvent) {
     if (!hasFiles(e)) return;
     e.preventDefault(); // or the browser opens the file in place of Briardr
-    dropping = true;
+    dropping = controlling && !stream.machine;
+  }
+  function ondragleave(e: DragEvent) {
+    // Moving onto the terminal's own parts leaves the host too.
+    if (!host.contains(e.relatedTarget as Node | null)) dropping = false;
   }
   function ondrop(e: DragEvent) {
     if (!hasFiles(e)) return;
     e.preventDefault();
     dropping = false;
-    const files = e.dataTransfer?.files;
-    if (!files?.length) return;
     // An upload lands on this host, where a terminal on another machine can't open it.
     if (stream.machine) return toast(`Files can’t be sent to a terminal on ${stream.machine}.`);
-    sheet = { k: 'upload', items: uploadItems(files) };
+    if (!controlling) return toast('Take control to send files.');
+    const { files, folders } = droppedFiles(e.dataTransfer!.items);
+    if (folders) toast('Folders can’t be sent, only files.');
+    if (files.length) sheet = { k: 'upload', items: uploadItems(files) };
   }
 
   async function pasteFromClipboard() {
@@ -448,7 +454,7 @@
 <div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
   <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class={['term-host', !isLive && 'is-stale', dropping && 'is-drop']} bind:this={host} {ondragover} ondragleave={() => (dropping = false)} {ondrop} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
+  <div class={['term-host', !isLive && 'is-stale', dropping && 'is-drop']} bind:this={host} {ondragover} {ondragleave} {ondrop} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
     <div class="term-shift" bind:this={shift}>
       <div class="term-screen" bind:this={screen}></div>
     </div>

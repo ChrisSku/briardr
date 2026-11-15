@@ -15,6 +15,21 @@ export interface UploadItem {
 }
 export const uploadItems = (files: Iterable<File>): UploadItem[] => Array.from(files, (file) => ({ file, kind: file.type.startsWith('image/') ? 'image' : 'file' }));
 
+/** The files in a drop, and how many folders it had: a folder comes as a file the browser can't read. */
+export function droppedFiles(items: Iterable<Pick<DataTransferItem, 'kind' | 'getAsFile' | 'webkitGetAsEntry'>>): { files: File[]; folders: number } {
+  const files: File[] = [];
+  let folders = 0;
+  for (const it of items) {
+    if (it.kind !== 'file') continue;
+    if (it.webkitGetAsEntry()?.isDirectory) folders++;
+    else {
+      const file = it.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  return { files, folders };
+}
+
 /**
  * The uploaded files' quoted paths as one paste. An agent gets each on a line of its own: Claude Code
  * attaches an image path that has a line to itself. Any other program gets them as a shell's arguments.
