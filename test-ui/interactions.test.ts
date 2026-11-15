@@ -34,9 +34,11 @@ afterAll(async () => {
 
 let pairedViaUi = false;
 
-async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui'): Promise<{ ctx: BrowserContext; page: Page }> {
+/** `serviceWorkers: 'block'` for a test that answers the page's requests itself (`page.route`): a page its
+ *  service worker controls sends them past the test. */
+async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui', serviceWorkers: 'allow' | 'block' = 'allow'): Promise<{ ctx: BrowserContext; page: Page }> {
   const base = profile === 'iphone' ? devices['iPhone 15 Pro'] : { viewport: { width: 1280, height: 800 } };
-  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US' });
+  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   if (!pairedViaUi) {
@@ -1295,7 +1297,7 @@ describe('settings', () => {
 
 describe('devices', () => {
   test('a device can be renamed; a revoke or a pairing code that fails says so and changes nothing', async () => {
-    const a = await device('iphone', 'phone-devices');
+    const a = await device('iphone', 'phone-devices', 'block');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     const other = s.run.auth.pair(s.run.auth.createPairingCode().code, 'old tablet');
     assert.ok(other.ok);
