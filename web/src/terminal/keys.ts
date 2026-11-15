@@ -3,28 +3,7 @@
 // arrows and chords are sent by name; Home/End/PageUp/PageDown/Delete/Insert use standard sequences.
 // Command is sent as Herdr's `super` modifier (the kitty keyboard protocol, e.g. ⌘A = CSI 97;9u).
 // Herdr 0.9.4 and newer drop it, like terminals do, for a program that turned on no keyboard protocol.
-import { state } from '../reactive.svelte.ts';
-
 export type Mod = 'ctrl' | 'alt' | 'shift' | 'super';
-export type ModMode = 'off' | 'once' | 'locked' | 'held';
-export const mods = state<Record<Mod, ModMode>>({ ctrl: 'off', alt: 'off', shift: 'off', super: 'off' });
-
-export function activeMods(): Mod[] {
-  return (Object.keys(mods.value) as Mod[]).filter((m) => mods.value[m] !== 'off');
-}
-
-/** After a key is sent, one-shot modifiers turn off; locked and held ones stay. */
-export function consumeMods() {
-  const m = { ...mods.value };
-  let changed = false;
-  for (const k of Object.keys(m) as Mod[])
-    if (m[k] === 'once') {
-      m[k] = 'off';
-      changed = true;
-    }
-  if (changed) mods.value = m;
-}
-
 export type Outgoing = { keys: string[] } | { text: string } | { key: string };
 
 const NAMED: Record<string, string> = {

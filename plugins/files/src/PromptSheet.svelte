@@ -4,7 +4,8 @@
 -->
 <script lang="ts">
   import { Icon, Sheet, type Stream, type StreamContext } from '@briardr/sdk';
-  import { clearPrompt, fileMention, formatPrompt, promptOf, rangeLabel, removeSnippet, removeFileReference, setQuestion } from './prompt.ts';
+  import { clearPrompt, promptOf, removeSnippet, removeFileReference, setQuestion } from './prompt.ts';
+  import { fileMention, formatPrompt, rangeLabel } from './prompt-text.ts';
 
   let { stream, briardr, onClose, onSent }: { stream: Stream; briardr: StreamContext; onClose: () => void; onSent: () => void } = $props();
   const toast = (text: string) => briardr.toast(text);
