@@ -204,10 +204,16 @@ async function build() {
   const manifest = path.join(dist, 'manifest.webmanifest');
   const manifestText = withIcons(fs.readFileSync(manifest, 'utf8'));
   fs.writeFileSync(manifest, manifestText);
-  // The server's Content-Security-Policy allows the page's one inline script, the import map, by its hash.
+  // The server's Content-Security-Policy allows the page's inline scripts by their hashes: the import map,
+  // and the theme (web/src/theme-early.ts), which is in the page itself so that it runs before the first
+  // paint without a request of its own (a launch on a stalled network would wait for one).
   const importMap = JSON.stringify({ imports: runtime });
-  fs.writeFileSync(path.join(dist, 'index.html.csp'), `'sha256-${crypto.createHash('sha256').update(importMap).digest('base64')}'\n`);
+  const [early] = await bundle({ entrypoints: [path.join(web, 'src', 'theme-early.ts')], format: 'iife' });
+  const theme = (await early.text()).trim();
+  const scriptHash = (text: string) => `'sha256-${crypto.createHash('sha256').update(text).digest('base64')}'`;
+  fs.writeFileSync(path.join(dist, 'index.html.csp'), `${scriptHash(importMap)} ${scriptHash(theme)}\n`);
   const page = withIcons(fs.readFileSync(path.join(web, 'index.html'), 'utf8'))
+    .replace('%THEME%', () => `<script>${theme}</script>`)
     .replace('%IMPORT_MAP%', `<script type="importmap">${importMap}</script>`)
     .replace('%APP_JS%', `/${js}`)
     .replace('%APP_CSS%', (css ? `<link rel="stylesheet" href="/${css}">` : '') + [...preload].map((p) => `\n    <link rel="modulepreload" href="/${p}">`).join(''));
