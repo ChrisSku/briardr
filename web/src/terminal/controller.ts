@@ -72,15 +72,20 @@ export interface ControllerOptions {
   fontSize: number;
   screenReader: boolean;
   onLink: (url: string) => void;
-  onLongPress: (info: { x: number; y: number; col: number; row: number; link: string | null }) => void;
   onNotice: (text: string) => void;
 }
+
+/** What was pasted into a terminal: text, or a file (an image from the clipboard). */
+export type Pasted = { text: string } | { file: File };
 
 export class TerminalController {
   readonly term: Terminal;
   readonly status: State<TermStatus>;
   readonly generation = state(0);
   readonly opts: ControllerOptions;
+  /** Takes what's pasted into this terminal (its stream's screen reviews files and long text). Without
+   *  one, as in Peek, a paste goes nowhere: never to another terminal that's open. */
+  onPaste: ((p: Pasted) => void) | null = null;
   private serialize = new SerializeAddon();
   private ws: WebSocket | null = null;
   private clientSession = randomId(10);
@@ -612,17 +617,12 @@ export class TerminalController {
   private onPasteEvent(e: ClipboardEvent) {
     // Keep pastes explicit: text goes through as a single paste (never submitted); images and files
     // are offered to the review flow by the stream screen.
-    const items = e.clipboardData?.items;
-    if (items) for (const it of Array.from(items)) if (it.kind === 'file') {
-      e.preventDefault();
-      e.stopPropagation();
-      window.dispatchEvent(new CustomEvent('briardr:paste-file', { detail: it.getAsFile() }));
-      return;
-    }
-    const text = e.clipboardData?.getData('text/plain');
     e.preventDefault();
     e.stopPropagation();
-    if (text) window.dispatchEvent(new CustomEvent('briardr:paste-text', { detail: text }));
+    const file = Array.from(e.clipboardData?.items ?? []).find((it) => it.kind === 'file')?.getAsFile();
+    const text = e.clipboardData?.getData('text/plain');
+    if (file) this.onPaste?.({ file });
+    else if (text) this.onPaste?.({ text });
   }
 }
 
