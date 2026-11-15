@@ -50,6 +50,9 @@ gets your clicks and drags, and in any program dragging selects text and copies 
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
 the mouse, so the selection also shows while a program like that handles the same drag itself.
 
+Briardr is light or dark as the device is. Settings → Appearance keeps it light or dark on that device
+whatever its system says, the terminal included.
+
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
 
