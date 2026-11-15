@@ -1108,8 +1108,9 @@ impl App {
         }
     }
 
-    /// The Content-Security-Policy for the page: the usual one, with its inline import map allowed by the
-    /// hash the build writes next to it (`index.html.csp`, scripts/build.ts). None without that file.
+    /// The Content-Security-Policy for the page: the usual one, with its inline scripts (the import map and
+    /// the theme) allowed by the hashes the build writes next to it (`index.html.csp`, scripts/build.ts).
+    /// None without that file.
     async fn page_csp(&self, headers: &HeaderMap, file: &str) -> Option<String> {
         let listed = tokio::fs::read_to_string(format!("{file}.csp"))
             .await

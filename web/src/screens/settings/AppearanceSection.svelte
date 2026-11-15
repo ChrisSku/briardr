@@ -1,21 +1,17 @@
 <script lang="ts">
-  import { setTheme, themeChoice, type ThemeChoice } from '../../theme.ts';
+  import { setTheme, THEMES, themeChoice, type ThemeChoice } from '../../theme.ts';
   import Section from './Section.svelte';
 
-  const CHOICES: { id: ThemeChoice; label: string }[] = [
-    { id: 'system', label: 'System' },
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
-  ];
+  const CHOICES = Object.keys(THEMES) as ThemeChoice[];
   const choice = $derived(themeChoice());
 </script>
 
 <Section id="appearance" title="Appearance">
   <fieldset class="segmented" aria-label="Theme">
-    {#each CHOICES as c}
-      <label class={choice === c.id ? 'is-on' : ''}>
-        <input type="radio" name="theme" value={c.id} checked={choice === c.id} onchange={() => setTheme(c.id)} />
-        {c.label}
+    {#each CHOICES as id}
+      <label class={choice === id ? 'is-on' : ''}>
+        <input type="radio" name="theme" value={id} checked={choice === id} onchange={() => setTheme(id)} />
+        {THEMES[id]}
       </label>
     {/each}
   </fieldset>

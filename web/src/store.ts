@@ -2,6 +2,7 @@
 // seen markers and review checkmarks persist in this browser only.
 import type { Snippet } from 'svelte';
 import { derived, load, persisted, save, State, state } from './reactive.svelte.ts';
+import type { ThemeChoice } from './theme.ts';
 import type { Group, HerdrHealth, HostCaps, MacSummary, Model } from './types.ts';
 
 export { persisted };
@@ -64,7 +65,7 @@ export const prefs = persisted<{
   screenReaderTerminal: boolean;
   lowBatteryInApp: boolean;
   /** Light or dark whatever the system says (web/src/theme.ts); missing until it's chosen. */
-  theme?: 'system' | 'light' | 'dark';
+  theme?: ThemeChoice;
 }>('briardr.prefs', {
   fontSize: 13,
   bracketedPaste: true,

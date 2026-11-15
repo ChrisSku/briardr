@@ -1394,12 +1394,21 @@ describe('appearance', () => {
   test('a device can stay light or dark whatever its system says, in the terminal too, and go back to following it', async () => {
     const a = await device('iphone', 'phone-theme');
     onTestFinished(() => a.ctx.close().catch(() => {}));
+    const refused: string[] = [];
+    a.page.on('console', (m) => /Content Security Policy|Refused to/i.test(m.text()) && refused.push(m.text()));
     const page = () => a.page.evaluate(() => ({
       theme: document.documentElement.dataset.theme,
       canvas: getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim().toLowerCase(),
       bar: document.querySelector('meta[name="theme-color"]')!.getAttribute('content'),
     }));
-    const terminal = () => a.page.evaluate(() => (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background as string);
+    // The terminal's background as the page resolves it: its colours are the --term-* tokens as built (#fff).
+    const terminal = () => a.page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('i'));
+      probe.style.color = (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background;
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
     const choose = async (label: string) => {
       await a.page.goto(s.base + '/settings/appearance');
       await a.page.locator('#set-appearance label', { hasText: label }).click();
@@ -1411,7 +1420,10 @@ describe('appearance', () => {
     await a.page.goto(s.base + '/settings');
     await a.page.locator('.set-row', { hasText: 'Appearance' }).getByText('Dark').waitFor();
     await openTarget(a.page);
-    assert.equal(await terminal(), '#0a0a09');
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
+    // Each of the terminal's colours comes from its --term-* token.
+    const unset = await a.page.evaluate(() => Object.entries((document.querySelector('.term-host') as any).briardrTerminal.term.options.theme).filter(([, v]) => !CSS.supports('color', v as string)).map(([k]) => k));
+    assert.deepEqual(unset, []);
     // The choice is applied before the page paints, so a launch doesn't flash the system's theme.
     await a.page.reload();
     assert.equal((await page()).theme, 'dark');
@@ -1423,10 +1435,12 @@ describe('appearance', () => {
     assert.equal((await page()).theme, 'dark');
     // An open terminal follows a change of theme.
     await openTarget(a.page);
-    assert.equal(await terminal(), '#0a0a09');
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
     await a.page.emulateMedia({ colorScheme: 'light' });
-    await a.page.waitForFunction(() => (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background === '#ffffff');
+    await waitUntil('the open terminal to turn light', async () => (await terminal()) === 'rgb(255, 255, 255)');
     assert.equal((await page()).theme, 'light');
+    // The theme script is in the page itself, allowed by its hash.
+    assert.deepEqual(refused, []);
   });
 });
 

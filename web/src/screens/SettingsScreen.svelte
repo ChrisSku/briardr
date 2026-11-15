@@ -12,9 +12,9 @@
   import { pushStatus } from '../push.ts';
   import { navigate } from '../router.ts';
   import { prefs, toast } from '../store.ts';
+  import { THEMES, themeChoice } from '../theme.ts';
   import { Icon, type IconName } from '../ui/icons/index.ts';
   import { ago } from '../ui/kit.ts';
-  import { themeChoice } from '../theme.ts';
   import AboutSection from './settings/AboutSection.svelte';
   import AppearanceSection from './settings/AppearanceSection.svelte';
   import DevicesSection from './settings/DevicesSection.svelte';
@@ -159,7 +159,7 @@
         <div class="card">
           {@render row('devices', 'device', 'Devices', devices === null ? null : String(devices))}
           {@render row('notifications', 'bell', 'Notifications', push)}
-          {@render row('appearance', 'moon', 'Appearance', { system: 'System', light: 'Light', dark: 'Dark' }[themeChoice()])}
+          {@render row('appearance', 'moon', 'Appearance', THEMES[themeChoice()])}
           {@render row('terminal', 'terminal', 'Terminal', `${prefs.value.fontSize} pt`)}
           {@render row('keybar', 'keyboard', 'Key bar')}
           {@render row('install', 'download', 'Install app')}

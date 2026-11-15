@@ -205,10 +205,11 @@ async function build() {
   const manifestText = withIcons(fs.readFileSync(manifest, 'utf8'));
   fs.writeFileSync(manifest, manifestText);
   // The server's Content-Security-Policy allows the page's inline scripts by their hashes: the import map,
-  // and the theme (web/theme.js), which is in the page itself so that it runs before the first paint
-  // without a request of its own (a launch on a stalled network would wait for one).
+  // and the theme (web/src/theme-early.ts), which is in the page itself so that it runs before the first
+  // paint without a request of its own (a launch on a stalled network would wait for one).
   const importMap = JSON.stringify({ imports: runtime });
-  const theme = fs.readFileSync(path.join(web, 'theme.js'), 'utf8').trim();
+  const [early] = await bundle({ entrypoints: [path.join(web, 'src', 'theme-early.ts')], format: 'iife' });
+  const theme = (await early.text()).trim();
   const scriptHash = (text: string) => `'sha256-${crypto.createHash('sha256').update(text).digest('base64')}'`;
   fs.writeFileSync(path.join(dist, 'index.html.csp'), `${scriptHash(importMap)} ${scriptHash(theme)}\n`);
   const page = withIcons(fs.readFileSync(path.join(web, 'index.html'), 'utf8'))
