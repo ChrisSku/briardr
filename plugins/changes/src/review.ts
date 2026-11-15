@@ -1,20 +1,18 @@
 // Review comments on the changes: lines picked in a diff, each with what to do about them, sent to the
-// terminal as one paste with an optional note in front. Each comment keeps the lines it was written on.
-
-export interface DiffLine {
-  text: string;
-  k: 'dl-meta' | 'dl-hunk' | 'dl-add' | 'dl-del' | 'dl-ctx';
-  /** The line's number: the old file's for a removed line, the new file's otherwise (from the hunk headers). */
-  n: number | null;
-}
+// terminal as one paste with an optional note in front. Kept on this device per stream, so they survive
+// switching surfaces and relaunches until they are sent or cleared. Each comment keeps the lines it was
+// written on, as they were then.
+import { codeBlock, persisted } from '@briardr/sdk';
 
 export interface Comment {
   path: string;
+  /** The file's change when the comment was written (`ChangedFile.signature`): `ids` name lines of it. */
+  signature: string;
   /** Where the lines are, as the diff numbers them: "42", "42-44", or "40 (removed)". */
   where: string;
   /** The picked lines as the diff shows them, with their +, - or space. */
   lines: string;
-  /** Which lines they were (`lineId`), to mark them in the diff. */
+  /** Which lines they were (`lineId`), to mark them in the diff while the file is unchanged. */
   ids: string[];
   text: string;
 }
@@ -24,43 +22,28 @@ export interface Review {
   comments: Comment[];
 }
 
-const kind = (l: string): DiffLine['k'] =>
-  l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'dl-meta' : l.startsWith('@@') ? 'dl-hunk' : l.startsWith('+') ? 'dl-add' : l.startsWith('-') ? 'dl-del' : 'dl-ctx';
+const reviews = persisted<Record<string, Review>>('briardr.changes.review', {});
+const EMPTY: Review = { note: '', comments: [] };
 
-/** A unified diff's lines, each with its kind and number. */
-export function parseDiff(text: string): DiffLine[] {
-  let a = 0;
-  let b = 0;
-  const lines = text.split('\n');
-  // The diff ends with a line break, which is not one more line of it (an empty context line is a space).
-  if (lines.at(-1) === '') lines.pop();
-  return lines
-    .filter((l, i) => i > 0 || l)
-    .map((text) => {
-      const k = kind(text);
-      const h = k === 'dl-hunk' ? /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(text) : null;
-      if (h) [a, b] = [Number(h[1]), Number(h[2])];
-      const n = k === 'dl-del' ? a++ : k === 'dl-add' ? b++ : k === 'dl-ctx' && !text.startsWith('\\') ? (a++, b++) : null;
-      return { text, k, n };
-    });
+export const reviewOf = (sid: string): Review => reviews.value[sid] ?? EMPTY;
+
+function put(sid: string, r: Review) {
+  const next = { ...reviews.value };
+  if (r.comments.length || r.note) next[sid] = r;
+  else delete next[sid];
+  reviews.value = next;
 }
-
-/** A numbered line's name within its file's diff: removed lines count in the old file, the others in the new one. */
-export const lineId = (l: DiffLine): string | null => (l.n === null ? null : `${l.k === 'dl-del' ? '-' : '+'}${l.n}`);
-
-const range = (ns: number[]) => (ns[0] === ns.at(-1) ? `${ns[0]}` : `${ns[0]}-${ns.at(-1)}`);
-
-/** Where picked lines are: their numbers in the new file, or in the old one when all of them were removed. */
-export function whereOf(picked: DiffLine[]): string {
-  const now = picked.filter((l) => l.n !== null && l.k !== 'dl-del').map((l) => l.n!);
-  if (now.length) return range(now);
-  const old = picked.filter((l) => l.n !== null).map((l) => l.n!);
-  return old.length ? `${range(old)} (removed)` : '';
+export const addComment = (sid: string, c: Comment) => put(sid, { ...reviewOf(sid), comments: [...reviewOf(sid).comments, c] });
+export function removeComment(sid: string, i: number) {
+  const r = reviewOf(sid);
+  put(sid, { ...r, comments: r.comments.filter((_, j) => j !== i) });
 }
+export const setNote = (sid: string, note: string) => put(sid, { ...reviewOf(sid), note });
+export const clearReview = (sid: string) => put(sid, EMPTY);
 
 /**
- * The text that is pasted: the note, then each comment as its file and lines, the diff lines in a fence
- * (longer than any run of backticks inside them) and the comment under it.
+ * The text that is pasted: the note, then each comment as its file and lines, the diff lines in a code
+ * block and the comment under it.
  *
  *   Please keep the public API as it is.
  *
@@ -74,11 +57,6 @@ export function whereOf(picked: DiffLine[]): string {
 export function formatReview(r: Review): string {
   const parts: string[] = [];
   if (r.note.trim()) parts.push(r.note.trim());
-  for (const c of r.comments) {
-    let longest = 2;
-    for (const match of c.lines.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
-    const fence = '`'.repeat(longest + 1);
-    parts.push(`${c.path} ${c.where}\n${fence}diff\n${c.lines}\n${fence}\n${c.text.trim()}`);
-  }
+  for (const c of r.comments) parts.push(`${c.path} ${c.where}\n${codeBlock(c.lines, 'diff')}\n${c.text.trim()}`);
   return parts.join('\n\n');
 }

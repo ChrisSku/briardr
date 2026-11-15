@@ -1,7 +1,9 @@
-// Changes: lines picked in a diff become review comments, pasted into the terminal as one prompt.
+// Changes: lines picked in a diff become review comments, pasted into the terminal as one prompt (the
+// paste itself is checked in test-ui/interactions.test.ts).
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
-import { formatReview, lineId, parseDiff, whereOf } from '../plugins/changes/src/review.ts';
+import { lineId, parseDiff, whereOf } from '../plugins/changes/src/diff.ts';
+import { codeBlock } from '../web/src/screens/stream/insert.ts';
 
 const diff = ['diff --git a/src/a.rs b/src/a.rs', 'index 111..222 100644', '--- a/src/a.rs', '+++ b/src/a.rs', '@@ -10,4 +10,5 @@ fn main() {', ' let a = 1;', '-let b = 2;', '+let b = 3;', '+let c = 4;', ' done();', '\\ No newline at end of file'].join('\n');
 
@@ -22,14 +24,8 @@ test('picked lines are named by their numbers in the new file, or in the old one
   assert.equal(whereOf(lines.slice(4, 5)), '');
 });
 
-test('the pasted review is the note, then each comment under its file, lines and a fence that holds them', () => {
-  const text = formatReview({
-    note: ' Keep the public API. ',
-    comments: [
-      { path: 'src/a.rs', where: '11-12', lines: '-let b = 2;\n+let b = 3;', ids: ['-11', '+11'], text: 'Why 3?\n' },
-      { path: 'README.md', where: '4', lines: '+```sh', ids: ['+4'], text: 'Close the fence.' },
-    ],
-  });
-  assert.equal(text, ['Keep the public API.', 'src/a.rs 11-12\n```diff\n-let b = 2;\n+let b = 3;\n```\nWhy 3?', 'README.md 4\n````diff\n+```sh\n````\nClose the fence.'].join('\n\n'));
-  assert.equal(formatReview({ note: '', comments: [] }), '');
+test('a code block’s fence is longer than any run of backticks in the lines it holds', () => {
+  assert.equal(codeBlock('-let b = 2;\n+let b = 3;', 'diff'), '```diff\n-let b = 2;\n+let b = 3;\n```');
+  assert.equal(codeBlock('+```sh', 'diff'), '````diff\n+```sh\n````');
+  assert.equal(codeBlock('a ````` b'), '``````\na ````` b\n``````');
 });

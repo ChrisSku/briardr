@@ -1684,5 +1684,28 @@ describe('Changes review', () => {
     await sleep(300);
     assert.deepEqual(pastes, ['Small review\n\na.txt 2-3\n```diff\n+TWO\n three\n```\nUse a constant'], 'one paste and no Enter');
     assert.equal(await a.page.evaluate(() => localStorage.getItem('briardr.changes.review')), '{}');
+
+    // In a long diff the selection bar stays in view, above the review bar.
+    const long = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long);
+    git('add', 'b.txt');
+    git('commit', '-q', '-m', 'second');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long.replace(/^line \d*3$/gm, '$& changed'));
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    await a.page.getByRole('button', { name: 'Refresh changes' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
+    const tall = a.page.getByRole('region', { name: 'Diff of b.txt' });
+    await tall.locator('.dl-add').first().click({ position: { x: 14, y: 4 } });
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('First');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    await bar.getByText('1 comment for the agent').waitFor();
+    await tall.locator('.dl-ctx').first().click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Line 1' }).waitFor();
+    const viewport = a.page.viewportSize()!;
+    const selbar = (await a.page.getByRole('toolbar', { name: 'Selected lines' }).boundingBox())!;
+    const review = (await bar.boundingBox())!;
+    assert.ok(selbar.y + selbar.height <= review.y, 'the selection bar sits above the review bar');
+    assert.ok(review.y + review.height <= viewport.height, 'both are in view');
   });
 });
