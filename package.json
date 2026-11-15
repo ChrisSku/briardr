@@ -42,7 +42,7 @@
     "playwright": "^1.65.0",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",
-    "typescript": "^7.0.2"
+    "typescript": "^5.9.3"
   },
   "engines": {
     "bun": ">=1.4"
