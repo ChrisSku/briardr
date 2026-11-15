@@ -91,7 +91,7 @@
     <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
     <span class="row-text">
       <span class="row-title">{#if s.state === 'done' && !seenDone}<span class="new-dot" aria-label="New"></span>{/if}{s.name}</span>
-      <!-- Without the badge, VoiceOver still hears the state: "Fix flaky login test, Needs you, web · auth, 2 min". -->
+      <!-- Without the badge, VoiceOver still hears the state: "auth refactor, Needs you, web · auth, Fix the flaky login test, 2 min". -->
       {#if !badge && s.state}<span class="sr-only">, {STATE_LABEL[s.state]},</span>{/if}
       <span class="row-sub">{sub}</span>
       {#if task}<span class="row-sub row-task">{task}</span>{/if}

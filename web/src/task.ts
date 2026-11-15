@@ -13,6 +13,9 @@ export function taskOf(s: Titled): string | null {
   if (!title || s.kind !== 'agent') return null;
   const t = title.toLowerCase();
   const repeats = [s.name, s.tool, s.folder, s.cwd].some((x) => x && x.trim().toLowerCase() === t);
+  // The agent's own name ("Claude Code") is its title until it has a task.
+  const words = t.split(/\s+/);
+  const ownName = words[0] === s.tool.toLowerCase() && words.length <= 2;
   // A path (the folder, in full or from the home folder) is where it runs, not what it does.
-  return repeats || /^[~/]/.test(title) ? null : title;
+  return repeats || ownName || /^[~/]/.test(title) ? null : title;
 }

@@ -745,9 +745,11 @@ describe('agents list, peek, banners and links', () => {
     onTestFinished(() => a.ctx.close().catch(() => {}));
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
     await row.locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+    // VoiceOver hears it with the rest of the row.
+    await row.getByRole('button', { name: /ui target.*Reviewing the parser/ }).waitFor();
     await a.page.getByRole('button', { name: 'Jump to a stream' }).click();
     await a.page.getByLabel('Search streams').fill('parser');
-    await a.page.locator('#jump-list .row-title', { hasText: 'ui target' }).waitFor();
+    await a.page.locator('#jump-list .row-main', { hasText: 'ui target' }).locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
   });
 
   test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
