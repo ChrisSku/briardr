@@ -44,7 +44,7 @@
         <input class="field" bind:value={name} autofocus placeholder={t.fallback} required={!t.fallback} />
       </label>
       <p class="hint">
-        {#if t.noun === 'device'}Signed-in devices lists it under this name.{:else}{t.fallback ? 'Leave empty to show the tool’s name again. ' : ''}Herdr shows this name on {theHost()} too.{/if}
+        {#if t.noun === 'device'}The device stays signed in.{:else}{t.fallback ? 'Leave empty to show the tool’s name again. ' : ''}Herdr shows this name on {theHost()} too.{/if}
       </p>
       {#if s.error}<p class="error" role="alert">{s.error}</p>{/if}
       <div class="form-actions">
