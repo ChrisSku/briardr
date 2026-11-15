@@ -19,6 +19,13 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # TypeScript stays on 5 until svelte-check (`mise run typecheck`) can check the client with 7 on its own.
+    # It runs on TypeScript's JavaScript API, which 7 doesn't have, so it wants 6 installed beside 7, and its
+    # two modes for 7 fall short here: --tsgo checked 74 of the 505 files and missed a component's exports,
+    # and --tsgo-experimental-api doesn't run under Bun. Move TypeScript to a new major by hand.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       packages:
         patterns: ["*"]
