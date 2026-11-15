@@ -20,7 +20,6 @@
       fontSize: prefs.value.fontSize,
       screenReader: prefs.value.screenReaderTerminal,
       onLink: () => {},
-      onLongPress: () => {},
       onNotice: (t) => toast(t),
     });
     c.mount(host, screen);

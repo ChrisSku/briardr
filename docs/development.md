@@ -137,6 +137,19 @@ exercises pairing, terminals, uploads, notes, Git changes, docs, previews, and a
 restart. See [the Linux guide](linux-deployment.md#day-to-day) for exact commands. This is an active
 test that creates temporary state; use a deployment you control and understand the restart option.
 
+## Dependency updates
+
+Dependabot ([`.github/dependabot.yml`](../.github/dependabot.yml)) opens up to three pull requests a
+month: the server's crates, the packages of the client, the tests and the scripts, and the workflows'
+actions, each kind grouped into one. With Dependabot security updates on in the repository's settings,
+a vulnerable dependency gets a pull request of its own as soon as GitHub learns of it. These pull
+requests run every check. They bring no changeset, and the changeset check lets them through: what they
+update ships with the next release. Push a changeset to Dependabot's branch when an update changes
+something users notice.
+
+Bun, Rust and the linters ([`mise.toml`](../mise.toml)) and the Herdr, herdr-core and Caddy versions
+([`deploy/versions.env`](../deploy/versions.env)) are updated by hand.
+
 ## Releases
 
 Every pull request brings a [changeset](../.changeset/README.md): `mise run changeset` asks whether the
@@ -144,7 +157,8 @@ change is a patch, minor or major one and for its changelog entry, and writes it
 1.0.0, fixes and new features are patches and breaking changes are minor; from 1.0.0, a fix is a patch, a
 feature minor and a breaking change major. A pull
 request that changes nothing users notice (docs, CI, tests) adds an empty one with
-`mise run changeset --empty`. CI fails a pull request without one. Each pull request adds its own file,
+`mise run changeset --empty`. CI fails a pull request without one (except
+[Dependabot's](#dependency-updates)). Each pull request adds its own file,
 so several can be open at once without conflicting over the version or the changelog.
 
 Merging releases it. When the Linux checks pass on `main`, the
