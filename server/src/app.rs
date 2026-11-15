@@ -22,6 +22,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -273,12 +274,15 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
 
 /// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
 pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
+    json_body_as(ctx, limit).await
+}
+
+/// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
+pub async fn json_body_as<T: DeserializeOwned>(ctx: &mut Ctx, limit: usize) -> Result<T, ApiError> {
     let body = std::mem::replace(&mut ctx.body, Body::empty());
     let buf = read_body(&ctx.headers, body, limit).await?;
-    if buf.is_empty() {
-        return Ok(json!({}));
-    }
-    serde_json::from_slice(&buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
+    let buf: &[u8] = if buf.is_empty() { b"{}" } else { &buf };
+    serde_json::from_slice(buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
 }
 
 /// The raw body, for uploads and dictation.
