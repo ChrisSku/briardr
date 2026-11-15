@@ -2,13 +2,14 @@
 use std::sync::Arc;
 
 use axum::http::Method;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, caps_json, json_body, ok, response, send, str_or_empty, ApiError, App, Ctx, Routes,
-    VERSION,
+    action_err, caps_json, json_body, json_body_as, ok, response, send, str_or_empty, ApiError,
+    App, Ctx, Routes, VERSION,
 };
-use crate::auth::PairError;
+use crate::auth::{device_name, PairError};
 use crate::qr;
 use crate::terminal_hub::PROTOCOL;
 
@@ -43,6 +44,17 @@ fn pair_message(error: &PairError, host: &str) -> String {
         PairError::Invalid => "That code isn’t right.".to_string(),
         PairError::Locked => "Too many wrong codes. Create a new one.".to_string(),
     }
+}
+
+/// A revoke or rename of a device that isn't paired (any more).
+fn device_gone() -> ApiError {
+    action_err(404, "device_gone", "That device is no longer signed in.")
+}
+
+/// `POST /api/devices/:id/rename`; a missing or `null` name is refused like an empty one.
+#[derive(Deserialize)]
+struct RenameBody {
+    name: Option<String>,
 }
 
 /// The same authenticated startup data for an existing session and a newly paired device.
@@ -186,11 +198,10 @@ pub(super) fn register(r: &mut Routes) {
             let removed = blocking(move || auth.revoke(&id))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
-            Ok(send(
-                if removed { 200 } else { 404 },
-                &json!({"ok": removed}),
-                &[],
-            ))
+            if !removed {
+                return Err(device_gone());
+            }
+            ok(json!({"ok": true}))
         },
     );
 
@@ -199,22 +210,17 @@ pub(super) fn register(r: &mut Routes) {
         "/api/devices/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, 4096).await?;
-            let name = str_or_empty(b.get("name")).trim().to_string();
-            if name.is_empty() {
+            let body: RenameBody = json_body_as(&mut ctx, 4096).await?;
+            let Some(name) = body.name.as_deref().and_then(device_name) else {
                 return Err(action_err(400, "invalid_name", "Enter a name."));
-            }
+            };
             let id = ctx.param("id").to_string();
             let auth = app.d.auth.clone();
             let renamed = blocking(move || auth.rename(&id, &name))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
             if !renamed {
-                return Err(action_err(
-                    404,
-                    "device_gone",
-                    "That device is no longer signed in.",
-                ));
+                return Err(device_gone());
             }
             ok(json!({"ok": true}))
         },

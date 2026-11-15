@@ -57,7 +57,6 @@
       else if (isWebUrl(url)) window.open(url, '_blank', 'noopener,noreferrer');
       else toast('Briardr only opens web links. Hold the link to copy it.');
     },
-    onLongPress: () => {},
     onNotice: (t) => toast(t),
   });
 

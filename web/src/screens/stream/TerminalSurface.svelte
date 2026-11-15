@@ -33,6 +33,7 @@
   import type { Stream } from '../../types.ts';
   import { Icon } from '../../ui/icons/index.ts';
   import { openMenu, type MenuItem } from '../../ui/kit.ts';
+  import ComposeSheet from './ComposeSheet.svelte';
   import { acceptsImages } from './insert.ts';
   import KeyBar from './keybar/KeyBar.svelte';
   import { keyboardInset } from '../../keyboard.svelte.ts';
@@ -60,7 +61,7 @@
     const safeBottom = wrap ? parseFloat(getComputedStyle(wrap).paddingBottom) || 0 : 0;
     return Math.max(0, kb.current - safeBottom);
   });
-  let sheet = $state.raw<null | { k: 'paste'; text: string } | { k: 'upload'; file: File | Blob; kind: 'image' | 'file' } | { k: 'select'; text: string; start: number; end: number }>(null);
+  let sheet = $state.raw<null | { k: 'compose' } | { k: 'paste'; text: string } | { k: 'upload'; file: File | Blob; kind: 'image' | 'file' } | { k: 'select'; text: string; start: number; end: number }>(null);
   let dictating = $state(false);
   let level = $state(0);
   let rec: Recorder | null = null;
@@ -78,26 +79,19 @@
     ctl.mount(host, screen);
     const sizes = ctl.term.onResize(() => resized++);
     // Paste from a hardware keyboard / context menu goes through review for files, directly for text.
-    const onText = (e: Event) => {
-      const text = (e as CustomEvent).detail as string;
-      if (text.length > 2000 || text.includes('\n')) sheet = { k: 'paste', text };
-      else ctl.paste(text, prefs.value.bracketedPaste);
-    };
-    const onFile = (e: Event) => {
-      const f = (e as CustomEvent).detail as File | null;
-      if (f) sheet = { k: 'upload', file: f, kind: f.type.startsWith('image/') ? 'image' : 'file' };
+    ctl.onPaste = (p) => {
+      if ('file' in p) sheet = { k: 'upload', file: p.file, kind: p.file.type.startsWith('image/') ? 'image' : 'file' };
+      else if (p.text.length > 2000 || p.text.includes('\n')) sheet = { k: 'paste', text: p.text };
+      else ctl.paste(p.text, prefs.value.bracketedPaste);
     };
     // Physical keyboard detection on touch devices: a keydown while no on-screen keyboard is showing.
     const onKey = () => {
       if ('ontouchstart' in window && kb.current === 0 && document.activeElement === ctl.term.textarea) hardwareKeyboard.value = true;
     };
-    window.addEventListener('briardr:paste-text', onText);
-    window.addEventListener('briardr:paste-file', onFile);
     window.addEventListener('keydown', onKey, true);
     return () => {
       sizes.dispose();
-      window.removeEventListener('briardr:paste-text', onText);
-      window.removeEventListener('briardr:paste-file', onFile);
+      ctl.onPaste = null;
       window.removeEventListener('keydown', onKey, true);
       endPress?.();
     };
@@ -328,6 +322,7 @@
   function onPlus(anchor: HTMLElement) {
     openMenu(
       [
+        { label: 'Compose…', icon: 'pencil', onSelect: () => (sheet = { k: 'compose' }), hint: 'Write here, then insert' },
         { label: 'Paste from clipboard', icon: 'clipboard', onSelect: pasteFromClipboard, hint: 'Text or image' },
         { label: 'Paste text…', icon: 'clipboard', onSelect: () => (sheet = { k: 'paste', text: '' }) },
         // An upload lands on this host, where a terminal on another machine can't open it.
@@ -468,6 +463,7 @@
       />
     </div>
   {/if}
+  {#if sheet?.k === 'compose'}<ComposeSheet {ctl} {stream} onClose={() => (sheet = null)} />{/if}
   {#if sheet?.k === 'paste'}<PasteSheet {ctl} {stream} initial={sheet.text} onClose={() => (sheet = null)} />{/if}
   {#if sheet?.k === 'upload'}<UploadSheet {ctl} {stream} file={sheet.file} kind={sheet.kind} onClose={() => (sheet = null)} />{/if}
   {#if sheet?.k === 'select'}<SelectTextSheet text={sheet.text} start={sheet.start} end={sheet.end} onClose={() => (sheet = null)} />{/if}

@@ -39,6 +39,12 @@ the terminal opens a link or does nothing, and a swipe scrolls, so you can scrol
 keyboard is up. Where a hardware keyboard hides the key bar (on an iPad), a tap puts the focus in the
 terminal.
 
+To write more than a few words, choose **Compose…** from the key bar's + menu. It is a text field of
+the device, with its autocorrection, editing and the keyboard's dictation, also with a Linux host.
+**Insert** puts the message into the terminal as one paste; Briardr never presses Enter for you. A
+message you close without inserting is kept as that stream's draft, and the last messages you inserted
+are listed under Recent. Drafts and recent messages stay on the device.
+
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
@@ -49,9 +55,9 @@ and streams from their ⋯ menu anywhere. Closing asks first, because it stops w
 
 The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
 Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
-beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the keyboard's built-in
-dictation works in text fields. Briardr's separate host-side dictation feature requires a compatible
-Mac host; it is unavailable with a Linux host.
+beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the
+keyboard's built-in dictation works in text fields, such as Compose. Briardr's separate host-side
+dictation feature requires a compatible Mac host; it is unavailable with a Linux host.
 
 On a Mac, Briardr can have several windows: New Window in the sidebar, in a stream's ⋯ menu or with ⌥⌘N,
 Open in New Window on a stream, or the browser's or installed app's own New Window command. Each window
@@ -142,8 +148,9 @@ days (at most 100).
 
 ## Device names
 
-Settings → Devices lists every signed-in device under the name it got at pairing. The pencil beside a
-device renames it, from any signed-in device; the device stays signed in.
+Settings → Devices and `briardr devices` list every signed-in device by the name it got at pairing.
+The pencil beside a device renames it, from any signed-in device; the device stays signed in. A name
+keeps at most 60 characters.
 
 ## Lost device or changed URL
 

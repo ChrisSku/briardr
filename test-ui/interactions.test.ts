@@ -81,14 +81,21 @@ async function startEcho(mode: '' | '--kitty' = '') {
   echoing = true;
 }
 /** Quit whatever the pane runs and wait until its shell answers: a command typed before the prompt is back
- *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts. */
+ *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts.
+ *  The shell is asked again when no answer shows. An answer can be printed and gone: when the last test's
+ *  page gives up control, the pane goes back to its own size, which on a busy machine can still be under way
+ *  after `ctx.close()` returned, and zsh redraws its prompt after a resize one line too high, over the answer. */
 let syncs = 0;
 async function settleShell() {
-  const n = 1000 + ++syncs;
-  herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-  // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
-  herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
-  await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)));
+  for (const t0 = Date.now(); ; ) {
+    const n = 1000 + ++syncs;
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
+    herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
+    const answered = await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)), 2000).then(() => true, () => false);
+    if (answered) return;
+    if (Date.now() - t0 > WAIT) throw new Error('timed out waiting for the shell to answer');
+  }
 }
 /** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
@@ -507,6 +514,40 @@ describe('terminal input (iPhone)', () => {
     assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the paste');
   });
 
+  test('Compose keeps a draft, inserts it as one bracketed paste without Enter, and offers it again', async () => {
+    const compose = page.getByRole('dialog', { name: 'Compose' });
+    const area = compose.getByLabel('Message for ui target');
+    const open = async () => {
+      await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+      await page.getByRole('menuitem', { name: /Compose/ }).click();
+      await page.waitForFunction(() => document.activeElement?.classList.contains('compose-area'));
+    };
+    await open();
+    // A text field of the device: autocorrection and capitals stay on, and iOS doesn't zoom into it.
+    assert.equal(await area.getAttribute('autocorrect'), null);
+    assert.equal(await area.getAttribute('autocapitalize'), null);
+    assert.ok(parseFloat(await area.evaluate((e) => getComputedStyle(e).fontSize)) >= 16);
+    await area.fill('Check the login test,\nthen fix it');
+    await compose.getByRole('button', { name: 'Close' }).click();
+    await sleep(300);
+    assert.ok(!Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1').includes('login test'), 'closing inserts nothing');
+
+    await open();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it', 'the draft is back');
+    await compose.getByRole('button', { name: 'Insert', exact: true }).click();
+    await expectBytes(hex('\x1b[200~Check the login test,\nthen fix it\x1b[201~'));
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the message');
+
+    await open();
+    assert.equal(await area.inputValue(), '', 'an inserted message leaves no draft');
+    await compose.getByRole('button', { name: 'Check the login test, then fix it' }).click();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it');
+    await area.fill('');
+    await compose.getByRole('button', { name: 'Clear', exact: true }).click();
+    assert.equal(await compose.locator('.compose-recent').count(), 0);
+  });
+
   test('an image is reviewed, made a PNG within 4096 px, uploaded privately, and its path inserted without Enter', async () => {
     await page.getByRole('button', { name: 'Insert text, image or file' }).click();
     const chooser = page.waitForEvent('filechooser');
@@ -696,6 +737,35 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
+    const a = await device('mac', 'mac-peek-paste');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const pastes: string[] = [];
+    a.page.on('websocket', (sock) => sock.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') return;
+      try { const m = JSON.parse(payload); if (m.t === 'input' && m.paste) pastes.push(m.paste.text); } catch {}
+    }));
+    await openTarget(a.page);
+    // Beside an open stream, the sidebar picks the list next to it.
+    await a.page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Workspaces' }).click();
+    await a.page.locator('.list-pane').locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).focus();
+    await a.page.keyboard.press('Enter');
+    await a.page.getByRole('menuitem', { name: /Peek/ }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
+    const paste = (terminal: string, text: string) =>
+      a.page.locator(`${terminal} textarea`).evaluate((el, text) => {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }, text);
+    await paste('.peek-screen', 'into-peek');
+    await a.page.getByRole('button', { name: 'Close' }).click();
+    await paste('.term-screen', 'into-stream');
+    await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
+    assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
+  });
+
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
     const a = await device('iphone', 'phone-swipe');
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
@@ -729,6 +799,33 @@ describe('agents list, peek, banners and links', () => {
     await a.page.locator('.grp-attention .row-title', { hasText: 'ui target' }).waitFor();
     herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
     await a.ctx.close();
+  });
+
+  test('a banner that shows again stays its full time: the first one’s timer doesn’t take it down', async () => {
+    const a = await device('iphone', 'phone-banner-again');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    onTestFinished(() => void herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude'));
+    // The agent's state changes as the page hears of them, with the time.
+    const heard: { to: string; at: number }[] = [];
+    a.page.on('websocket', (sock) => sock.on('framereceived', ({ payload }) => {
+      if (typeof payload !== 'string' || !payload.includes('"transition"')) return;
+      const m = JSON.parse(payload);
+      if (m.t === 'transition' && m.streamId === ws.pane) heard.push({ to: m.to, at: Date.now() });
+    }));
+    await a.page.reload(); // a new live connection, which the listener above hears
+    await a.page.waitForSelector('.count-strip');
+    const report = (state: string) => herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', state);
+    const banner = a.page.locator('.banner-attention', { hasText: 'ui target needs you' });
+    report('blocked');
+    await banner.waitFor();
+    await sleep(2000);
+    report('working');
+    await waitUntil('the agent to work again', () => heard.at(-1)?.to === 'working');
+    report('blocked');
+    await waitUntil('the agent to need you again', () => heard.at(-1)?.to === 'blocked');
+    await banner.waitFor({ state: 'detached' });
+    const shown = Date.now() - heard.at(-1)!.at;
+    assert.ok(shown > 5000, `the second banner stayed ${shown} ms of its 6 seconds`);
   });
 
   test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined; text in a link’s place isn’t one', async () => {
