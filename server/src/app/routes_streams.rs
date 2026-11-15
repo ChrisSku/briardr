@@ -13,7 +13,7 @@ use super::{
 };
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
-use crate::files::{delete_entry, list_dir, read_file, search_files, FileEntry};
+use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
 use crate::git::{
     changes, file_diff, ChangeKind, ChangedFile, ChangesReport, ChangesState, FileRef, GitError,
 };
@@ -542,6 +542,24 @@ pub(super) fn register(r: &mut Routes) {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
             let query = ctx.query.get("q").unwrap_or("").to_string();
+            // `in=contents` looks inside the files instead of at their names.
+            if ctx.query.get("in") == Some("contents") {
+                let result = blocking(move || {
+                    let changed = changed_docs(&cwd).unwrap_or_default();
+                    search_contents(&cwd, &query, &changed, "git")
+                })
+                .await?
+                .map_err(docs_err)?;
+                return ok(json!({
+                    "matches": result.matches.iter().map(|m| json!({
+                        "path": m.path,
+                        "line": m.line,
+                        "text": m.text,
+                        "changed": m.changed,
+                    })).collect::<Vec<_>>(),
+                    "truncated": result.truncated,
+                }));
+            }
             let result = blocking(move || {
                 let changed = changed_docs(&cwd).unwrap_or_default();
                 search_files(&cwd, &query, &changed)

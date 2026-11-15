@@ -3,7 +3,8 @@
   code scrolls sideways and are never copied), images as images, PDFs as pages (zoomable), binary
   files described.
   Lines are picked for a prompt by tapping their numbers (a second tap makes a range; Shift-click
-  extends one) or by selecting text in them; lines already in the prompt are marked.
+  extends one) or by selecting text in them; lines already in the prompt are marked. A search result
+  opens the file at its line, picked.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -21,12 +22,14 @@
     /** Changes when the surface refreshes, to reload this file too. */
     revision: number;
     treeOpen: boolean;
+    /** A line to show and pick (a search result); a new `n` goes there again. */
+    goTo?: { line: number; n: number } | null;
     onBack: () => void;
     onToggleTree: () => void;
     /** Opens the prompt to write the question. */
     onAsk: () => void;
   }
-  let { stream, briardr, path, compact, revision, treeOpen, onBack, onToggleTree, onAsk }: Props = $props();
+  let { stream, briardr, path, compact, revision, treeOpen, goTo = null, onBack, onToggleTree, onAsk }: Props = $props();
   /** PDF zoom steps, times the pane's width. */
   const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
   const toast = (text: string) => briardr.toast(text);
@@ -99,6 +102,16 @@
       if (p === path) error = e instanceof ApiError ? e.message : 'Couldn’t open this file.';
     }
   }
+
+  // A search result's line, once the file's lines are on the page (and again for another line of it).
+  $effect(() => {
+    const target = goTo;
+    void html;
+    const line = target && code?.children[target.line - 1];
+    if (!target || !line) return;
+    untrack(() => (sel = { anchor: target.line, from: target.line, to: target.line }));
+    requestAnimationFrame(() => line.scrollIntoView({ block: 'center' }));
+  });
 
   // One string for the whole file: thousands of lines as separate components would be slow to mount.
   const html = $derived(rendered ? rendered.lines.map((l) => `<span class="cl"><span class="lc">${l}</span></span>`).join('') : '');
