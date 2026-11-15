@@ -1,8 +1,8 @@
 // Scratch directories for the unit tests: each one new, empty and unique (the process id and a counter name
 // it, so tests running in parallel and parallel runs never share one), and removed when it's dropped, also
 // when the test fails. Keep the guard until the test ends: `let dir = Scratch::new("name");`, not `let _ =`.
-// Fake programs for a test to run are written with `write_executable`, and a test waits up to `WAIT` for
-// something that should happen at once.
+// Fake programs for a test to run are written with `write_executable`, a test's repository is set up with
+// `git`, and a test waits up to `WAIT` for something that should happen at once.
 
 use std::fs;
 use std::io::Write;
@@ -72,4 +72,22 @@ pub fn write_executable(path: &Path, contents: &str) {
     drop(stdin);
     let status = child.wait().expect("write an executable");
     assert!(status.success(), "writing {} failed", path.display());
+}
+
+/// Runs `git` in `dir` as a test sets up a repository: committing works without the user's identity or signing.
+pub fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .current_dir(dir)
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
 }

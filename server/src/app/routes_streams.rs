@@ -544,21 +544,13 @@ pub(super) fn register(r: &mut Routes) {
             let query = ctx.query.get("q").unwrap_or("").to_string();
             // `in=contents` looks inside the files instead of at their names.
             if ctx.query.get("in") == Some("contents") {
-                let result = blocking(move || {
+                let found = blocking(move || {
                     let changed = changed_docs(&cwd).unwrap_or_default();
                     search_contents(&cwd, &query, &changed, "git")
                 })
                 .await?
                 .map_err(docs_err)?;
-                return ok(json!({
-                    "matches": result.matches.iter().map(|m| json!({
-                        "path": m.path,
-                        "line": m.line,
-                        "text": m.text,
-                        "changed": m.changed,
-                    })).collect::<Vec<_>>(),
-                    "truncated": result.truncated,
-                }));
+                return ok(serde_json::to_value(found).map_err(|_| ApiError::Internal)?);
             }
             let result = blocking(move || {
                 let changed = changed_docs(&cwd).unwrap_or_default();

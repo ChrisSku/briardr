@@ -284,7 +284,7 @@
                 if (ev.key === 'Escape') { ev.preventDefault(); clearSearch(); }
                 else if (ev.key === 'ArrowDown') { ev.preventDefault(); tree?.querySelector<HTMLButtonElement>('.ft-row')?.focus(); }
               }} />
-              {#if query}<button class="icon-btn" aria-label="Clear filename search" title="Clear search" onclick={clearSearch}><Icon name="close" size={16} /></button>{/if}
+              {#if query}<button class="icon-btn" aria-label={searchIn === 'contents' ? 'Clear search in files' : 'Clear filename search'} title="Clear search" onclick={clearSearch}><Icon name="close" size={16} /></button>{/if}
             </div>
           </div>
           {#if searchQuery}
@@ -318,7 +318,7 @@
             {#if searchQuery && found}<ContentMatches matches={found.matches} {selected} onOpen={openMatch} />{/if}
           </ul>
           {#if searchQuery && search?.truncated}<p class="ft-search-status muted">Search limited. Try a more specific filename.</p>{/if}
-          {#if searchQuery && found?.truncated}<p class="ft-search-status muted">Showing the first {found.matches.length} lines. Try something more specific.</p>{/if}
+          {#if searchQuery && found?.truncated}<p class="ft-search-status muted">{found.matches.length ? `Showing the first ${found.matches.length} lines.` : 'Search limited.'} Try something more specific.</p>{/if}
         </section>
         {#if !compact}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->

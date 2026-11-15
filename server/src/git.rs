@@ -6,9 +6,7 @@
 //  - tracked changes are diffed with the plumbing command `diff-index`, which never refreshes the
 //    index. Porcelain `git diff <commit>` is allowed only as `diff --no-index`;
 //  - external diff drivers, textconv, fsmonitor hooks and pagers are disabled, so repository
-//    config can't make Briardr run programs;
-//  - `git grep` (the Files search) reads the work tree and the index, and may not be told to open
-//    what it finds in a program.
+//    config can't make Briardr run programs.
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
@@ -32,7 +30,6 @@ pub const READ_ONLY_SUBCOMMANDS: &[&str] = &[
     "diff",
     "ls-files",
     "symbolic-ref",
-    "grep",
 ];
 pub const MAX_FILES: usize = 500;
 pub const MAX_DIFF_LINES: usize = 2000;
@@ -87,20 +84,6 @@ pub fn build_argv(args: &[&str]) -> Result<Vec<String>, GitError> {
         return Err(GitError::Forbidden(
             "git diff is only allowed with --no-index (use diff-index)".into(),
         ));
-    }
-    // `git grep -O` hands the matching files to a program. The pattern (after -e) and the paths (after
-    // --) are not options, whatever they look like.
-    if sub == "grep" {
-        let mut options = args.iter().take_while(|a| **a != "--");
-        while let Some(a) = options.next() {
-            if *a == "-e" {
-                options.next();
-            } else if a.starts_with("-O") || a.starts_with("--open-files-in-pager") {
-                return Err(GitError::Forbidden(
-                    "git grep may not open files in a pager".into(),
-                ));
-            }
-        }
     }
     let mut rest: Vec<String> = args.iter().map(|a| a.to_string()).collect();
     if (sub == "diff" || sub == "diff-index") && !args.contains(&"--no-ext-diff") {
@@ -726,27 +709,10 @@ pub fn file_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::{write_executable, Scratch};
+    use crate::scratch::{git, write_executable, Scratch};
 
     fn strs(argv: &[String]) -> Vec<&str> {
         argv.iter().map(String::as_str).collect()
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(dir)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@example.com",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
     }
 
     #[test]
@@ -765,18 +731,6 @@ mod tests {
             Err(GitError::Forbidden(_))
         ));
         assert!(build_argv(&["diff", "--no-index", "--", "/dev/null", "a"]).is_ok());
-        assert!(build_argv(&["grep", "-n", "-e", "-Osh"]).is_ok());
-        for open in [
-            "-O",
-            "-Osh",
-            "--open-files-in-pager",
-            "--open-files-in-pager=sh",
-        ] {
-            assert!(matches!(
-                build_argv(&["grep", open, "-e", "x"]),
-                Err(GitError::Forbidden(_))
-            ));
-        }
         assert!(build_argv(&["status", "--porcelain=v2"]).is_ok());
     }
 
