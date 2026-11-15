@@ -39,6 +39,12 @@ the device, with its autocorrection, editing and the keyboard's dictation, also 
 message you close without inserting is kept as that stream's draft, and the last messages you inserted
 are listed under Recent. Drafts and recent messages stay on the device.
 
+**Select image…** and **Select file…** in the same menu take several at once, and with a mouse or
+trackpad you can drop files (not folders) on a terminal you control. You see them all before they are
+sent and can remove any. They are uploaded to a private folder on the host, and their paths are
+inserted as one paste, never followed by Enter: for an agent each on a line of its own (Claude Code
+attaches an image path that has a line to itself), for a shell as arguments.
+
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
@@ -142,6 +148,12 @@ storage. **Repair offline app** removes the service worker and its caches and in
 notes, drafts, pairing, and settings stay. A device keeps this build's offline shell and the previous
 one, the 200 most recent plugin files, and cached terminal screens of streams opened in the last 30
 days (at most 100).
+
+## Device names
+
+Settings → Devices and `briardr devices` list every signed-in device by the name it got at pairing.
+The pencil beside a device renames it, from any signed-in device; the device stays signed in. A name
+keeps at most 60 characters.
 
 ## Lost device or changed URL
 
