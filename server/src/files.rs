@@ -851,13 +851,14 @@ mod tests {
         let result = search_contents(&root, "match", &HashSet::new(), "git").unwrap();
         assert_eq!(result.matches.len(), MAX_CONTENT_MATCHES);
         assert!(result.truncated);
-        assert_eq!(
-            result
-                .matches
-                .iter()
-                .filter(|m| m.path == "f00.txt")
-                .count(),
-            MAX_MATCHES_PER_FILE
+        // Which files come first is the file system's order (sorted on APFS, not on ext4).
+        let mut per_file = HashMap::new();
+        for m in &result.matches {
+            *per_file.entry(m.path.as_str()).or_insert(0) += 1;
+        }
+        assert!(
+            per_file.values().all(|n| *n == MAX_MATCHES_PER_FILE),
+            "{per_file:?}"
         );
 
         let long = format!("{}needle{}", "a".repeat(1000), "b".repeat(1000));
