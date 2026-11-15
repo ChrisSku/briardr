@@ -11,7 +11,12 @@ export type Route =
   | { name: 'app'; tab: string };
 
 export function parse(pathname: string): Route {
-  const parts = pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  let parts: string[];
+  try {
+    parts = pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  } catch {
+    return { name: 'agents' }; // a stray % in a typed address
+  }
   switch (parts[0]) {
     case undefined:
     case 'agents':

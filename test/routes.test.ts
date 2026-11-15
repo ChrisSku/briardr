@@ -38,3 +38,7 @@ test('the bare address, extra slashes and old paths open a place', () => {
   assert.deepEqual(parse('/stream'), { name: 'agents' }, 'a stream without an ID');
   assert.deepEqual(parse('/agents/extra'), { name: 'agents' });
 });
+
+test('an address that can’t be decoded opens Agents', () => {
+  for (const path of ['/stream/100%', '/stream/%E0%A4%A', '/settings/%zz', '/%']) assert.deepEqual(parse(path), { name: 'agents' }, path);
+});
