@@ -1,8 +1,8 @@
 /* Briardr — plain, system-native styling. Light and dark; Dynamic Type via the system body font. */
 /* The design tokens ("Quiet chrome, loud state"): warm stone neutrals, an ink primary, and saturated
-   colour only for state. Light under :root, dark under prefers-color-scheme. */
+   colour only for state. Light under :root, dark under :root[data-theme='dark']. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', 'Geist Mono', Menlo, monospace;
   --bg-canvas: #F6F5F3;
@@ -37,13 +37,26 @@
   --diff-add-bg: #E9F6EE;
   --diff-del: #B42318;
   --diff-del-bg: #FDEEEC;
+  /* The terminal's colours (web/src/terminal/controller.ts): its text, selection and the 16 ANSI colours. */
   --term-bg: #FFFFFF;
   --term-fg: #1C1917;
-  --term-dim: #6D665F;
+  --term-selection: #B4D2FF;
+  --term-black: #1C1917;
+  --term-red: #C9372C;
   --term-green: #18794A;
+  --term-yellow: #9A5800;
   --term-blue: #1D5FD1;
-  --term-amber: #9A5800;
   --term-magenta: #8E3FB8;
+  --term-cyan: #0B7285;
+  --term-white: #D1D1D6;
+  --term-bright-black: #6E6E73;
+  --term-bright-red: #E0453A;
+  --term-bright-green: #2A9D48;
+  --term-bright-yellow: #B07800;
+  --term-bright-blue: #2F7BF0;
+  --term-bright-magenta: #A352D6;
+  --term-bright-cyan: #1491A8;
+  --term-bright-white: #FFFFFF;
   --shadow-color: #1C19171F;
   /* Fixed colours that don't change with the theme: the switch knob, the search highlight, a preview's page. */
   --knob: #FFFFFF;
@@ -137,64 +150,76 @@
   /* Layout: the screen gutter, 16 on iPhone (20 on iPad and Mac, below). */
   --gutter: var(--space-4);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-canvas: #0D0C0B;
-    --bg-surface: #171614;
-    --bg-raised: #211F1D;
-    --bg-sunken: #24221F;
-    --bg-selected: #2E2B28;
-    --line-subtle: #24221F;
-    --line-default: #2F2C29;
-    --line-strong: #47423D;
-    --text-primary: #F4F2EF;
-    --text-secondary: #B3ACA4;
-    --text-tertiary: #8F8880;
-    --text-on-ink: #171614;
-    --text-on-state: #1A0F06;
-    --ink-default: #F4F2EF;
-    --ink-pressed: #D9D4CE;
-    --brand-fawn: #D9A066;
-    --brand-fawn-bg: #2A1E13;
-    --state-attention: #FF9A57;
-    --state-attention-bg: #2C1A0D;
-    --state-attention-line: #57321A;
-    --state-working: #6AA8FF;
-    --state-working-bg: #0F1C31;
-    --state-finished: #5AD08A;
-    --state-finished-bg: #0E2517;
-    --state-ready: #A39C95;
-    --state-ready-bg: #26231F;
-    --state-danger: #FF7A6E;
-    --state-danger-bg: #321311;
-    --diff-add: #6EDC9A;
-    --diff-add-bg: #0F2418;
-    --diff-del: #FF8E85;
-    --diff-del-bg: #2D1311;
-    --term-bg: #0A0A09;
-    --term-fg: #E7E3DE;
-    --term-dim: #7F786F;
-    --term-green: #6EDC9A;
-    --term-blue: #7AB2FF;
-    --term-amber: #F2C46B;
-    --term-magenta: #D7A1F5;
-    --shadow-color: #00000099;
-    --hl-keyword: #ff7b72;
-    --hl-title: #d2a8ff;
-    --hl-const: #79c0ff;
-    --hl-string: #a5d6ff;
-    --hl-builtin: #ffa657;
-    --hl-comment: #8e8e93;
-    --hl-tag: #7ee787;
-    --hl-bullet: #f2cc60;
-    --tint-yellow: #e5c07b;
-    --tint-orange: #f0a35e;
-    --tint-blue: #61afef;
-    --tint-teal: #56c8c8;
-    --tint-green: #7fd18a;
-    --tint-purple: #c49bff;
-    --tint-image: #f06292;
-  }
+/* web/src/theme-early.ts sets data-theme before the first paint: this device's choice, else the system's. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg-canvas: #0D0C0B;
+  --bg-surface: #171614;
+  --bg-raised: #211F1D;
+  --bg-sunken: #24221F;
+  --bg-selected: #2E2B28;
+  --line-subtle: #24221F;
+  --line-default: #2F2C29;
+  --line-strong: #47423D;
+  --text-primary: #F4F2EF;
+  --text-secondary: #B3ACA4;
+  --text-tertiary: #8F8880;
+  --text-on-ink: #171614;
+  --text-on-state: #1A0F06;
+  --ink-default: #F4F2EF;
+  --ink-pressed: #D9D4CE;
+  --brand-fawn: #D9A066;
+  --brand-fawn-bg: #2A1E13;
+  --state-attention: #FF9A57;
+  --state-attention-bg: #2C1A0D;
+  --state-attention-line: #57321A;
+  --state-working: #6AA8FF;
+  --state-working-bg: #0F1C31;
+  --state-finished: #5AD08A;
+  --state-finished-bg: #0E2517;
+  --state-ready: #A39C95;
+  --state-ready-bg: #26231F;
+  --state-danger: #FF7A6E;
+  --state-danger-bg: #321311;
+  --diff-add: #6EDC9A;
+  --diff-add-bg: #0F2418;
+  --diff-del: #FF8E85;
+  --diff-del-bg: #2D1311;
+  --term-bg: #0A0A09;
+  --term-fg: #E7E3DE;
+  --term-selection: #3A4A6B;
+  --term-black: #1C1C1E;
+  --term-red: #FF6B61;
+  --term-green: #6EDC9A;
+  --term-yellow: #F2C46B;
+  --term-blue: #7AB2FF;
+  --term-magenta: #D7A1F5;
+  --term-cyan: #64D2FF;
+  --term-white: #D1D1D6;
+  --term-bright-black: #6E6E73;
+  --term-bright-red: #FF8A80;
+  --term-bright-green: #7EE787;
+  --term-bright-yellow: #FFE066;
+  --term-bright-blue: #8CBCFF;
+  --term-bright-magenta: #E5AAFF;
+  --term-bright-cyan: #8FE3FF;
+  --term-bright-white: #FFFFFF;
+  --shadow-color: #00000099;
+  --hl-keyword: #ff7b72;
+  --hl-title: #d2a8ff;
+  --hl-const: #79c0ff;
+  --hl-string: #a5d6ff;
+  --hl-builtin: #ffa657;
+  --hl-comment: #8e8e93;
+  --hl-tag: #7ee787;
+  --hl-bullet: #f2cc60;
+  --tint-yellow: #e5c07b;
+  --tint-orange: #f0a35e;
+  --tint-blue: #61afef;
+  --tint-teal: #56c8c8;
+  --tint-green: #7fd18a;
+  --tint-purple: #c49bff;
+  --tint-image: #f06292;
 }
 
 * { box-sizing: border-box; }
@@ -753,6 +778,14 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .select-area { min-height: 55vh; font-size: 0.82rem; white-space: pre; overflow: auto; -webkit-user-select: text; user-select: text; }
 .upload-preview img { max-width: 100%; max-height: 46vh; border-radius: 10px; display: block; margin: 0 auto 8px; border: 1px solid var(--line-default); }
 .file-line { word-break: break-all; }
+.upload-list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.upload-item { display: flex; align-items: center; gap: 10px; }
+.upload-item img, .upload-thumb { flex: none; width: 48px; height: 48px; border-radius: 8px; border: 1px solid var(--line-default); object-fit: cover; }
+.upload-thumb { display: grid; place-items: center; background: var(--bg-sunken); color: var(--text-secondary); }
+.upload-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.upload-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-text .hint, .upload-text .error { margin: 0; }
+.term-host.is-drop { outline: 2px dashed var(--ink-default); outline-offset: -6px; }
 
 /* changes: the branch and totals in a card, a quiet read-only hint, files with M/A/D chips and the open
    file's diff inline with line numbers */
