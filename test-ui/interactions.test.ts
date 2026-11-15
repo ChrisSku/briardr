@@ -698,10 +698,8 @@ describe('agents list, peek, banners and links', () => {
     await settleShell();
     herdr('pane', 'run', ws.pane, "printf '\\033]0;Reviewing the parser\\007'");
     herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
-    onTestFinished(() => {
-      herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
-      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
-    });
+    // The pane stays an agent's, as the tests after this one find it; only its title goes.
+    onTestFinished(() => void herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'"));
     const a = await device('iphone', 'phone-task');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
