@@ -1,6 +1,6 @@
 [package]
 name = "briardr-server"
-version = "0.3.23"
+version = "0.3.24"
 edition = "2021"
 publish = false
 license = "MIT"
@@ -55,6 +55,8 @@ aes-gcm = "0.11"
 # Errors: thiserror for module error enums; anyhow only at the binary edge.
 thiserror = "2"
 anyhow = "1"
+# QR codes for the pairing link (Settings → Devices and `briardr pair`); the encoder only, no image output.
+qrcode = { version = "0.14", default-features = false }
 # NFC normalization of client-supplied upload names (String.prototype.normalize('NFC') in JS).
 unicode-normalization = "0.1"
 

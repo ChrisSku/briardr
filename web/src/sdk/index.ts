@@ -24,7 +24,8 @@ export { derived, persisted, state, type Derived, type Persisted, type State } f
 export { prepareImage, MAX_IMAGE_BYTES, MAX_IMAGE_SIDE, type PreparedImage } from '../media.ts';
 export { keyboardInset } from '../keyboard.svelte.ts';
 export { isLocalhostUrl } from '../terminal/links.ts';
-export { AsOf, Empty, Sheet, StateBadge, ago, duration, longPress, type MenuItem } from '../ui/kit.ts';
+export { codeBlock } from '../screens/stream/insert.ts';
+export { AsOf, Empty, PromptSheet, Sheet, StateBadge, ago, duration, longPress, type MenuItem } from '../ui/kit.ts';
 export { Icon, iconName, type IconName } from '../ui/icons/index.ts';
 export { PullToRefresh } from '../ui/pull.svelte.ts';
 

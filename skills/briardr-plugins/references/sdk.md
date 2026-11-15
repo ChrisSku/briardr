@@ -16,6 +16,7 @@ nothing else from Briardr: `{{briardr}}/plugins/<id>/`. They're the best example
 | `Icon` | `<Icon name="refresh" size={20} label?="…" />`, names as in the manifest's `icon`. |
 | `iconName(s)` | A valid icon name for any string (unknown → `plug`). |
 | `Sheet` | A bottom sheet (iPhone) / dialog (iPad, Mac): `<Sheet title="…" onClose={…}>…</Sheet>`. |
+| `PromptSheet` | A prompt for the agent, looked over and sent to the terminal as one paste (never Enter; refused after a reconnect): `<PromptSheet title briardr text={whatIsPasted} bind:message messageLabel onClose onSent={(bytes) => …} onClear>…</PromptSheet>`. It shows the message field, the text as it will be pasted, its size, Copy and Send to terminal; list the rest as children with `<ul class="prompt-snippets"><li class="prompt-snippet"><div class="prompt-snippet-head"><span class="mono">path <strong>lines</strong></span>…remove button…</div><pre class="prompt-snippet-code">…</pre></li></ul>` (and `<p class="prompt-snippet-note">` for a comment under the code). `noun` (default `prompt`) names it on the buttons. Files' Ask about code and Changes' review use it. |
 | `StateBadge` | An agent state badge: `<StateBadge state={stream.state} />`. |
 | `PullToRefresh` | `const ptr = new PullToRefresh(load)`, then `<div {...ptr.handlers}>`; `ptr.pull` is the distance. |
 | `longPress(fn)` | Touch-and-hold (or right-click) handlers: `const lp = longPress(({ x, y }) => …)`, then `<div {...lp.handlers}>`. |
@@ -25,6 +26,7 @@ nothing else from Briardr: `{{briardr}}/plugins/<id>/`. They're the best example
 | `state(initial)`, `derived(fn)` | Reactive state shared between modules (`.value`), for plain `.ts` files. |
 | `keyboardInset()` | `.current` is the on-screen keyboard's height (0 when hidden); CSS has it as `var(--kb)`. A `Sheet` and a scrolling surface already stay above the keyboard, and a focused field scrolls into view; use it for a layout that fills the screen, such as an editor. |
 | `prepareImage(blob, name)` | An image made ready to upload: orientation fixed, camera and location metadata dropped, PNG of at most 4096 px and 20 MB: `{ blob, width, height, name, url }`. |
+| `codeBlock(code, info?)` | `code` as a Markdown code block for a prompt (`info` is the language, e.g. `ts` or `diff`), its fence longer than any run of backticks inside. |
 | `isLocalhostUrl(url)` | True for `http://localhost:…`, `127.0.0.1` and the like (for `onTerminalLink`). |
 | `renderDiagrams(element)` | From `@briardr/sdk/markdown`: draws the Mermaid diagrams in an element holding `renderMarkdown`'s output; call it after each render. Without it they stay code blocks. Mermaid loads only when there's a diagram. |
 | `renderMarkdown(text, { docPath, streamId })` | From `@briardr/sdk/markdown`: Briardr's Markdown renderer, safe for `{@html}` (raw HTML reduced to an allowlist of safe tags, no remote images; relative images load from the stream's folder). Separate so it loads only with plugins that use it. |

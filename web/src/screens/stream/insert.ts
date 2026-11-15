@@ -38,6 +38,15 @@ export function joinPaths(quoted: string[], s: Pick<Stream, 'kind'>): string {
   return quoted.join(s.kind === 'agent' ? '\n' : ' ');
 }
 
+/** `code` as a Markdown code block for a prompt, its fence longer than any run of backticks inside, so
+ *  code that holds fences stays whole. `info` is the language (`ts`, `diff`), or nothing. */
+export function codeBlock(code: string, info = ''): string {
+  let longest = 2;
+  for (const match of code.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}${info}\n${code}\n${fence}`;
+}
+
 // ---------- Compose: this device's drafts and the messages inserted last ----------
 
 export const MAX_RECENT = 20;

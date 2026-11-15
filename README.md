@@ -36,7 +36,7 @@ The name comes from the briard, a shaggy French herding dog. Briardr was called 
 | **See who needs you** | Agents grouped by Needs you, Working and Finished across every workspace, each with what it says it is working on, and a badge on the app icon. Peek at a live terminal without taking control or resizing it. |
 | **Take the reins** | Open a terminal, answer approvals, send prompts, paste text, upload files and images, and use a touch-friendly key bar whose keys you choose, per app if you like. Nothing you type is replayed after a reconnect. Create, rename and close workspaces, projects, and Claude Code, Codex or shell streams. |
 | **Explore the project** | Browse files, search paths, read highlighted code and PDFs, and collect lines from several files into a question for the agent. Deleting files and folders asks first. |
-| **Review the work** | Read the Git diff of every stream and mark files as reviewed. Changes uses read-only Git commands and never takes Git's lock. |
+| **Review the work** | Read the Git diff of every stream, mark files as reviewed, and comment on lines: the comments go to the agent's terminal together, as one paste. Changes uses read-only Git commands and never takes Git's lock. |
 | **Keep context close** | Read the project's Markdown docs, with their HTML and Mermaid diagrams, and keep notes with images next to a stream; send them to its terminal. |
 | **See what is running** | Open a development server in Preview, including WebSockets and hot reload, with zoom controls. |
 | **Know when you're needed** | Web Push alerts for questions and finished work, even with the app closed. Payloads are end-to-end encrypted; delivery goes through the browser's push service. |
@@ -83,12 +83,13 @@ Start Herdr (`herdr` in a terminal) if it isn't running. Keep the Briardr termin
 terminal:
 
 ```sh
-briardr pair             # one-time code for a new device (also: Settings → Devices → Add a device)
+briardr pair             # one-time code and QR code for a new device (also: Settings → Devices → Add a device)
 briardr install-agent    # optional: start Briardr at login (prints the launchctl command to run)
 ```
 
-Open the HTTPS URL it prints on your device and enter the code. On iPhone and iPad, **add Briardr to
-the Home Screen first and pair inside the installed app**, then turn on notifications in Settings.
+Open the HTTPS URL it prints on your device and enter the code, or scan its QR code to open Briardr
+with the code filled in. On iPhone and iPad, **add Briardr to the Home Screen first and pair inside the
+installed app**, then turn on notifications in Settings.
 [Device setup](docs/devices.md) covers certificates, installing, and testing alerts.
 
 ### Quick start on Ubuntu
@@ -96,7 +97,7 @@ the Home Screen first and pair inside the installed app**, then turn on notifica
 As a non-root user with sudo, on Ubuntu 24.04 or 26.04 LTS (x86_64 or aarch64):
 
 ```sh
-git clone --branch v0.3.23 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.24 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex

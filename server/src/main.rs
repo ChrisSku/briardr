@@ -19,6 +19,7 @@ pub mod plugins;
 pub mod power;
 pub mod preview;
 pub mod push;
+pub mod qr;
 pub mod serve;
 pub mod setup;
 pub mod site;
@@ -285,6 +286,13 @@ async fn pair(ctx: &Ctx) -> CliResult {
     let time = local_time(expires_at, TIME_FORMAT).await;
     println!("\n  Pairing code:  {code}\n");
     println!("  Open {origin} on the new device and enter it.");
+    // In a terminal, also as a QR code a phone's camera opens, with the code filled in.
+    let link = qr::pairing_link(&origin, &code);
+    if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        if let Some(picture) = qr::for_terminal(&link) {
+            println!("  Or scan this with its camera:\n\n{picture}");
+        }
+    }
     println!("  It works once and expires at {time}.\n");
     Ok(0)
 }

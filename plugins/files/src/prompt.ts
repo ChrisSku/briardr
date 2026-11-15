@@ -1,7 +1,7 @@
 // A prompt put together in Files: line ranges picked from one or more files, plus a question, sent to
 // the terminal as one paste. Kept on this device per stream, so it survives switching files, surfaces
 // and relaunches until it is sent or cleared. Each snippet keeps the text it had when it was added.
-import { persisted } from '@briardr/sdk';
+import { codeBlock, persisted } from '@briardr/sdk';
 
 export interface Snippet {
   path: string;
@@ -71,7 +71,7 @@ export const fileMention = (r: FileReference) => `@${r.path}${r.dir ? '/' : ''}`
 
 /**
  * The text that is pasted: the question, then each snippet as its path and lines on one line and the
- * code in a fence (longer than any run of backticks inside it, so code containing fences stays whole).
+ * code in a code block.
  *
  *   Why does this retry forever?
  *
@@ -88,12 +88,9 @@ export function formatPrompt(p: Prompt): string {
       parts.push(fileMention({ path: s.path, dir: false }));
       continue;
     }
-    let longest = 2;
-    for (const match of s.text.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
-    const fence = '`'.repeat(longest + 1);
     const name = s.path.split('/').pop()!;
     const ext = name.lastIndexOf('.') > 0 ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
-    parts.push(`${s.path} ${rangeLabel(s.from, s.to)}\n${fence}${ext}\n${s.text}\n${fence}`);
+    parts.push(`${s.path} ${rangeLabel(s.from, s.to)}\n${codeBlock(s.text, ext)}`);
   }
   for (const r of p.references ?? []) parts.push(fileMention(r));
   return parts.join('\n\n');

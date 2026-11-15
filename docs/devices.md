@@ -17,7 +17,8 @@ device to that server. No native Briardr client is required.
 2. Choose **Share → Add to Home Screen** and add Briardr.
 3. Open Briardr from the Home Screen. Pair here: the installed app may have a separate sign-in from
    Safari, so a Safari pairing may not carry over.
-4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
+4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install. On a
+   device that is already signed in, Settings → Devices → **Add a device** gives a code too.
 5. Enter the one-time code and a device name in Briardr. The code expires after ten minutes.
 6. Enable and test notifications in Briardr Settings → Notifications.
 
@@ -87,6 +88,20 @@ screen**, use it and pair inside that installation. These client combinations ne
 device testing; please report the OS, browser, access mode, and observed behavior when helping test.
 Windows hosting is a separate concern and is not currently supported.
 
+## Pair with a QR code
+
+`briardr pair` in a terminal and Settings → Devices → **Add a device** show a QR code beside the
+one-time code. Scanning it with the new device's camera opens Briardr with the code filled in; you still
+name the device and choose **Sign in**. The code is in the part of the link after `#`, which browsers
+send to no server or proxy, and Briardr takes it out of the address as soon as it has read it. It's the
+same code, so it still works once and expires after ten minutes.
+
+The QR code opens the address `briardr pair` prints. In Settings it opens the address the signed-in
+device uses, unless that's the host itself (`localhost`). The new device needs the same network and
+certificate trust as for typing the address: with Briardr's local CA, [trust it](#trust-briardrs-local-ca)
+first. On an iPhone or iPad the camera opens Safari, and the Home Screen app signs in separately: scan
+to get to Briardr, add it to the Home Screen, and enter the code in the installed app.
+
 ## Trust Briardr's local CA
 
 Only do this for a Briardr installation you control. A trusted root CA can sign certificates your
@@ -125,6 +140,15 @@ delivery to the device. An accepted message alone does not prove it arrived.
 Settings → Notifications also says when the permission, this device's subscription, and the host's
 record of it disagree, and repairs what it can (Repair renews an expired subscription). Where the
 platform supports badges, the app icon shows how many agents need you.
+
+Each device chooses its own alerts there, under **This device**: Needs you, Finished, Ready for input,
+low battery and **Include names** (workspace and stream names in them), and **Quiet hours**, a span of
+its day without any. A choice a device never made follows the host's `notifications` setting. The host
+keeps the choices until the device is revoked, so they stay when alerts are turned off and on again or
+repaired. Quiet hours follow the device's clock, summer time included; after a trip to another time
+zone, they follow the new one once Briardr is opened there. Alerts in quiet hours are dropped, not sent
+later, so the app icon's badge catches up with the next alert or when Briardr opens; while Briardr is
+open on screen, its own banners still show.
 
 Then close or background the app, trigger an agent needing attention, and check that the alert
 arrives and opens the correct stream. Test once on Wi-Fi and once on mobile data with the VPN
