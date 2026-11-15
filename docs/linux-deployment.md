@@ -273,7 +273,7 @@ Herdr's panes. It removes what it creates and revokes its own device.
 | --- | --- | --- |
 | `~/.local/share/briardr/config.json` | Settings (public origin, preview origins, Herdr path) | yes |
 | `~/.local/share/briardr/secrets/` (mode 700) | Paired devices (token hashes), pairing code hash, Web Push keys and subscriptions, diagnostics salt | yes |
-| `~/.local/share/briardr/state/` | Notes and their images, usage reports, monitor state | yes |
+| `~/.local/share/briardr/state/` | Notes and their images, usage reports, monitor state, each device's alert choices | yes |
 | `~/.local/share/briardr/logs/` | Connection diagnostics (no addresses, names, commands or text); rotate at 1 MB | no |
 | `/tmp/briardr-uploads/` | Uploaded files, removed after 7 days or at reboot | no |
 | `/etc/caddy/briardr.caddy`, `/etc/systemd/system/briardr*.service` | Generated deployment files | copies, in the archive's `deploy/` |

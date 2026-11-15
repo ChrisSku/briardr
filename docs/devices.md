@@ -126,6 +126,15 @@ Settings → Notifications also says when the permission, this device's subscrip
 record of it disagree, and repairs what it can (Repair renews an expired subscription). Where the
 platform supports badges, the app icon shows how many agents need you.
 
+Each device chooses its own alerts there, under **This device**: Needs you, Finished, Ready for input,
+low battery and **Include names** (workspace and stream names in them), and **Quiet hours**, a span of
+its day without any. A choice a device never made follows the host's `notifications` setting. The host
+keeps the choices until the device is revoked, so they stay when alerts are turned off and on again or
+repaired. Quiet hours follow the device's clock, summer time included; after a trip to another time
+zone, they follow the new one once Briardr is opened there. Alerts in quiet hours are dropped, not sent
+later, so the app icon's badge catches up with the next alert or when Briardr opens; while Briardr is
+open on screen, its own banners still show.
+
 Then close or background the app, trigger an agent needing attention, and check that the alert
 arrives and opens the correct stream. Test once on Wi-Fi and once on mobile data with the VPN
 connected if needed. Notifications need the host to remain awake and online, and require outbound
