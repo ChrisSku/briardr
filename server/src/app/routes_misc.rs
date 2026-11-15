@@ -8,8 +8,8 @@ use axum::http::Method;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, caps_json, js_number, js_truthy, json_body, lock, now_ms, ok, response, send,
-    str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
+    action_err, caps_json, js_number, js_truthy, json_body, json_body_as, lock, now_ms, ok,
+    response, send, str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
 };
 use crate::herdr::backend::Target;
 use crate::herdr::core::state::CoreTarget;
@@ -259,12 +259,13 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let device = ctx.device()?.id.clone();
-            let invalid = || action_err(400, "invalid", "Those alert settings aren’t valid.");
-            let change: PrefsChange =
-                serde_json::from_value(json_body(&mut ctx, JSON_LIMIT).await?)
-                    .map_err(|_| invalid())?;
+            let change: PrefsChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
             if !change.valid() {
-                return Err(invalid());
+                return Err(action_err(
+                    400,
+                    "invalid",
+                    "Those alert settings aren’t valid.",
+                ));
             }
             let push = app.d.push.clone();
             let prefs = blocking(move || push.change_prefs(&device, change))
