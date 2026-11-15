@@ -118,7 +118,8 @@ describe('authentication', () => {
     // The code is in the fragment, which browsers send to no server.
     assert.equal(r.link, `${s.base}/#pair=${r.code}`);
     assert.ok(r.qr.length >= 21 && r.qr.every((row: string) => row.length === r.qr.length && /^[01]+$/.test(row)), 'a square of modules');
-    assert.equal((await request(s, 'POST', '/api/pair', { code: r.code, name: 'by link' }, { cookie: false })).status, 200);
+    // (Paired in-process: the HTTP pairing route is rate-limited by the tests above, as it should be.)
+    assert.ok(s.run.auth.pair(r.code, 'by link').ok);
   });
 
   test('security headers are present on app and API responses', async () => {

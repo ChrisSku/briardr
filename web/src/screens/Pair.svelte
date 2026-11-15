@@ -4,7 +4,7 @@
   import { api, ApiError } from '../api.ts';
   import { record } from '../diag.ts';
   import { installSuggestion, platform, standalone } from '../install.ts';
-  import { navigate } from '../router.ts';
+  import { linkedCode, navigate } from '../router.ts';
   import { acceptSession, startSession } from '../session.ts';
   import { Icon } from '../ui/icons/index.ts';
 
@@ -18,10 +18,8 @@
     return 'Device';
   }
 
-  // A pairing link (the QR code in Settings → Devices and from `briardr pair`) brings the code in its
-  // fragment. It's taken out of the address at once: a one-time code has no place in the history.
-  const linked = /^#pair=([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})$/.exec(location.hash)?.[1].toUpperCase() ?? '';
-  if (linked) history.replaceState(history.state, '', location.pathname + location.search);
+  // A pairing link brings the code filled in.
+  const linked = linkedCode;
   // On an iPhone or iPad the Home Screen app signs in separately, and the code works once.
   const installFirst = linked && !standalone && (platform() === 'iphone' || platform() === 'ipad');
 
