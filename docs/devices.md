@@ -17,7 +17,8 @@ device to that server. No native Briardr client is required.
 2. Choose **Share → Add to Home Screen** and add Briardr.
 3. Open Briardr from the Home Screen. Pair here: the installed app may have a separate sign-in from
    Safari, so a Safari pairing may not carry over.
-4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
+4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install. On a
+   device that is already signed in, Settings → Devices → **Add a device** gives a code too.
 5. Enter the one-time code and a device name in Briardr. The code expires after ten minutes.
 6. Enable and test notifications in Briardr Settings → Notifications.
 
@@ -86,6 +87,20 @@ Open the URL in a modern browser and pair. If the browser offers **Install app**
 screen**, use it and pair inside that installation. These client combinations need additional
 device testing; please report the OS, browser, access mode, and observed behavior when helping test.
 Windows hosting is a separate concern and is not currently supported.
+
+## Pair with a QR code
+
+`briardr pair` in a terminal and Settings → Devices → **Add a device** show a QR code beside the
+one-time code. Scanning it with the new device's camera opens Briardr with the code filled in; you still
+name the device and choose **Sign in**. The code is in the part of the link after `#`, which browsers
+send to no server or proxy, and Briardr takes it out of the address as soon as it has read it. It's the
+same code, so it still works once and expires after ten minutes.
+
+The QR code opens the address `briardr pair` prints. In Settings it opens the address the signed-in
+device uses, unless that's the host itself (`localhost`). The new device needs the same network and
+certificate trust as for typing the address: with Briardr's local CA, [trust it](#trust-briardrs-local-ca)
+first. On an iPhone or iPad the camera opens Safari, and the Home Screen app signs in separately: scan
+to get to Briardr, add it to the Home Screen, and enter the code in the installed app.
 
 ## Trust Briardr's local CA
 

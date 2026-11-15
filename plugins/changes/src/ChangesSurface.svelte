@@ -1,13 +1,16 @@
 <!--
   Changes: read-only review of uncommitted work against HEAD. Refreshes when opened, when the agent's
   state changes, and on pull-to-refresh; never polls in the background. Requests like "revert this
-  file" belong to the agent, through the terminal.
+  file" belong to the agent, through the terminal: lines picked in a diff take a comment each, and the
+  comments go to the terminal together, as one paste.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
   import { LETTER, reviewed, type ChangedFile, type Report } from './changes.ts';
   import Diff from './Diff.svelte';
+  import { reviewOf } from './review.ts';
+  import ReviewSheet from './ReviewSheet.svelte';
 
   let { stream, visible, briardr }: StreamTabProps = $props();
   const host = $derived(briardr.host());
@@ -48,10 +51,15 @@
     else delete cur[f.path];
     reviewed.value = { ...reviewed.value, [stream.id]: cur };
   }
+
+  const review = $derived(reviewOf(stream.id));
+  let reviewing = $state(false);
+  /** The review bar's height: a diff's selection bar sticks above it. */
+  let reviewHeight = $state(0);
 </script>
 
 {#if visible}
-  <div class="surface changes" {...ptr.handlers}>
+  <div class="surface changes" style:--review-h="{review.comments.length || review.note ? reviewHeight + 8 : 0}px" {...ptr.handlers}>
     {#if ptr.pull > 0}<div class="ptr" style:height="{ptr.pull}px">{ptr.pull > 64 ? 'Release to refresh' : 'Pull to refresh'}</div>{/if}
     <div class="card branch-card">
       <div class="branch-row">
@@ -80,7 +88,7 @@
     {#if report?.state === 'clean'}<Empty title="No uncommitted changes">The working tree matches {report.noCommits ? 'an empty repository' : 'HEAD'}.</Empty>{/if}
     {#if report?.state === 'ok'}
       {#if report.truncated}<p class="note">Showing the first {report.files.length} of {report.totalFiles} files.</p>{/if}
-      <p class="changes-hint"><Icon name="info" size={14} />Read-only. To revert or change a file, ask the agent in the terminal.</p>
+      <p class="changes-hint"><Icon name="info" size={14} />Read-only. To have something changed, tap line numbers in a diff and comment for the agent.</p>
       <ul class="files card">
         {#each report.files as f}
           {@const isOpen = !!open[f.path]}
@@ -110,5 +118,18 @@
         {/each}
       </ul>
     {/if}
+    {#if review.comments.length || review.note}
+      <div class="changes-review" role="region" aria-label="Review" bind:offsetHeight={reviewHeight}>
+        <Icon name="notes" size={18} />
+        <span class="changes-review-label">{review.comments.length ? `${review.comments.length} ${review.comments.length === 1 ? 'comment' : 'comments'} for the agent` : 'Note drafted'}</span>
+        <button class="btn btn-small btn-primary" onclick={() => (reviewing = true)}>Review…</button>
+      </div>
+    {/if}
   </div>
+  {#if reviewing}
+    <ReviewSheet {stream} {briardr} onClose={() => (reviewing = false)} onSent={() => {
+      reviewing = false;
+      briardr.openTab('terminal');
+    }} />
+  {/if}
 {/if}

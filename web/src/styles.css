@@ -828,6 +828,20 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .dl-hunk { background: var(--bg-sunken); color: var(--text-tertiary) !important; padding: 6px 12px !important; }
 .dl-meta { display: none !important; }
 .diff .note { margin: 8px 12px; }
+/* Changes: line numbers pick lines for a comment; picked lines are tinted, commented ones carry a bar.
+   The selection bar and the review bar stay along the bottom while the files scroll, one above the other
+   (the card clips without being a scroller, so they can stick). */
+.changes .files.card { overflow: clip; }
+.changes .diff .dl-n { cursor: pointer; }
+.changes .diff pre > span.is-noted { box-shadow: inset 3px 0 0 var(--state-attention); }
+.changes .diff pre > span.is-sel { box-shadow: inset 3px 0 0 var(--ink-default); background: color-mix(in srgb, var(--ink-default) 14%, transparent); }
+.diff-selbar { position: sticky; bottom: var(--review-h, 0px); z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-surface); }
+.changes-review {
+  position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--line-default); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--shadow-menu);
+}
+.changes-review-label { flex: 1; min-width: 0; font-weight: 600; font-size: 0.9rem; }
+.comment-lines { max-height: 30vh; overflow: auto; }
 /* Elsewhere (the usage tap's review) a diff is a plain block. */
 .tap-review .diff { border-radius: 10px; border: 1px solid var(--line-default); }
 .tap-review .diff pre > span { padding: 0 12px; }
@@ -973,17 +987,20 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
   padding: 8px 8px max(8px, env(safe-area-inset-bottom)) 16px; border-top: 1px solid var(--line-default); background: var(--bg-sunken);
 }
 .has-prompt .fv-selbar { padding-bottom: 8px; }
-.fv-sel-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-.fv-sel-label small { font-weight: 400; font-size: 0.78rem; color: var(--text-secondary); }
+.fv-sel-label, .diff-sel-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+:is(.fv-sel-label, .diff-sel-label) small { font-weight: 400; font-size: 0.78rem; color: var(--text-secondary); }
 .files-prompt { color: var(--ink-default); }
 .files-prompt-label { flex: 1; min-width: 0; color: var(--text-primary); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* PromptSheet (the SDK's), and the snippets plugins list in it: a head with the path and a remove button,
+   the code, and a comment under it. */
 .prompt-label { display: block; font-weight: 600; font-size: 0.92rem; margin: 4px 0 6px; }
-.prompt-question { resize: vertical; min-height: 4.6em; font-size: max(16px, 1rem); line-height: 1.45; }
+.prompt-message { resize: vertical; min-height: 4.6em; font-size: max(16px, 1rem); line-height: 1.45; }
 .prompt-snippets { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .prompt-snippet { border: 1px solid var(--line-default); border-radius: 12px; background: var(--bg-sunken); overflow: hidden; }
 .prompt-snippet-head { display: flex; align-items: center; gap: 4px; padding: 0 2px 0 12px; border-bottom: 1px solid var(--line-default); font-size: 0.82rem; }
 .prompt-snippet-head .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-snippet-code, .prompt-raw pre { margin: 0; padding: 8px 12px; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.45; overflow-x: auto; white-space: pre; }
+.prompt-snippet-note { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line-default); background: var(--bg-surface); white-space: pre-wrap; overflow-wrap: anywhere; }
 .prompt-more { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; }
 .prompt-raw { flex: 1; min-width: 0; }
 .prompt-raw summary { cursor: pointer; color: var(--text-secondary); font-size: 0.88rem; line-height: 34px; }

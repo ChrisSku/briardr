@@ -3,8 +3,8 @@
   import { hostNoun, isMac, theHost } from '../host.ts';
   import { api, ApiError } from '../api.ts';
   import { record } from '../diag.ts';
-  import { installSuggestion, standalone } from '../install.ts';
-  import { navigate } from '../router.ts';
+  import { installSuggestion, platform, standalone } from '../install.ts';
+  import { linkedCode, navigate } from '../router.ts';
   import { acceptSession, startSession } from '../session.ts';
   import { Icon } from '../ui/icons/index.ts';
 
@@ -18,7 +18,11 @@
     return 'Device';
   }
 
-  let code = $state('');
+  // A pairing link (its QR code) brings the code filled in; signing in is still up to the person here. On
+  // an iPhone or iPad the Home Screen app signs in separately, and the code works once.
+  const installFirst = linkedCode && !standalone && (platform() === 'iphone' || platform() === 'ipad');
+
+  let code = $state(linkedCode);
   let focused = $state(false);
   const chars = $derived(code.replace(/[^A-Z0-9]/g, '').slice(0, 8));
   let name = $state(defaultName());
@@ -51,6 +55,9 @@
     <h1>Sign in to Briardr</h1>
     <p class="lead">See and steer the agents running on your {hostNoun()}, from anywhere on your network.</p>
     {#if reason}<p class="note">{reason}</p>{/if}
+    {#if installFirst}
+      <p class="note" role="note">For alerts, add Briardr to the Home Screen first (Share → Add to Home Screen) and enter this code there: the Home Screen app signs in separately, and the code works once.</p>
+    {/if}
     <form class="form" onsubmit={submit}>
       <div class="field-label">
         <label for="pair-code">Pairing code</label>
@@ -70,7 +77,7 @@
             spellcheck={false}
             inputmode="text"
             maxlength={9}
-            autofocus
+            autofocus={!linkedCode}
             required
           />
           <span class="cells" aria-hidden="true">
