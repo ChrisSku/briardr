@@ -97,6 +97,21 @@ describe('authentication', () => {
     assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).status, 200);
     assert.equal(await closing, 4401);
     assert.equal((await request(s, 'GET', '/api/state', undefined, { cookie })).status, 401);
+    assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).json.error, 'device_gone');
+  });
+
+  test('a device can be renamed; an empty name and an unknown device are refused', async () => {
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'to rename');
+    assert.ok(p.ok);
+    const rename = (id: string, name: unknown) => request(s, 'POST', `/api/devices/${id}/rename`, { name });
+    assert.equal((await rename(p.device.id, '  Work phone ')).status, 200);
+    const { devices } = (await request(s, 'GET', '/api/devices')).json;
+    assert.equal(devices.find((d: any) => d.id === p.device.id).name, 'Work phone');
+    assert.equal((await request(s, 'GET', '/api/session', undefined, { cookie: `__Host-briardr=${p.cookie}` })).json.device.name, 'Work phone', 'it stays signed in');
+    for (const name of ['', '   ', '\u0007\n', null, undefined]) assert.equal((await rename(p.device.id, name)).json.error, 'invalid_name');
+    assert.equal((await rename(p.device.id, 42)).json.error, 'bad_json');
+    assert.equal((await rename('no-such-device', 'x')).json.error, 'device_gone');
+    assert.equal((await request(s, 'POST', `/api/devices/${p.device.id}/rename`, { name: 'x' }, { cookie: false })).status, 401);
   });
 
   test('security headers are present on app and API responses', async () => {
