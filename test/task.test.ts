@@ -8,10 +8,11 @@ const agent = { kind: 'agent' as const, name: 'auth refactor', tool: 'claude', t
 test('an agent’s terminal title is its task', () => {
   assert.equal(taskOf({ ...agent, title: ' Fix the flaky login test ' }), 'Fix the flaky login test');
   assert.equal(taskOf({ ...agent, title: 'Claude hooks for the docs site' }), 'Claude hooks for the docs site');
+  assert.equal(taskOf({ ...agent, title: 'Reply to ana@example.com: the release' }), 'Reply to ana@example.com: the release');
 });
 
-test('a title that repeats the name, the agent or the folder isn’t shown', () => {
-  for (const title of [null, '', '  ', 'auth refactor', 'Claude', 'Claude Code', 'app', '/srv/app', '~/code/app']) assert.equal(taskOf({ ...agent, title }), null, String(title));
+test('a title that repeats the name, the agent or where it runs isn’t shown', () => {
+  for (const title of [null, '', '  ', 'auth refactor', 'Claude', 'Claude Code', 'app', '/srv/app', '~/code/app', 'runner@ci-host: /srv/app', 'ana@mac:~/code/app']) assert.equal(taskOf({ ...agent, title }), null, String(title));
   assert.equal(taskOf({ ...agent, tool: 'codex', title: 'Codex' }), null);
 });
 

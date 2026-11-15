@@ -16,6 +16,7 @@ export function taskOf(s: Titled): string | null {
   // The agent's own name ("Claude Code") is its title until it has a task.
   const words = t.split(/\s+/);
   const ownName = words[0] === s.tool.toLowerCase() && words.length <= 2;
-  // A path (the folder, in full or from the home folder) is where it runs, not what it does.
-  return repeats || ownName || /^[~/]/.test(title) ? null : title;
+  // A path (the folder, in full or from the home folder), or the shell prompt's "user@host: ~/app" an
+  // agent that sets no title leaves, is where it runs, not what it does.
+  return repeats || ownName || /^[~/]|^[^\s@]+@[^\s:]+:/.test(title) ? null : title;
 }

@@ -507,7 +507,6 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .row-title { font: var(--type-row-title); letter-spacing: var(--track-row-title); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .row-sub { color: var(--text-secondary); font: var(--type-footnote); letter-spacing: var(--track-footnote); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-task { color: var(--text-tertiary); }
 .row-trail { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
 .row-since { font: var(--type-caption); color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
 .row-since.is-attention { color: var(--state-attention); }

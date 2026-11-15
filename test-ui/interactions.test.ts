@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, holdTitle, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -767,10 +767,13 @@ describe('agents list, peek, banners and links', () => {
 
   test('an agent’s row shows what its terminal title says it’s doing, and Jump finds it by that', async () => {
     await settleShell();
-    herdr('pane', 'run', ws.pane, "printf '\\033]0;Reviewing the parser\\007'");
+    holdTitle(ws.pane, 'Reviewing the parser');
     herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
     // The pane stays an agent's, as the tests after this one find it; only its title goes.
-    onTestFinished(() => void herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'"));
+    onTestFinished(async () => {
+      await settleShell();
+      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
+    });
     const a = await device('iphone', 'phone-task');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
