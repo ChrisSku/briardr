@@ -79,14 +79,21 @@ async function startEcho(mode: '' | '--kitty' = '') {
   echoing = true;
 }
 /** Quit whatever the pane runs and wait until its shell answers: a command typed before the prompt is back
- *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts. */
+ *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts.
+ *  The shell is asked again when no answer shows. An answer can be printed and gone: when the last test's
+ *  page gives up control, the pane goes back to its own size, which on a busy machine can still be under way
+ *  after `ctx.close()` returned, and zsh redraws its prompt after a resize one line too high, over the answer. */
 let syncs = 0;
 async function settleShell() {
-  const n = 1000 + ++syncs;
-  herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-  // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
-  herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
-  await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)));
+  for (const t0 = Date.now(); ; ) {
+    const n = 1000 + ++syncs;
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
+    herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
+    const answered = await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)), 2000).then(() => true, () => false);
+    if (answered) return;
+    if (Date.now() - t0 > WAIT) throw new Error('timed out waiting for the shell to answer');
+  }
 }
 /** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
@@ -843,6 +850,33 @@ describe('agents list, peek, banners and links', () => {
     await a.page.locator('.grp-attention .row-title', { hasText: 'ui target' }).waitFor();
     herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
     await a.ctx.close();
+  });
+
+  test('a banner that shows again stays its full time: the first one’s timer doesn’t take it down', async () => {
+    const a = await device('iphone', 'phone-banner-again');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    onTestFinished(() => void herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude'));
+    // The agent's state changes as the page hears of them, with the time.
+    const heard: { to: string; at: number }[] = [];
+    a.page.on('websocket', (sock) => sock.on('framereceived', ({ payload }) => {
+      if (typeof payload !== 'string' || !payload.includes('"transition"')) return;
+      const m = JSON.parse(payload);
+      if (m.t === 'transition' && m.streamId === ws.pane) heard.push({ to: m.to, at: Date.now() });
+    }));
+    await a.page.reload(); // a new live connection, which the listener above hears
+    await a.page.waitForSelector('.count-strip');
+    const report = (state: string) => herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', state);
+    const banner = a.page.locator('.banner-attention', { hasText: 'ui target needs you' });
+    report('blocked');
+    await banner.waitFor();
+    await sleep(2000);
+    report('working');
+    await waitUntil('the agent to work again', () => heard.at(-1)?.to === 'working');
+    report('blocked');
+    await waitUntil('the agent to need you again', () => heard.at(-1)?.to === 'blocked');
+    await banner.waitFor({ state: 'detached' });
+    const shown = Date.now() - heard.at(-1)!.at;
+    assert.ok(shown > 5000, `the second banner stayed ${shown} ms of its 6 seconds`);
   });
 
   test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined; text in a link’s place isn’t one', async () => {
