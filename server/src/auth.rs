@@ -201,6 +201,20 @@ impl Auth {
         let _ = self.revoked.send(id.to_string());
         Ok(true)
     }
+    /// Renames a device, with the name cleaned as at pairing; its cookie keeps working. `Ok(false)` when
+    /// there's no such device.
+    pub fn rename(&self, id: &str, name: &str) -> Result<bool, ConfigError> {
+        let mut devices = self.lock();
+        let mut next = devices.clone();
+        let Some(device) = next.iter_mut().find(|d| d.id == id) else {
+            return Ok(false);
+        };
+        device.name = clean_name(name);
+        // Keep the old name if the change can't be saved, so the file and memory still agree.
+        save_devices(&self.devices_file, &next)?;
+        *devices = next;
+        Ok(true)
+    }
     /// Device for the request's cookie, if any.
     pub fn authenticate(&self, cookie_header: Option<&str>) -> Option<Device> {
         let value = cookie_header.and_then(|h| read_cookie(h, COOKIE))?;
@@ -273,18 +287,18 @@ fn write_pairing(file: &Path, state: &PairingState) -> Result<(), ConfigError> {
     write_file_atomic(file, &data, 0o600)
 }
 
-/// Strips control characters, keeps 60 characters, and falls back to "Device".
+/// A device name as Briardr keeps it: control characters removed (`briardr devices` prints it to a
+/// terminal), trimmed, at most 60 characters. None when nothing is left.
+pub fn device_name(name: &str) -> Option<String> {
+    let kept: String = name.chars().filter(|c| !c.is_control()).collect();
+    let cut: String = kept.trim().chars().take(60).collect();
+    let cut = cut.trim_end();
+    (!cut.is_empty()).then(|| cut.to_string())
+}
+
+/// `device_name`, falling back to "Device".
 fn clean_name(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .filter(|c| !matches!(c, '\u{0}'..='\u{1f}'))
-        .take(60)
-        .collect();
-    if cleaned.is_empty() {
-        "Device".to_string()
-    } else {
-        cleaned
-    }
+    device_name(name).unwrap_or_else(|| "Device".to_string())
 }
 
 pub fn normalize_code(code: &str) -> String {
@@ -457,6 +471,42 @@ mod tests {
         assert!(!auth.revoke(&device.id).unwrap());
         assert_eq!(auth.authenticate(Some(&header)), None);
         assert_eq!(revoked.try_recv().ok(), Some(device.id.clone()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn device_names_lose_controls_and_spaces_and_stop_at_60() {
+        assert_eq!(
+            device_name(" Work\u{7}\u{7f}\u{9b} phone\n"),
+            Some("Work phone".into())
+        );
+        assert_eq!(device_name(&"é".repeat(70)), Some("é".repeat(60)));
+        assert_eq!(
+            device_name(&format!("{} x", "a".repeat(59))),
+            Some("a".repeat(59))
+        );
+        assert_eq!(device_name(" \u{1b}\t "), None);
+        assert_eq!(clean_name(""), "Device");
+    }
+
+    #[test]
+    fn rename_keeps_the_device_signed_in_and_survives_a_restart() {
+        let dir = Scratch::new("auth-rename");
+        let auth = auth_in(&dir);
+        let (code, _) = auth.create_pairing_code();
+        let (device, cookie) = auth
+            .pair(&code, "Phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let header = format!("__Host-briardr={cookie}");
+
+        assert!(auth.rename(&device.id, "Work\u{7} phone").unwrap());
+        assert!(!auth.rename("no-such-device", "x").unwrap());
+        assert_eq!(auth.list()[0].name, "Work phone");
+        assert_eq!(
+            auth.authenticate(Some(&header)).map(|d| d.name),
+            Some("Work phone".to_string())
+        );
+        assert_eq!(auth_in(&dir).list()[0].name, "Work phone");
         let _ = fs::remove_dir_all(&dir);
     }
 
