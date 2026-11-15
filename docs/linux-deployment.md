@@ -63,7 +63,7 @@ adaptation.
 As the Briardr user:
 
 ```sh
-git clone --branch v0.3.21 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.22 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --domain briardr.example.com     # read-only: what's there, what's missing
 scripts/setup-linux.sh install --domain briardr.example.com --agents claude,codex
@@ -137,7 +137,7 @@ forwarding). Every Briardr rule from [Security model](#security-model) still app
 ### Install
 
 ```sh
-git clone --branch v0.3.21 https://github.com/ChrisSku/briardr.git ~/briardr
+git clone --branch v0.3.22 https://github.com/ChrisSku/briardr.git ~/briardr
 cd ~/briardr
 scripts/setup-linux.sh check --access wireguard
 scripts/setup-linux.sh install --access wireguard --agents claude,codex
@@ -313,7 +313,7 @@ Briardr on the internet relies on device pairing rather than on network membersh
   credentials. It is not tested; if you add one, test pairing, WebSockets, the Home Screen app and
   notification taps through it yourself.
 - **Mac-only features are off:** battery, Always on, Sleep Mac, server dictation (use the keyboard's
-  dictation in text fields) and the Keychain usage source. The UI hides them and the API answers
+  dictation in text fields, such as Compose) and the Keychain usage source. The UI hides them and the API answers
   `501 unsupported`.
 
 ## Previews
