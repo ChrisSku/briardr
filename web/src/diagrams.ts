@@ -2,13 +2,14 @@
 // document has a diagram; until then, and if a diagram can't be drawn, the code block stays. A document
 // can't change this configuration (`secure`), and its diagrams keep no links.
 import type { Mermaid } from 'mermaid';
+import { isDark, onThemeChange } from './theme.ts';
 
 let mermaid: Promise<Mermaid> | null = null;
 let drawn = 0;
 const MIN_SCALE = 0.7;
 
 function configure(m: Mermaid) {
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const dark = isDark();
   const styles = getComputedStyle(document.documentElement);
   const color = (name: string) => styles.getPropertyValue(name).trim();
   const fontFamily = color('--font-sans');
@@ -59,7 +60,7 @@ async function draw(m: Mermaid, block: HTMLElement) {
 function load(): Promise<Mermaid> {
   return (mermaid ??= import('mermaid').then(({ default: m }) => {
     // Diagrams take their colours when drawn, so a change of theme draws them again.
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    onThemeChange(() => {
       configure(m);
       for (const block of document.querySelectorAll<HTMLElement>('pre.md-diagram')) void draw(m, block);
     });

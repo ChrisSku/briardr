@@ -60,9 +60,9 @@ function deploy(suffix: string, opts: { broken?: boolean } = {}): { version: str
     if (f === 'index.html' || f === 'sw.js') text = text.replaceAll(v1, v2);
     if (opts.broken && f === 'sw.js') text = text.replace('"/manifest.webmanifest"', '"/manifest.webmanifest","/assets/never-built.js"');
     fs.writeFileSync(file, text);
-    // The import map changed with the names, and the server allows it by its hash.
-    const map = f === 'index.html' && text.match(/<script type="importmap">([^<]*)<\/script>/)?.[1];
-    if (map) fs.writeFileSync(path.join(next, 'index.html.csp'), `'sha256-${crypto.createHash('sha256').update(map).digest('base64')}'\n`);
+    // The import map changed with the names, and the server allows the page's inline scripts by their hashes.
+    const inline = f === 'index.html' ? [...text.matchAll(/<script(?: type="importmap")?>([^]*?)<\/script>/g)].map((m) => m[1]) : [];
+    if (inline.length) fs.writeFileSync(path.join(next, 'index.html.csp'), inline.map((code) => `'sha256-${crypto.createHash('sha256').update(code).digest('base64')}'`).join(' ') + '\n');
   }
   serve(next);
   fs.rmSync(next, { recursive: true, force: true });
