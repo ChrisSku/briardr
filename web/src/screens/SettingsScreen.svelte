@@ -190,7 +190,7 @@
     {:else if section === 'install'}
       <InstallSection />
     {:else if section === 'notifications'}
-      <NotificationsSection {s} {save} />
+      <NotificationsSection {s} />
     {:else if section === 'plugins'}
       <PluginsSection />
     {:else if section === 'power' && hasPower}

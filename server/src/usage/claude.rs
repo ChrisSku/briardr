@@ -11,14 +11,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
 use reqwest::StatusCode;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::codex::UsageError;
 use super::types::{js_num, ProviderReport, UsageWindow};
-use crate::config::{read_json, write_file_atomic, ConfigError};
+use crate::config::{present, read_json, write_file_atomic, ConfigError};
 use crate::http;
 
 pub const CLAUDE_USAGE_URL_DEFAULT: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -291,11 +291,6 @@ pub struct TapRecord {
     backup_path: Option<String>,
     installed_bytes_hash: String,
     installed_at: u64,
-}
-
-/// Deserializes a present key, including `null`, as `Some`; a missing key stays `None` via `default`.
-fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
-    Value::deserialize(d).map(Some)
 }
 
 #[derive(Debug, Error)]

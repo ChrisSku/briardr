@@ -8,13 +8,14 @@ use axum::http::Method;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, caps_json, js_number, js_truthy, json_body, lock, now_ms, ok, response, send,
-    str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
+    action_err, caps_json, js_number, js_truthy, json_body, json_body_as, lock, now_ms, ok,
+    response, send, str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
 };
 use crate::herdr::backend::Target;
 use crate::herdr::core::state::CoreTarget;
 use crate::herdr::rpc::{herdr_status, HerdrTarget};
 use crate::preview::{OpenError, PreviewInfo};
+use crate::push::PrefsChange;
 
 /// Runs blocking work (file writes, shelling out, locks) off the async runtime.
 async fn blocking<T, F>(f: F) -> Result<T, ApiError>
@@ -244,7 +245,33 @@ pub(super) fn register(r: &mut Routes) {
                 "subscribed": app.d.push.has_device(&device),
                 "endpoint": app.d.push.device_endpoint(&device),
                 "settings": app.cfg().notifications,
+                "prefs": app.d.push.prefs(&device),
             }))
+        },
+    );
+
+    // A change to what this device wants of its alerts (push::PrefsChange): true or false is its own
+    // choice, null goes back to the host's setting; `quiet` is its quiet hours or null. Fields left out
+    // stay as they are.
+    r.add(
+        Method::PUT,
+        "/api/notifications/device",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let device = ctx.device()?.id.clone();
+            let change: PrefsChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            if !change.valid() {
+                return Err(action_err(
+                    400,
+                    "invalid",
+                    "Those alert settings aren’t valid.",
+                ));
+            }
+            let push = app.d.push.clone();
+            let prefs = blocking(move || push.change_prefs(&device, change))
+                .await?
+                .map_err(|_| ApiError::Internal)?;
+            ok(json!({ "prefs": prefs }))
         },
     );
 

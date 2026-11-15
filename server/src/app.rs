@@ -806,7 +806,7 @@ impl App {
                 }
                 app.d.hub.close_device(&id, 4401);
                 app.d.previews.close_device(&id);
-                let _ = app.d.push.unsubscribe_device(&id);
+                let _ = app.d.push.forget_device(&id);
             }
         });
     }
@@ -1392,15 +1392,16 @@ impl App {
         Ok(report.summary)
     }
 
-    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, when the
-    /// setting allows, to every device as a push. Wake and keep-awake events have no listener.
+    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, as a push, to the
+    /// devices that take it (the host's setting, or their own choice). Wake and keep-awake events
+    /// have no listener.
     pub fn power_events(self: &Arc<Self>, events: &[PowerEvent]) {
         for ev in events {
             let PowerEvent::LowBattery(b) = ev else {
                 continue;
             };
             self.broadcast(&json!({"t": "battery", "level": b.level, "percent": b.percent, "sleeping": b.sleeping}));
-            if !self.cfg().notifications.low_battery || !self.d.caps.battery {
+            if !self.d.caps.battery || !self.d.push.wanted("battery") {
                 continue;
             }
             let percent = b.percent.map_or("null".to_string(), |p| p.to_string());
