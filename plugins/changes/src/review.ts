@@ -31,8 +31,10 @@ const kind = (l: string): DiffLine['k'] =>
 export function parseDiff(text: string): DiffLine[] {
   let a = 0;
   let b = 0;
-  return text
-    .split('\n')
+  const lines = text.split('\n');
+  // The diff ends with a line break, which is not one more line of it (an empty context line is a space).
+  if (lines.at(-1) === '') lines.pop();
+  return lines
     .filter((l, i) => i > 0 || l)
     .map((text) => {
       const k = kind(text);

@@ -9,6 +9,9 @@ test('diff lines are numbered from the hunk headers: removed lines in the old fi
   const lines = parseDiff(diff);
   assert.deepEqual(lines.map((l) => [l.k, l.n]), [['dl-meta', null], ['dl-meta', null], ['dl-meta', null], ['dl-meta', null], ['dl-hunk', null], ['dl-ctx', 10], ['dl-del', 11], ['dl-add', 11], ['dl-add', 12], ['dl-ctx', 13], ['dl-ctx', null]]);
   assert.deepEqual(lines.map(lineId).filter(Boolean), ['+10', '-11', '+11', '+12', '+13']);
+  // The line break a diff ends with is not a line of its own.
+  assert.equal(parseDiff(diff + '\n').length, lines.length);
+  assert.deepEqual(parseDiff(''), []);
 });
 
 test('picked lines are named by their numbers in the new file, or in the old one when all were removed', () => {
