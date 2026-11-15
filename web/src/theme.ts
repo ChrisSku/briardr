@@ -1,4 +1,4 @@
-// The page's theme, light or dark: web/public/theme.js sets it on <html> (data-theme) from this
+// The page's theme, light or dark: web/theme.js (in the page) sets it on <html> (data-theme) from this
 // device's choice or the system's. Styles follow the attribute; code that draws its own colours (the
 // terminal, diagrams) asks here.
 import { prefs } from './store.ts';

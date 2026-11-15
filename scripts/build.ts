@@ -188,7 +188,7 @@ async function build() {
       __BRIARDR_ICON__: JSON.stringify(icons['/icons/icon-192.png']),
       // Chunks too, so a client still on this version can load them after the next build replaced them.
       // The brand tile's dog is linked from the app by its plain name.
-      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', '/theme.js', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
+      __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
     },
   });
 
@@ -204,10 +204,15 @@ async function build() {
   const manifest = path.join(dist, 'manifest.webmanifest');
   const manifestText = withIcons(fs.readFileSync(manifest, 'utf8'));
   fs.writeFileSync(manifest, manifestText);
-  // The server's Content-Security-Policy allows the page's one inline script, the import map, by its hash.
+  // The server's Content-Security-Policy allows the page's inline scripts by their hashes: the import map,
+  // and the theme (web/theme.js), which is in the page itself so that it runs before the first paint
+  // without a request of its own (a launch on a stalled network would wait for one).
   const importMap = JSON.stringify({ imports: runtime });
-  fs.writeFileSync(path.join(dist, 'index.html.csp'), `'sha256-${crypto.createHash('sha256').update(importMap).digest('base64')}'\n`);
+  const theme = fs.readFileSync(path.join(web, 'theme.js'), 'utf8').trim();
+  const scriptHash = (text: string) => `'sha256-${crypto.createHash('sha256').update(text).digest('base64')}'`;
+  fs.writeFileSync(path.join(dist, 'index.html.csp'), `${scriptHash(importMap)} ${scriptHash(theme)}\n`);
   const page = withIcons(fs.readFileSync(path.join(web, 'index.html'), 'utf8'))
+    .replace('%THEME%', () => `<script>${theme}</script>`)
     .replace('%IMPORT_MAP%', `<script type="importmap">${importMap}</script>`)
     .replace('%APP_JS%', `/${js}`)
     .replace('%APP_CSS%', (css ? `<link rel="stylesheet" href="/${css}">` : '') + [...preload].map((p) => `\n    <link rel="modulepreload" href="/${p}">`).join(''));

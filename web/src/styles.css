@@ -137,7 +137,7 @@
   /* Layout: the screen gutter, 16 on iPhone (20 on iPad and Mac, below). */
   --gutter: var(--space-4);
 }
-/* web/public/theme.js sets data-theme before the first paint: this device's choice, else the system's. */
+/* web/theme.js sets data-theme before the first paint: this device's choice, else the system's. */
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg-canvas: #0D0C0B;
