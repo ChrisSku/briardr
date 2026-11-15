@@ -3,8 +3,10 @@
 // Several fields pass source values through unchecked (`x ?? null`, `resets_at * 1000`), so they
 // are `Value` here: the JSON the client sees and the persisted usage.json keep their existing shape.
 // Optional keys (`key?:`) are `Option<Value>`: `None` = key absent, `Some(Value::Null)` = `null`.
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::config::present;
 
 /// A JS number as JSON: whole numbers serialize as integers (like `JSON.stringify`), NaN/±∞ as null.
 pub fn js_num(n: f64) -> Value {
@@ -15,11 +17,6 @@ pub fn js_num(n: f64) -> Value {
     } else {
         Value::from(n)
     }
-}
-
-/// Deserializes a present key, including `null`, as `Some`; a missing key stays `None` via `default`.
-fn present<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
-    Value::deserialize(d).map(Some)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
