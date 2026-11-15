@@ -35,10 +35,11 @@ pre-push:
       glob: [".github/workflows/*", "scripts/setup-linux.sh", "site/install.sh", "mise.toml"]
       run: mise run lint
     # About 25 seconds once the test server is built. mise.toml sets the Bun and Rust versions and the tasks.
+    # The built-in plugins (plugins/) are part of the client build, and both suites exercise them.
     - name: test
-      glob: ["server/**", "web/**", "test/**", "scripts/**", "package.json", "bun.lock", "bunfig.toml", "mise.toml"]
+      glob: ["server/**", "web/**", "plugins/**", "test/**", "scripts/**", "package.json", "bun.lock", "bunfig.toml", "mise.toml"]
       run: mise run test
     # About 3 minutes, so only for the client and its tests here; CI runs it for every change.
     - name: ui
-      glob: ["web/**", "test-ui/**"]
+      glob: ["web/**", "plugins/**", "test-ui/**"]
       run: mise run test:ui

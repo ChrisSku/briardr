@@ -1,27 +1,31 @@
 <!--
   One changed file's diff. Lines are picked for a review comment by tapping their numbers (a second tap
-  makes a range; Shift-click extends one); lines that already have a comment are marked.
+  makes a range; Shift-click extends one); lines that already have a comment are marked while the file
+  stays as it was when the comment was written.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, Icon, Sheet, type PluginContext, type Stream } from '@briardr/sdk';
-  import { addComment, reviewOf, type ChangedFile, type Since } from './changes.ts';
-  import { lineId, parseDiff, whereOf } from './review.ts';
+  import type { ChangedFile, Since } from './changes.ts';
+  import { lineId, parseDiff, whereOf } from './diff.ts';
+  import { addComment, reviewOf, type Comment } from './review.ts';
 
   let { stream, briardr, file, since }: { stream: Stream; briardr: PluginContext; file: ChangedFile; since: Since } = $props();
-  let d = $state.raw<{ text: string; truncated: boolean; lines: number; binary: boolean } | null>(null);
+  /** The diff, and the change of the file it is of (`signature`). */
+  let d = $state.raw<{ text: string; truncated: boolean; lines: number; binary: boolean; signature: string } | null>(null);
   let err = $state<string | null>(null);
   /** Lines picked for a comment, as positions in `lines` (inclusive). */
   let sel = $state<{ anchor: number; from: number; to: number } | null>(null);
 
-  // Load when opened, and again when the file changes.
+  // Load when opened, and again when the file changes or is compared with something else.
   const key = $derived(`${file.path}\n${file.signature}\n${since}`);
   $effect(() => {
     void key;
     untrack(() => {
       sel = null;
+      const signature = file.signature;
       briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes/diff?path=${encodeURIComponent(file.path)}${since === 'base' ? '&since=base' : ''}`, undefined, { timeout: 20_000 }).then(
-        (r) => (d = r),
+        (r) => (d = { ...r, signature }),
         (e) => (err = e instanceof ApiError ? e.message : 'Couldn’t load the diff.'),
       );
     });
@@ -30,11 +34,18 @@
   const lines = $derived(d ? parseDiff(d.text) : []);
 
   // ---------- picking lines for a comment ----------
-  let commenting = $state(false);
-  let text = $state('');
   const picked = $derived(sel ? lines.slice(sel.from, sel.to + 1).filter((l) => l.k !== 'dl-meta') : []);
   const where = $derived(whereOf(picked));
-  const noted = $derived(new Set(reviewOf(stream.id).comments.filter((c) => c.path === file.path).flatMap((c) => c.ids)));
+  const noted = $derived(new Set(reviewOf(stream.id).comments.filter((c) => c.path === file.path && c.signature === d?.signature).flatMap((c) => c.ids)));
+  /** The lines a comment is being written on, taken when Comment is chosen: the diff reloading meanwhile
+   *  (the agent changing the file) doesn't change them. */
+  let draft = $state.raw<Omit<Comment, 'text'> | null>(null);
+  let text = $state('');
+
+  function comment() {
+    if (!d || !where) return;
+    draft = { path: file.path, signature: d.signature, where, lines: picked.map((l) => l.text).join('\n'), ids: picked.map(lineId).filter((id) => id !== null) };
+  }
 
   // A click on a line's number.
   function onclick(e: MouseEvent) {
@@ -50,10 +61,10 @@
 
   function add(e: Event) {
     e.preventDefault();
-    if (!text.trim() || !where) return;
-    addComment(stream.id, { path: file.path, where, lines: picked.map((l) => l.text).join('\n'), ids: picked.map(lineId).filter((id) => id !== null), text: text.trim() });
-    briardr.record('review_comment_added', { lines: picked.length });
-    commenting = false;
+    if (!draft || !text.trim()) return;
+    addComment(stream.id, { ...draft, text: text.trim() });
+    briardr.record('review_comment_added', { lines: draft.lines.split('\n').length });
+    draft = null;
     text = '';
     sel = null;
   }
@@ -78,32 +89,21 @@
         {where.includes('-') ? 'Lines' : 'Line'} {where.replace('-', '–')}
         {#if sel.from === sel.to}<small>Tap another number for a range</small>{/if}
       </span>
-      <button class="btn btn-small btn-primary" onclick={() => (commenting = true)}>Comment…</button>
+      <button class="btn btn-small btn-primary" onclick={comment}>Comment…</button>
       <button class="icon-btn" aria-label="Clear selection" title="Clear selection" onclick={() => (sel = null)}><Icon name="close" /></button>
     </div>
   {/if}
-  {#if commenting}
-    <Sheet title="Comment on {file.path.split('/').pop()} {where}" onClose={() => (commenting = false)} initialFocus=".review-comment">
+  {#if draft}
+    <Sheet title="Comment on {draft.path.split('/').pop()} {draft.where}" onClose={() => (draft = null)} initialFocus=".prompt-message">
       <form class="form" onsubmit={add}>
-        <pre class="review-lines">{picked.map((l) => l.text).join('\n')}</pre>
-        <textarea class="field review-comment" bind:value={text} aria-label="Comment" placeholder="What should the agent do about these lines?" rows="3"></textarea>
+        <div class="prompt-snippet"><pre class="prompt-snippet-code comment-lines">{draft.lines}</pre></div>
+        <textarea class="field prompt-message" bind:value={text} aria-label="Comment" placeholder="What should the agent do about these lines?" rows="3"></textarea>
         <p class="hint">Comments are collected for this stream. Send them from Review when you’re done.</p>
         <div class="form-actions">
-          <button type="button" class="btn" onclick={() => (commenting = false)}>Cancel</button>
+          <button type="button" class="btn" onclick={() => (draft = null)}>Cancel</button>
           <button class="btn btn-primary" disabled={!text.trim()}>Add comment</button>
         </div>
       </form>
     </Sheet>
   {/if}
 {/if}
-
-<style>
-  .diff :global(.dl-n) { cursor: pointer; }
-  .diff pre > :global(span.is-noted) { box-shadow: inset 3px 0 0 var(--state-attention); }
-  .diff pre > :global(span.is-sel) { box-shadow: inset 3px 0 0 var(--ink-default); background: color-mix(in srgb, var(--ink-default) 14%, transparent); }
-  .diff-selbar { display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-surface); position: sticky; bottom: 0; }
-  .diff-sel-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
-  .diff-sel-label small { font-weight: 400; font-size: 0.78rem; color: var(--text-secondary); }
-  .review-lines { margin: 0; padding: 8px 12px; max-height: 30vh; overflow: auto; font: var(--type-mono-small); background: var(--bg-sunken); border: 1px solid var(--line-default); border-radius: 10px; white-space: pre; }
-  .review-comment { resize: vertical; min-height: 4.6em; font-size: max(16px, 1rem); line-height: 1.45; }
-</style>

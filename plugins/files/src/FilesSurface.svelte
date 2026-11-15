@@ -11,7 +11,7 @@
   import FileRow from './FileRow.svelte';
   import FileView from './FileView.svelte';
   import { addFileReference, promptOf } from './prompt.ts';
-  import PromptSheet from './PromptSheet.svelte';
+  import AskSheet from './AskSheet.svelte';
 
   let { stream, visible, compact, briardr }: StreamTabProps = $props();
   const toast = (text: string) => briardr.toast(text);
@@ -326,7 +326,7 @@
     {/if}
   </div>
   {#if asking}
-    <PromptSheet {stream} {briardr} onClose={() => (asking = false)} onSent={() => {
+    <AskSheet {stream} {briardr} onClose={() => (asking = false)} onSent={() => {
       asking = false;
       briardr.openTab('terminal');
     }} />

@@ -5,6 +5,20 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.23
+
+- **Settings → Devices says when something fails.** A revoke, a sign-out or "Add a device" that the host couldn't carry out used to do nothing; now a message says so, and a list that can't be loaded offers "Try again". ([#45](https://github.com/ChrisSku/briardr/pull/45))
+- **Send several images or files at once, and drop files on the terminal.** "Select image…" and "Select file…" take more than one, and with a mouse or trackpad files (not folders) can be dropped on a terminal you control. All of them are reviewed in one sheet (any can be removed), uploaded in order, and their paths inserted as one paste, never followed by Enter: for an agent each path on a line of its own, for a shell as arguments. ([#41](https://github.com/ChrisSku/briardr/pull/41))
+- **Signed-in devices can be renamed.** Settings → Devices has a pencil beside each device; the device stays signed in under its new name. A name keeps at most 60 characters, without spaces around it or control characters, at pairing too. ([#45](https://github.com/ChrisSku/briardr/pull/45))
+
+## 0.3.22
+
+- **Workspace folders on a Linux host show the home folder as `~`.** Workspaces shortened only a Mac's `/Users/name`; `/home/name` and `/root` are shortened now too. ([#36](https://github.com/ChrisSku/briardr/pull/36))
+- **rustls, the TLS library, is updated to 0.23.46.** It fixes four advisories (one moderate, three low) in how rustls handles a rejected Encrypted Client Hello, an unauthenticated ServerHello, the debug output of sessions, and compressed certificates. Briardr's own HTTPS listener and its requests to Web Push and usage services use rustls. ([#37](https://github.com/ChrisSku/briardr/pull/37))
+- **Compose: write a message in a text field of your device, then insert it.** The key bar's + menu has "Compose…": a field with the device's autocorrection, editing and keyboard dictation (so dictation also works with a Linux host). Insert puts the message into the terminal as one paste, never followed by Enter. A message you don't insert is kept as the stream's draft, and the last messages you inserted are offered again under Recent; both stay on the device. ([#40](https://github.com/ChrisSku/briardr/pull/40))
+- **A banner that shows again stays its full time.** When a stream needed you twice within a few seconds, or the low-battery banner changed to "going to sleep", the first banner's timer took the new one down early. ([#33](https://github.com/ChrisSku/briardr/pull/33))
+- **A paste into Peek no longer lands in the stream that's open beside it.** On an iPad or a Mac, pasting while a Peek sheet had the focus put the text into the open stream's terminal, short single lines without review. Peek is read-only, so a paste into it now goes nowhere. ([#39](https://github.com/ChrisSku/briardr/pull/39))
+
 ## 0.3.21
 
 - **On a touch screen, only the key bar's keyboard key opens and closes the on-screen keyboard.** Tapping

@@ -1,5 +1,7 @@
 # Every pull request brings a changeset (.changeset/README.md): what it changes for CHANGELOG.md and the
 # version, or an empty one when it changes nothing users notice. Merging releases it (release.yml).
+# Dependabot's pull requests (.github/dependabot.yml) are let through without one: it can't write one, and
+# what it updates ships with the next release. A changeset pushed to its branch is checked like any other.
 # Actions are pinned to commits; the comment names the release each one is.
 name: changeset
 
@@ -11,13 +13,14 @@ permissions:
 
 jobs:
   changeset:
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # to compare the pull request with its base
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde # v5.2.1
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           install_args: bun
       - run: bun install --frozen-lockfile

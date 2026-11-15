@@ -8,8 +8,9 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
-  import { LETTER, markKey, reviewed, reviewOf, type ChangedFile, type Report, type Since } from './changes.ts';
+  import { LETTER, markKey, reviewed, type ChangedFile, type Report, type Since } from './changes.ts';
   import Diff from './Diff.svelte';
+  import { reviewOf } from './review.ts';
   import ReviewSheet from './ReviewSheet.svelte';
 
   let { stream, visible, briardr }: StreamTabProps = $props();
@@ -43,7 +44,7 @@
     if (visible) untrack(load);
   });
   const base = $derived(report?.base ?? null);
-  /** The report on screen is of what's asked for (the other one shows until the new one arrives). */
+  /** What the report on screen is of (the other view shows until the one asked for arrives). */
   const shown = $derived(report?.since ?? 'head');
 
   const ptr = new PullToRefresh(load);
@@ -61,10 +62,12 @@
 
   const review = $derived(reviewOf(stream.id));
   let reviewing = $state(false);
+  /** The review bar's height: a diff's selection bar sticks above it. */
+  let reviewHeight = $state(0);
 </script>
 
 {#if visible}
-  <div class="surface changes" {...ptr.handlers}>
+  <div class="surface changes" style:--review-h="{review.comments.length || review.note ? reviewHeight + 8 : 0}px" {...ptr.handlers}>
     {#if ptr.pull > 0}<div class="ptr" style:height="{ptr.pull}px">{ptr.pull > 64 ? 'Release to refresh' : 'Pull to refresh'}</div>{/if}
     <div class="card branch-card">
       <div class="branch-row">
@@ -136,9 +139,9 @@
       </ul>
     {/if}
     {#if review.comments.length || review.note}
-      <div class="changes-review" role="region" aria-label="Review">
+      <div class="changes-review" role="region" aria-label="Review" bind:offsetHeight={reviewHeight}>
         <Icon name="notes" size={18} />
-        <span class="changes-review-label">{review.comments.length === 1 ? '1 comment' : `${review.comments.length} comments`} for the agent</span>
+        <span class="changes-review-label">{review.comments.length ? `${review.comments.length} ${review.comments.length === 1 ? 'comment' : 'comments'} for the agent` : 'Note drafted'}</span>
         <button class="btn btn-small btn-primary" onclick={() => (reviewing = true)}>Review…</button>
       </div>
     {/if}
@@ -150,12 +153,3 @@
     }} />
   {/if}
 {/if}
-
-<style>
-  .changes-since { margin-top: 4px; }
-  .changes-review {
-    position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px;
-    border: 1px solid var(--line-default); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--shadow-menu);
-  }
-  .changes-review-label { flex: 1; min-width: 0; font-weight: 600; font-size: 0.9rem; }
-</style>

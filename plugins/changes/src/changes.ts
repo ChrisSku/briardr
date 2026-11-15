@@ -1,12 +1,12 @@
 // What the Changes surface shows, as the host reports it: uncommitted work against HEAD, or everything
 // since the branch the work started from (its commits and the uncommitted work).
 import { persisted } from '@briardr/sdk';
-import type { Comment, Review } from './review.ts';
 
 /** Files marked reviewed on this device, by stream, with the change they were reviewed at (`signature`). */
 export const reviewed = persisted<Record<string, Record<string, string>>>('briardr.reviewed', {});
-/** A file's key in `reviewed`: a mark made against the base is its own, beside the one for uncommitted work. */
-export const markKey = (path: string, since: Since) => (since === 'base' ? `base:${path}` : path);
+/** A file's key in `reviewed`: a mark made against the base is its own, beside the one for uncommitted work
+ *  (no path has a NUL in it, so the two never meet). */
+export const markKey = (path: string, since: Since) => (since === 'base' ? `base\0${path}` : path);
 
 export interface ChangedFile {
   path: string;
@@ -41,23 +41,3 @@ export interface Report {
 export type Since = 'head' | 'base';
 
 export const LETTER: Record<string, string> = { added: 'A', modified: 'M', deleted: 'D', renamed: 'R', copied: 'C', type: 'T', untracked: 'U', conflict: '!' };
-
-// ---------- review comments, kept on this device per stream until they are sent or cleared ----------
-const reviews = persisted<Record<string, Review>>('briardr.changes.review', {});
-const EMPTY: Review = { note: '', comments: [] };
-
-export const reviewOf = (sid: string): Review => reviews.value[sid] ?? EMPTY;
-
-function put(sid: string, r: Review) {
-  const next = { ...reviews.value };
-  if (r.comments.length || r.note) next[sid] = r;
-  else delete next[sid];
-  reviews.value = next;
-}
-export const addComment = (sid: string, c: Comment) => put(sid, { ...reviewOf(sid), comments: [...reviewOf(sid).comments, c] });
-export function removeComment(sid: string, i: number) {
-  const r = reviewOf(sid);
-  put(sid, { ...r, comments: r.comments.filter((_, j) => j !== i) });
-}
-export const setNote = (sid: string, note: string) => put(sid, { ...reviewOf(sid), note });
-export const clearReview = (sid: string) => put(sid, EMPTY);

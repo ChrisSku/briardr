@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use thiserror::Error;
 use url::Url;
@@ -77,6 +77,20 @@ pub struct NotificationsConfig {
     pub debounce_ms: u64,
 }
 
+impl NotificationsConfig {
+    /// Whether the host sends this kind of alert ("needs_you", "finished", "ready", "battery") to a
+    /// device that didn't choose for itself.
+    pub fn sends(&self, kind: &str) -> bool {
+        match kind {
+            "needs_you" => self.needs_you,
+            "finished" => self.finished,
+            "ready" => self.ready,
+            "battery" => self.low_battery,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageConfig {
@@ -109,6 +123,14 @@ impl Default for UpdatesConfig {
 
 fn tui_backend() -> String {
     "tui".to_string()
+}
+
+/// For `deserialize_with` with `default`: a key that is there, `null` included, is `Some`; a missing
+/// key stays `None`.
+pub fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
 }
 
 /// Unset strings are written as "" in the config file.
@@ -161,6 +183,10 @@ impl Paths {
     }
     pub fn monitor_state(&self) -> PathBuf {
         self.state().join("monitor.json")
+    }
+    /// What each device chose for its alerts (push::DevicePrefs).
+    pub fn device_alerts(&self) -> PathBuf {
+        self.state().join("device-alerts.json")
     }
     pub fn power_state(&self) -> PathBuf {
         self.state().join("power.json")

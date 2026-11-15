@@ -22,6 +22,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -273,12 +274,15 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
 
 /// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
 pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
+    json_body_as(ctx, limit).await
+}
+
+/// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
+pub async fn json_body_as<T: DeserializeOwned>(ctx: &mut Ctx, limit: usize) -> Result<T, ApiError> {
     let body = std::mem::replace(&mut ctx.body, Body::empty());
     let buf = read_body(&ctx.headers, body, limit).await?;
-    if buf.is_empty() {
-        return Ok(json!({}));
-    }
-    serde_json::from_slice(&buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
+    let buf: &[u8] = if buf.is_empty() { b"{}" } else { &buf };
+    serde_json::from_slice(buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
 }
 
 /// The raw body, for uploads and dictation.
@@ -773,7 +777,7 @@ impl App {
                 }
                 app.d.hub.close_device(&id, 4401);
                 app.d.previews.close_device(&id);
-                let _ = app.d.push.unsubscribe_device(&id);
+                let _ = app.d.push.forget_device(&id);
             }
         });
     }
@@ -1108,8 +1112,9 @@ impl App {
         }
     }
 
-    /// The Content-Security-Policy for the page: the usual one, with its inline import map allowed by the
-    /// hash the build writes next to it (`index.html.csp`, scripts/build.ts). None without that file.
+    /// The Content-Security-Policy for the page: the usual one, with its inline scripts (the import map and
+    /// the theme) allowed by the hashes the build writes next to it (`index.html.csp`, scripts/build.ts).
+    /// None without that file.
     async fn page_csp(&self, headers: &HeaderMap, file: &str) -> Option<String> {
         let listed = tokio::fs::read_to_string(format!("{file}.csp"))
             .await
@@ -1359,15 +1364,16 @@ impl App {
         Ok(report.summary)
     }
 
-    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, when the
-    /// setting allows, to every device as a push. Wake and keep-awake events have no listener.
+    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, as a push, to the
+    /// devices that take it (the host's setting, or their own choice). Wake and keep-awake events
+    /// have no listener.
     pub fn power_events(self: &Arc<Self>, events: &[PowerEvent]) {
         for ev in events {
             let PowerEvent::LowBattery(b) = ev else {
                 continue;
             };
             self.broadcast(&json!({"t": "battery", "level": b.level, "percent": b.percent, "sleeping": b.sleeping}));
-            if !self.cfg().notifications.low_battery || !self.d.caps.battery {
+            if !self.d.caps.battery || !self.d.push.wanted("battery") {
                 continue;
             }
             let percent = b.percent.map_or("null".to_string(), |p| p.to_string());

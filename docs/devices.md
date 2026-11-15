@@ -33,19 +33,34 @@ the terminal opens a link or does nothing, and a swipe scrolls, so you can scrol
 keyboard is up. Where a hardware keyboard hides the key bar (on an iPad), a tap puts the focus in the
 terminal.
 
+To write more than a few words, choose **Compose…** from the key bar's + menu. It is a text field of
+the device, with its autocorrection, editing and the keyboard's dictation, also with a Linux host.
+**Insert** puts the message into the terminal as one paste; Briardr never presses Enter for you. A
+message you close without inserting is kept as that stream's draft, and the last messages you inserted
+are listed under Recent. Drafts and recent messages stay on the device.
+
+**Select image…** and **Select file…** in the same menu take several at once, and with a mouse or
+trackpad you can drop files (not folders) on a terminal you control. You see them all before they are
+sent and can remove any. They are uploaded to a private folder on the host, and their paths are
+inserted as one paste, never followed by Enter: for an agent each on a line of its own (Claude Code
+attaches an image path that has a line to itself), for a shell as arguments.
+
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
 the mouse, so the selection also shows while a program like that handles the same drag itself.
+
+Briardr is light or dark as the device is. Settings → Appearance keeps it light or dark on that device
+whatever its system says, the terminal included.
 
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
 
 The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
 Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
-beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the keyboard's built-in
-dictation works in text fields. Briardr's separate host-side dictation feature requires a compatible
-Mac host; it is unavailable with a Linux host.
+beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the
+keyboard's built-in dictation works in text fields, such as Compose. Briardr's separate host-side
+dictation feature requires a compatible Mac host; it is unavailable with a Linux host.
 
 On a Mac, Briardr can have several windows: New Window in the sidebar, in a stream's ⋯ menu or with ⌥⌘N,
 Open in New Window on a stream, or the browser's or installed app's own New Window command. Each window
@@ -111,6 +126,15 @@ Settings → Notifications also says when the permission, this device's subscrip
 record of it disagree, and repairs what it can (Repair renews an expired subscription). Where the
 platform supports badges, the app icon shows how many agents need you.
 
+Each device chooses its own alerts there, under **This device**: Needs you, Finished, Ready for input,
+low battery and **Include names** (workspace and stream names in them), and **Quiet hours**, a span of
+its day without any. A choice a device never made follows the host's `notifications` setting. The host
+keeps the choices until the device is revoked, so they stay when alerts are turned off and on again or
+repaired. Quiet hours follow the device's clock, summer time included; after a trip to another time
+zone, they follow the new one once Briardr is opened there. Alerts in quiet hours are dropped, not sent
+later, so the app icon's badge catches up with the next alert or when Briardr opens; while Briardr is
+open on screen, its own banners still show.
+
 Then close or background the app, trigger an agent needing attention, and check that the alert
 arrives and opens the correct stream. Test once on Wi-Fi and once on mobile data with the VPN
 connected if needed. Notifications need the host to remain awake and online, and require outbound
@@ -133,6 +157,12 @@ storage. **Repair offline app** removes the service worker and its caches and in
 notes, drafts, pairing, and settings stay. A device keeps this build's offline shell and the previous
 one, the 200 most recent plugin files, and cached terminal screens of streams opened in the last 30
 days (at most 100).
+
+## Device names
+
+Settings → Devices and `briardr devices` list every signed-in device by the name it got at pairing.
+The pencil beside a device renames it, from any signed-in device; the device stays signed in. A name
+keeps at most 60 characters.
 
 ## Lost device or changed URL
 

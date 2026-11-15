@@ -34,9 +34,11 @@ afterAll(async () => {
 
 let pairedViaUi = false;
 
-async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui'): Promise<{ ctx: BrowserContext; page: Page }> {
+/** `serviceWorkers: 'block'` for a test that answers the page's requests itself (`page.route`): a page its
+ *  service worker controls sends them past the test. */
+async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui', serviceWorkers: 'allow' | 'block' = 'allow'): Promise<{ ctx: BrowserContext; page: Page }> {
   const base = profile === 'iphone' ? devices['iPhone 15 Pro'] : { viewport: { width: 1280, height: 800 } };
-  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US' });
+  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   if (!pairedViaUi) {
@@ -79,14 +81,21 @@ async function startEcho(mode: '' | '--kitty' = '') {
   echoing = true;
 }
 /** Quit whatever the pane runs and wait until its shell answers: a command typed before the prompt is back
- *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts. */
+ *  (a fixed sleep has run out on a busy machine) is lost, and the echo program never starts.
+ *  The shell is asked again when no answer shows. An answer can be printed and gone: when the last test's
+ *  page gives up control, the pane goes back to its own size, which on a busy machine can still be under way
+ *  after `ctx.close()` returned, and zsh redraws its prompt after a resize one line too high, over the answer. */
 let syncs = 0;
 async function settleShell() {
-  const n = 1000 + ++syncs;
-  herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
-  // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
-  herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
-  await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)));
+  for (const t0 = Date.now(); ; ) {
+    const n = 1000 + ++syncs;
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+]', 'ctrl+c');
+    // The sum is only in the output: the typed command, which the pane shows too, doesn't contain it.
+    herdr('pane', 'run', ws.pane, `echo SYNC-$((${n - 1}+1))`);
+    const answered = await waitUntil('the shell to answer', async () => new RegExp(`SYNC-${n}\\b`).test(await paneText('recent', 10)), 2000).then(() => true, () => false);
+    if (answered) return;
+    if (Date.now() - t0 > WAIT) throw new Error('timed out waiting for the shell to answer');
+  }
 }
 /** Quit the echo program, if it runs, and wait until it has: what's typed next goes to the shell. */
 async function stopEcho() {
@@ -505,6 +514,40 @@ describe('terminal input (iPhone)', () => {
     assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the paste');
   });
 
+  test('Compose keeps a draft, inserts it as one bracketed paste without Enter, and offers it again', async () => {
+    const compose = page.getByRole('dialog', { name: 'Compose' });
+    const area = compose.getByLabel('Message for ui target');
+    const open = async () => {
+      await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+      await page.getByRole('menuitem', { name: /Compose/ }).click();
+      await page.waitForFunction(() => document.activeElement?.classList.contains('compose-area'));
+    };
+    await open();
+    // A text field of the device: autocorrection and capitals stay on, and iOS doesn't zoom into it.
+    assert.equal(await area.getAttribute('autocorrect'), null);
+    assert.equal(await area.getAttribute('autocapitalize'), null);
+    assert.ok(parseFloat(await area.evaluate((e) => getComputedStyle(e).fontSize)) >= 16);
+    await area.fill('Check the login test,\nthen fix it');
+    await compose.getByRole('button', { name: 'Close' }).click();
+    await sleep(300);
+    assert.ok(!Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1').includes('login test'), 'closing inserts nothing');
+
+    await open();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it', 'the draft is back');
+    await compose.getByRole('button', { name: 'Insert', exact: true }).click();
+    await expectBytes(hex('\x1b[200~Check the login test,\nthen fix it\x1b[201~'));
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).slice(-2).join('').endsWith('0d'), 'no Enter after the message');
+
+    await open();
+    assert.equal(await area.inputValue(), '', 'an inserted message leaves no draft');
+    await compose.getByRole('button', { name: 'Check the login test, then fix it' }).click();
+    assert.equal(await area.inputValue(), 'Check the login test,\nthen fix it');
+    await area.fill('');
+    await compose.getByRole('button', { name: 'Clear', exact: true }).click();
+    assert.equal(await compose.locator('.compose-recent').count(), 0);
+  });
+
   test('an image is reviewed, made a PNG within 4096 px, uploaded privately, and its path inserted without Enter', async () => {
     await page.getByRole('button', { name: 'Insert text, image or file' }).click();
     const chooser = page.waitForEvent('filechooser');
@@ -532,6 +575,34 @@ describe('terminal input (iPhone)', () => {
     assert.equal(head.toString('latin1', 1, 4), 'PNG');
     assert.ok(Math.max(head.readUInt32BE(16), head.readUInt32BE(20)) <= 4096);
     assert.ok(!fs.readFileSync(p).includes(Buffer.from('Exif')), 'no EXIF metadata');
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
+  });
+
+  test('several files picked at once are uploaded, and their paths inserted in order as one paste without Enter', async () => {
+    await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('menuitem', { name: /Select file/ }).click();
+    await (await chooser).setFiles([
+      { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('one') },
+      { name: 'second file.txt', mimeType: 'text/plain', buffer: Buffer.from('two') },
+      { name: 'third.txt', mimeType: 'text/plain', buffer: Buffer.from('three') },
+    ]);
+    const sheet = page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('second file.txt').waitFor();
+    // One can be taken out again before sending.
+    await sheet.getByRole('button', { name: 'Remove third.txt' }).click();
+    await page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    let m: RegExpMatchArray | undefined;
+    for (let i = 0; i < 40 && !m; i++) {
+      await sleep(100);
+      const all = Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1');
+      m = [...all.matchAll(/\x1b\[200~(.*?)\x1b\[201~/gs)].filter((x) => x[1].includes('first.txt')).pop();
+    }
+    assert.ok(m, 'the paths were inserted as one bracketed paste');
+    // The pane runs a program, not an agent: the paths go as a shell's arguments.
+    assert.match(m![1], /^'?\S*briardr-uploads\/[0-9a-f]{24}\/first\.txt'? '\S*briardr-uploads\/[0-9a-f]{24}\/second file\.txt'$/);
     await sleep(300);
     assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
   });
@@ -694,6 +765,79 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
+    const a = await device('mac', 'mac-peek-paste');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const pastes: string[] = [];
+    a.page.on('websocket', (sock) => sock.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') return;
+      try { const m = JSON.parse(payload); if (m.t === 'input' && m.paste) pastes.push(m.paste.text); } catch {}
+    }));
+    await openTarget(a.page);
+    // Beside an open stream, the sidebar picks the list next to it.
+    await a.page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Workspaces' }).click();
+    await a.page.locator('.list-pane').locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).focus();
+    await a.page.keyboard.press('Enter');
+    await a.page.getByRole('menuitem', { name: /Peek/ }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
+    const paste = (terminal: string, text: string) =>
+      a.page.locator(`${terminal} textarea`).evaluate((el, text) => {
+        const dt = new DataTransfer();
+        dt.setData('text/plain', text);
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }, text);
+    await paste('.peek-screen', 'into-peek');
+    await a.page.getByRole('button', { name: 'Close' }).click();
+    await paste('.term-screen', 'into-stream');
+    await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
+    assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
+    herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
+  });
+
+  test('files dropped on a terminal you control are offered for sending, an image as the PNG it becomes', async () => {
+    // A 40 px PNG and a log, and with `huge` a file over the 100 MB limit, dropped on the page's terminal.
+    const drop = (page: Page, huge = false) =>
+      page.locator('.term-host').evaluate(async (host, huge) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d')!.fillRect(0, 0, 40, 40);
+        const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
+        dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        if (huge) dt.items.add(new File([new ArrayBuffer(100 * 1024 * 1024 + 1)], 'huge.bin'));
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+        host.dispatchEvent(over);
+        if (!over.defaultPrevented) throw new Error('the drop was not accepted');
+        host.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      }, huge);
+    const a = await device('mac', 'mac-drop');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await openTarget(a.page);
+    // A window that only watches gets nothing from a drop, not even an upload.
+    const b = await device('mac', 'mac-drop-watching');
+    onTestFinished(() => b.ctx.close().catch(() => {}));
+    await b.page.goto(s.base + '/workspaces');
+    await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
+    await b.page.waitForSelector('[data-ownership=watching]');
+    await drop(b.page);
+    await b.page.getByText('Take control to send files.').waitFor();
+    assert.equal(await b.page.getByRole('dialog').count(), 0, 'nothing is offered for sending');
+    await b.ctx.close();
+
+    await drop(a.page, true);
+    const sheet = a.page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('shot.png').waitFor();
+    await sheet.getByText('40 × 40 px PNG').waitFor();
+    await sheet.getByText('build.log').waitFor();
+    // A file over the limit holds the others back until it's removed.
+    await sheet.getByText('over the 100 MB limit').waitFor();
+    assert.ok(await sheet.getByRole('button', { name: 'Upload and insert 3 paths' }).isDisabled());
+    await sheet.getByRole('button', { name: 'Remove huge.bin' }).click();
+    assert.ok(await a.page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).isEnabled());
+    assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
+  });
+
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
     const a = await device('iphone', 'phone-swipe');
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
@@ -727,6 +871,33 @@ describe('agents list, peek, banners and links', () => {
     await a.page.locator('.grp-attention .row-title', { hasText: 'ui target' }).waitFor();
     herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude');
     await a.ctx.close();
+  });
+
+  test('a banner that shows again stays its full time: the first one’s timer doesn’t take it down', async () => {
+    const a = await device('iphone', 'phone-banner-again');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    onTestFinished(() => void herdr('pane', 'release-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude'));
+    // The agent's state changes as the page hears of them, with the time.
+    const heard: { to: string; at: number }[] = [];
+    a.page.on('websocket', (sock) => sock.on('framereceived', ({ payload }) => {
+      if (typeof payload !== 'string' || !payload.includes('"transition"')) return;
+      const m = JSON.parse(payload);
+      if (m.t === 'transition' && m.streamId === ws.pane) heard.push({ to: m.to, at: Date.now() });
+    }));
+    await a.page.reload(); // a new live connection, which the listener above hears
+    await a.page.waitForSelector('.count-strip');
+    const report = (state: string) => herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', state);
+    const banner = a.page.locator('.banner-attention', { hasText: 'ui target needs you' });
+    report('blocked');
+    await banner.waitFor();
+    await sleep(2000);
+    report('working');
+    await waitUntil('the agent to work again', () => heard.at(-1)?.to === 'working');
+    report('blocked');
+    await waitUntil('the agent to need you again', () => heard.at(-1)?.to === 'blocked');
+    await banner.waitFor({ state: 'detached' });
+    const shown = Date.now() - heard.at(-1)!.at;
+    assert.ok(shown > 5000, `the second banner stayed ${shown} ms of its 6 seconds`);
   });
 
   test('OSC 8 hyperlinks keep their real destination; soft-wrapped URLs are joined; text in a link’s place isn’t one', async () => {
@@ -1293,6 +1464,90 @@ describe('settings', () => {
   });
 });
 
+describe('appearance', () => {
+  test('a device can stay light or dark whatever its system says, in the terminal too, and go back to following it', async () => {
+    const a = await device('iphone', 'phone-theme');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const refused: string[] = [];
+    a.page.on('console', (m) => /Content Security Policy|Refused to/i.test(m.text()) && refused.push(m.text()));
+    const page = () => a.page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      canvas: getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim().toLowerCase(),
+      bar: document.querySelector('meta[name="theme-color"]')!.getAttribute('content'),
+    }));
+    // The terminal's background as the page resolves it: its colours are the --term-* tokens as built (#fff).
+    const terminal = () => a.page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('i'));
+      probe.style.color = (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background;
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    const choose = async (label: string) => {
+      await a.page.goto(s.base + '/settings/appearance');
+      await a.page.locator('#set-appearance label', { hasText: label }).click();
+    };
+    assert.deepEqual(await page(), { theme: 'light', canvas: '#f6f5f3', bar: '#f6f5f3' }, 'the system is light');
+
+    await choose('Dark');
+    assert.deepEqual(await page(), { theme: 'dark', canvas: '#0d0c0b', bar: '#0d0c0b' });
+    await a.page.goto(s.base + '/settings');
+    await a.page.locator('.set-row', { hasText: 'Appearance' }).getByText('Dark').waitFor();
+    await openTarget(a.page);
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
+    // Each of the terminal's colours comes from its --term-* token.
+    const unset = await a.page.evaluate(() => Object.entries((document.querySelector('.term-host') as any).briardrTerminal.term.options.theme).filter(([, v]) => !CSS.supports('color', v as string)).map(([k]) => k));
+    assert.deepEqual(unset, []);
+    // The choice is applied before the page paints, so a launch doesn't flash the system's theme.
+    await a.page.reload();
+    assert.equal((await page()).theme, 'dark');
+
+    await choose('Light');
+    await a.page.emulateMedia({ colorScheme: 'dark' });
+    assert.equal((await page()).theme, 'light', 'light although the system is dark now');
+    await choose('System');
+    assert.equal((await page()).theme, 'dark');
+    // An open terminal follows a change of theme.
+    await openTarget(a.page);
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
+    await a.page.emulateMedia({ colorScheme: 'light' });
+    await waitUntil('the open terminal to turn light', async () => (await terminal()) === 'rgb(255, 255, 255)');
+    assert.equal((await page()).theme, 'light');
+    // The theme script is in the page itself, allowed by its hash.
+    assert.deepEqual(refused, []);
+  });
+});
+
+describe('devices', () => {
+  test('a device can be renamed; a revoke or a pairing code that fails says so and changes nothing', async () => {
+    const a = await device('iphone', 'phone-devices', 'block');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const other = s.run.auth.pair(s.run.auth.createPairingCode().code, 'old tablet');
+    assert.ok(other.ok);
+    await a.page.goto(s.base + '/settings/devices');
+    const row = (name: string) => a.page.locator('#set-devices .row', { hasText: name });
+    await row('old tablet').getByRole('button', { name: 'Rename old tablet' }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Rename device' });
+    await sheet.getByLabel('Name').fill('Kitchen tablet');
+    await sheet.getByRole('button', { name: 'Save' }).click();
+    await row('Kitchen tablet').waitFor();
+    assert.equal(await row('old tablet').count(), 0);
+
+    // The host can't do it (here: every change to a device fails).
+    await a.page.route((url) => url.pathname.startsWith('/api/devices/'), (route) =>
+      route.request().method() === 'GET' ? route.continue() : route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal","message":"The host couldn’t save that."}' }),
+    );
+    await row('Kitchen tablet').getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByRole('dialog', { name: 'Revoke Kitchen tablet?' }).getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    await row('Kitchen tablet').waitFor();
+    await a.page.getByText('The host couldn’t save that.').waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    assert.equal(await a.page.locator('.pair-code').count(), 0);
+  });
+});
+
 describe('key bar settings', () => {
   test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
     const { ctx, page } = await device('iphone', 'phone-keybar');
@@ -1587,6 +1842,29 @@ describe('Changes review', () => {
     await sleep(300);
     assert.deepEqual(pastes, ['Small review\n\na.txt 2-3\n```diff\n+TWO\n three\n```\nUse a constant'], 'one paste and no Enter');
     assert.equal(await a.page.evaluate(() => localStorage.getItem('briardr.changes.review')), '{}');
+
+    // In a long diff the selection bar stays in view, above the review bar.
+    const long = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long);
+    git('add', 'b.txt');
+    git('commit', '-q', '-m', 'second');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long.replace(/^line \d*3$/gm, '$& changed'));
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    await a.page.getByRole('button', { name: 'Refresh changes' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
+    const tall = a.page.getByRole('region', { name: 'Diff of b.txt' });
+    await tall.locator('.dl-add').first().click({ position: { x: 14, y: 4 } });
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('First');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    await bar.getByText('1 comment for the agent').waitFor();
+    await tall.locator('.dl-ctx').first().click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Line 1' }).waitFor();
+    const viewport = a.page.viewportSize()!;
+    const selbar = (await a.page.getByRole('toolbar', { name: 'Selected lines' }).boundingBox())!;
+    const review = (await bar.boundingBox())!;
+    assert.ok(selbar.y + selbar.height <= review.y, 'the selection bar sits above the review bar');
+    assert.ok(review.y + review.height <= viewport.height, 'both are in view');
   });
 
   test('on a branch with commits of its own, Changes also shows everything since the branch it started from', async () => {
@@ -1614,20 +1892,29 @@ describe('Changes review', () => {
     await a.page.waitForSelector('[data-ownership=controlling]');
     await a.page.getByRole('tab', { name: 'Changes' }).click();
     const files = () => a.page.locator('.file-toggle .file-path').allInnerTexts();
-    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).waitFor();
+    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).click();
     assert.deepEqual(await files(), ['a.txt'], 'uncommitted work first');
     await a.page.getByLabel('Reviewed a.txt on this device').check();
+    const diffA = a.page.getByRole('region', { name: 'Diff of a.txt' });
+    await diffA.locator('.dl-add').click({ position: { x: 14, y: 4 } });
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('Say why');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    await diffA.locator('.is-noted').waitFor();
 
     const compare = a.page.getByRole('group', { name: 'Compare with' });
     await compare.getByRole('button', { name: 'Since main' }).click();
     await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor();
     assert.deepEqual((await files()).sort(), ['a.txt', 'b.txt']);
     assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), false, 'a mark on the uncommitted change isn’t one on the whole branch');
+    // Nor does a comment written on the uncommitted change mark lines of this view's diff.
+    await diffA.locator('.is-noted').waitFor({ state: 'detached' });
     await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
     await a.page.getByRole('region', { name: 'Diff of b.txt' }).locator('.dl-add', { hasText: 'committed work' }).waitFor();
 
     await compare.getByRole('button', { name: 'Uncommitted' }).click();
     await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor({ state: 'detached' });
     assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), true);
+    await diffA.locator('.is-noted').waitFor();
   });
 });

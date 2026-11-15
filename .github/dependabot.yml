@@ -1,0 +1,39 @@
+# Dependency updates, once a month and grouped: one pull request for the server's crates, one for the
+# client's, the tests' and the scripts' packages, and one for the workflows' actions (pinned to commits;
+# Dependabot moves the commit and the version in its comment). Vulnerable dependencies get a pull request
+# of their own when GitHub learns of them (Dependabot security updates, in the repository's settings).
+# Its pull requests run every check. The changeset check lets them through without a changeset
+# (changeset.yml), so an update ships with the next release. Bun, Rust and the linters (mise.toml) and the
+# versions in deploy/versions.env are updated by hand.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /server
+    schedule:
+      interval: monthly
+    groups:
+      crates:
+        patterns: ["*"]
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: monthly
+    # TypeScript stays on 5 until svelte-check (`mise run typecheck`) can check the client with 7 on its own.
+    # It runs on TypeScript's JavaScript API, which 7 doesn't have, so it wants 6 installed beside 7, and its
+    # two modes for 7 fall short here: --tsgo checked 74 of the 505 files and missed a component's exports,
+    # and --tsgo-experimental-api doesn't run under Bun. Move TypeScript to a new major by hand.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+    groups:
+      packages:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

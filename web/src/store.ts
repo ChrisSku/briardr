@@ -2,6 +2,7 @@
 // seen markers and review checkmarks persist in this browser only.
 import type { Snippet } from 'svelte';
 import { derived, load, persisted, save, State, state } from './reactive.svelte.ts';
+import type { ThemeChoice } from './theme.ts';
 import type { Group, HerdrHealth, HostCaps, MacSummary, Model } from './types.ts';
 
 export { persisted };
@@ -58,7 +59,14 @@ export const live = derived(() => conn.value.state === 'online');
 export const stale = derived(() => conn.value.state !== 'online' || !herdr.value?.ok);
 
 // ---------- device-only preferences ----------
-export const prefs = persisted('briardr.prefs', {
+export const prefs = persisted<{
+  fontSize: number;
+  bracketedPaste: boolean;
+  screenReaderTerminal: boolean;
+  lowBatteryInApp: boolean;
+  /** Light or dark whatever the system says (web/src/theme.ts); missing until it's chosen. */
+  theme?: ThemeChoice;
+}>('briardr.prefs', {
   fontSize: 13,
   bracketedPaste: true,
   screenReaderTerminal: false,
@@ -102,11 +110,16 @@ export interface Banner {
 export const banners = state<Banner[]>([]);
 /** Content a screen shows in the overlay above the header (rendered there by App, with the screen's own state). */
 export const topOverlay = state<Snippet | null>(null);
+const bannerTimers = new Map<string, number>();
 export function pushBanner(b: Banner, ttl = 6000) {
   banners.value = [...banners.value.filter((x) => x.id !== b.id), b].slice(-3);
-  if (ttl) setTimeout(() => dismissBanner(b.id), ttl);
+  // A banner shown again starts its time again: the earlier one's timer would take it down early.
+  clearTimeout(bannerTimers.get(b.id));
+  if (ttl) bannerTimers.set(b.id, window.setTimeout(() => dismissBanner(b.id), ttl));
 }
 export function dismissBanner(id: string) {
+  clearTimeout(bannerTimers.get(id));
+  bannerTimers.delete(id);
   banners.value = banners.value.filter((b) => b.id !== id);
 }
 
