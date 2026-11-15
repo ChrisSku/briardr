@@ -18,12 +18,11 @@
     return 'Device';
   }
 
-  // A pairing link brings the code filled in.
-  const linked = linkedCode;
-  // On an iPhone or iPad the Home Screen app signs in separately, and the code works once.
-  const installFirst = linked && !standalone && (platform() === 'iphone' || platform() === 'ipad');
+  // A pairing link (its QR code) brings the code filled in; signing in is still up to the person here. On
+  // an iPhone or iPad the Home Screen app signs in separately, and the code works once.
+  const installFirst = linkedCode && !standalone && (platform() === 'iphone' || platform() === 'ipad');
 
-  let code = $state(linked);
+  let code = $state(linkedCode);
   let focused = $state(false);
   const chars = $derived(code.replace(/[^A-Z0-9]/g, '').slice(0, 8));
   let name = $state(defaultName());
@@ -78,7 +77,7 @@
             spellcheck={false}
             inputmode="text"
             maxlength={9}
-            autofocus={!linked}
+            autofocus={!linkedCode}
             required
           />
           <span class="cells" aria-hidden="true">

@@ -343,6 +343,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         allowed_hosts: Arc::new(RwLock::new(
             hostnames.iter().cloned().collect::<HashSet<_>>(),
         )),
+        public_origin: public_origin.clone(),
         dictation_helper,
         ca_profile,
         tls_mode: tls_mode.clone(),

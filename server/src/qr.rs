@@ -26,9 +26,10 @@ pub fn modules(text: &str) -> Option<Vec<String>> {
 }
 
 /// The QR code for a terminal: two rows of modules per line as half blocks, black on white whatever the
-/// terminal's colours are (a camera reads dark on light), with the quiet zone.
+/// terminal's colours are (a camera reads dark on light), with the quiet zone of four modules a reader
+/// needs (as Settings → Devices draws it).
 pub fn for_terminal(text: &str) -> Option<String> {
-    const QUIET: usize = 2;
+    const QUIET: usize = 4;
     let rows = modules(text)?;
     let width = rows.first()?.len() + 2 * QUIET;
     let blank = "0".repeat(width);
@@ -96,9 +97,9 @@ mod tests {
             .unwrap()
             .len();
         // Two leading spaces of indentation, then the modules and the quiet zone on both sides.
-        assert!(lines.iter().all(|l| cells(l) == 2 + modules + 4));
-        assert_eq!(lines.len(), (modules + 4).div_ceil(2));
-        // The first line is only quiet zone.
-        assert!(!lines[0].contains(['█', '▀', '▄']));
+        assert!(lines.iter().all(|l| cells(l) == 2 + modules + 8));
+        assert_eq!(lines.len(), (modules + 8).div_ceil(2));
+        // The first two lines are only quiet zone.
+        assert!(!lines[..2].concat().contains(['█', '▀', '▄']));
     }
 }

@@ -50,8 +50,9 @@ Tailscale HTTPS, skip the `configure` step: Briardr then uses its own local CA, 
 briardr pair
 ```
 
-Open the URL it prints. On an iPhone or iPad, [install the Home Screen app](devices.md#iphone-and-ipad)
-before entering the code. Codes work once and expire after ten minutes.
+Open the URL it prints, or [scan its QR code](devices.md#pair-with-a-qr-code). On an iPhone or iPad,
+[install the Home Screen app](devices.md#iphone-and-ipad) before entering the code. Codes work once and
+expire after ten minutes.
 
 If Herdr is installed outside PATH, configure its absolute path and restart Briardr:
 

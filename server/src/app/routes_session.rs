@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use axum::http::Method;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
@@ -55,6 +55,18 @@ fn device_gone() -> ApiError {
 #[derive(Deserialize)]
 struct RenameBody {
     name: Option<String>,
+}
+
+/// `POST /api/devices/pairing-code`: a one-time code, the link that opens Briardr with it filled in, and
+/// that link as a QR code's rows of modules (`1` dark, `0` light), for the new device's camera.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PairingCode {
+    code: String,
+    expires_at: u64,
+    link: String,
+    /// None when the link is too long for a QR code.
+    qr: Option<Vec<String>>,
 }
 
 /// The same authenticated startup data for an existing session and a newly paired device.
@@ -233,15 +245,14 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let auth = app.d.auth.clone();
             let (code, expires_at) = blocking(move || auth.create_pairing_code()).await?;
-            // The link opens Briardr where this device reaches it, with the code filled in; `qr` is
-            // the same as a QR code's modules, for the new device's camera.
-            let link = qr::pairing_link(&app.origin_of(&ctx.headers), &code);
-            ok(json!({
-                "code": code,
-                "expiresAt": expires_at,
-                "link": link,
-                "qr": qr::modules(&link),
-            }))
+            let link = qr::pairing_link(&app.pairing_origin(&ctx.headers), &code);
+            let body = PairingCode {
+                qr: qr::modules(&link),
+                link,
+                code,
+                expires_at,
+            };
+            ok(serde_json::to_value(body).map_err(|_| ApiError::Internal)?)
         },
     );
 

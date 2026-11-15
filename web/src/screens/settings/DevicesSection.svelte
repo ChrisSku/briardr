@@ -19,7 +19,8 @@
   }
   let list = $state.raw<Device[] | null>(null);
   let failed = $state<string | null>(null);
-  /** A one-time code, the link that opens Briardr with it filled in, and that link as a QR code's rows of 0 and 1. */
+  /** A one-time code, the link that opens Briardr with it filled in (where this device reached it, or the
+   *  host's address when it's the host itself), and that link as a QR code's rows of 0 and 1. */
   interface PairingCode {
     code: string;
     expiresAt: number;
@@ -27,6 +28,7 @@
     qr: string[] | null;
   }
   let code = $state.raw<PairingCode | null>(null);
+  const opens = $derived(code && new URL(code.link).host);
   /** The dark modules as one path, a unit square each, inside a quiet zone of four. */
   const qrPath = (rows: string[]) => rows.flatMap((row, y) => Array.from(row, (m, x) => (m === '1' ? `M${x + 4} ${y + 4}h1v1h-1z` : ''))).join('');
   const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
@@ -93,9 +95,9 @@
           <rect width="100%" height="100%" fill="#fff" />
           <path fill="#000" d={qrPath(code.qr)} />
         </svg>
-        <p>Scan this with the new device’s camera, or open <strong>{location.host}</strong> there and enter:</p>
+        <p>Scan this with the new device’s camera, or open <strong>{opens}</strong> there and enter:</p>
       {:else}
-        <p>On the new device, open <strong>{location.host}</strong> and enter:</p>
+        <p>On the new device, open <strong>{opens}</strong> and enter:</p>
       {/if}
       <p class="code mono" aria-label="Pairing code {code.code.split('').join(' ')}">{code.code}</p>
       <p class="hint">Works once. Expires at {new Date(code.expiresAt).toLocaleTimeString()}.</p>
