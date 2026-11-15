@@ -747,6 +747,9 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 
 /* insert sheets */
 .paste-area { min-height: 220px; resize: vertical; font-size: max(16px, 0.86rem); }
+.compose-area { min-height: 132px; resize: vertical; font-size: max(16px, 1rem); line-height: 1.45; }
+.compose-recent { margin-top: 6px; }
+.compose-again { min-height: var(--size-tap); padding: 8px 4px; }
 .select-area { min-height: 55vh; font-size: 0.82rem; white-space: pre; overflow: auto; -webkit-user-select: text; user-select: text; }
 .upload-preview img { max-width: 100%; max-height: 46vh; border-radius: 10px; display: block; margin: 0 auto 8px; border: 1px solid var(--line-default); }
 .file-line { word-break: break-all; }
