@@ -55,7 +55,7 @@ for (const profile of ['iphone', 'mac'] as const)
         await page.waitForSelector('.count-strip');
         await page.waitForSelector('.stream-row .row-task');
         problems.push(...(await audit(page, 'agents')));
-        for (const [p, sel] of [['/workspaces', '.tree'], ['/usage', '.usage-card'], ['/settings', '.set-group'], ['/settings/notifications', '#set-notifications']] as const) {
+        for (const [p, sel] of [['/workspaces', '.tree'], ['/usage', '.usage-card'], ['/settings', '.set-group'], ['/settings/notifications', '#set-notifications'], ['/settings/appearance', '#set-appearance']] as const) {
           await page.goto(s.base + p);
           await page.waitForSelector(sel);
           await page.waitForTimeout(400);
