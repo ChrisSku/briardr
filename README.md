@@ -83,12 +83,13 @@ Start Herdr (`herdr` in a terminal) if it isn't running. Keep the Briardr termin
 terminal:
 
 ```sh
-briardr pair             # one-time code for a new device (also: Settings → Devices → Add a device)
+briardr pair             # one-time code and QR code for a new device (also: Settings → Devices → Add a device)
 briardr install-agent    # optional: start Briardr at login (prints the launchctl command to run)
 ```
 
-Open the HTTPS URL it prints on your device and enter the code. On iPhone and iPad, **add Briardr to
-the Home Screen first and pair inside the installed app**, then turn on notifications in Settings.
+Open the HTTPS URL it prints on your device and enter the code, or scan its QR code to open Briardr
+with the code filled in. On iPhone and iPad, **add Briardr to the Home Screen first and pair inside the
+installed app**, then turn on notifications in Settings.
 [Device setup](docs/devices.md) covers certificates, installing, and testing alerts.
 
 ### Quick start on Ubuntu

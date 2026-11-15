@@ -250,6 +250,33 @@ fn strip_port(host: &str) -> &str {
     }
 }
 
+/// The name in a Host header, lowercased, without its port or an IPv6 address's brackets.
+fn host_name(host: &str) -> String {
+    let host = host.to_lowercase();
+    if let Some(rest) = host.strip_prefix('[') {
+        // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
+        match rest.find(']') {
+            Some(i) => rest[..i].to_string(),
+            None => {
+                let mut r = rest.to_string();
+                r.pop();
+                r
+            }
+        }
+    } else {
+        strip_port(&host).to_string()
+    }
+}
+
+/// Whether a host name is this computer's own (localhost or a loopback address), which another device
+/// can't open.
+fn is_loopback_name(name: &str) -> bool {
+    name == "localhost"
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 // ---------- request helpers ----------
 
 /// Read a request body, refusing it as soon as it grows past the limit (413 `too_large`).
@@ -596,6 +623,8 @@ pub struct AppDeps {
     pub notes: Arc<Notes>,
     pub web_dir: PathBuf,
     pub allowed_hosts: Arc<RwLock<HashSet<String>>>,
+    /// The address devices open, as `briardr pair` prints it (`public_origin_of`).
+    pub public_origin: String,
     pub dictation_helper: Arc<RwLock<Option<PathBuf>>>,
     pub ca_profile: Option<String>,
     /// (wanted, effective) TLS mode.
@@ -836,20 +865,7 @@ impl App {
     }
 
     pub fn host_allowed(&self, headers: &HeaderMap) -> bool {
-        let host = header_str(headers, "host").unwrap_or("").to_lowercase();
-        let name = if let Some(rest) = host.strip_prefix('[') {
-            // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
-            match rest.find(']') {
-                Some(i) => rest[..i].to_string(),
-                None => {
-                    let mut r = rest.to_string();
-                    r.pop();
-                    r
-                }
-            }
-        } else {
-            strip_port(&host).to_string()
-        };
+        let name = host_name(header_str(headers, "host").unwrap_or(""));
         self.d
             .allowed_hosts
             .read()
@@ -869,6 +885,18 @@ impl App {
         match self.proxy(&self.cfg()) {
             Some((public_origin, _)) => origin == public_origin,
             None => origin == format!("https://{}", header_str(headers, "host").unwrap_or("null")),
+        }
+    }
+
+    /// Where a new device opens Briardr: where this request reached it (a Host the Host check allowed),
+    /// as another device on that network does. Behind a proxy, or from the host itself (localhost), it's
+    /// the address `briardr pair` prints.
+    pub fn pairing_origin(&self, headers: &HeaderMap) -> String {
+        match header_str(headers, "host") {
+            Some(host) if !self.in_proxy_mode() && !is_loopback_name(&host_name(host)) => {
+                format!("https://{host}")
+            }
+            _ => self.d.public_origin.clone(),
         }
     }
 
@@ -1576,6 +1604,14 @@ mod tests {
         assert_eq!(strip_port("a.b:443"), "a.b");
         assert_eq!(strip_port("[::1]:3000"), "[::1]");
         assert_eq!(strip_port("host:"), "host:");
+        assert_eq!(host_name("Mac.Tail1.ts.net:7443"), "mac.tail1.ts.net");
+        assert_eq!(host_name("[::1]:7443"), "::1");
+        assert!(
+            is_loopback_name("localhost")
+                && is_loopback_name("127.0.0.1")
+                && is_loopback_name("::1")
+        );
+        assert!(!is_loopback_name("10.8.0.1") && !is_loopback_name("mac.tail1.ts.net"));
         assert_eq!(decode_uri_component("w1%3Ap1").as_deref(), Some("w1:p1"));
         assert_eq!(decode_uri_component("%E0%A4%A"), None);
         assert_eq!(decode_uri_component("%FF"), None);
