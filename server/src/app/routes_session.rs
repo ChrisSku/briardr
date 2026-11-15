@@ -2,12 +2,15 @@
 use std::sync::Arc;
 
 use axum::http::Method;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    caps_json, json_body, ok, response, send, str_or_empty, ApiError, App, Ctx, Routes, VERSION,
+    action_err, caps_json, json_body, json_body_as, ok, response, send, str_or_empty, ApiError,
+    App, Ctx, Routes, VERSION,
 };
-use crate::auth::PairError;
+use crate::auth::{device_name, PairError};
+use crate::qr;
 use crate::terminal_hub::PROTOCOL;
 
 /// Runs blocking work (file writes, shelling out) off the async runtime.
@@ -41,6 +44,29 @@ fn pair_message(error: &PairError, host: &str) -> String {
         PairError::Invalid => "That code isn’t right.".to_string(),
         PairError::Locked => "Too many wrong codes. Create a new one.".to_string(),
     }
+}
+
+/// A revoke or rename of a device that isn't paired (any more).
+fn device_gone() -> ApiError {
+    action_err(404, "device_gone", "That device is no longer signed in.")
+}
+
+/// `POST /api/devices/:id/rename`; a missing or `null` name is refused like an empty one.
+#[derive(Deserialize)]
+struct RenameBody {
+    name: Option<String>,
+}
+
+/// `POST /api/devices/pairing-code`: a one-time code, the link that opens Briardr with it filled in, and
+/// that link as a QR code's rows of modules (`1` dark, `0` light), for the new device's camera.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PairingCode {
+    code: String,
+    expires_at: u64,
+    link: String,
+    /// None when the link is too long for a QR code.
+    qr: Option<Vec<String>>,
 }
 
 /// The same authenticated startup data for an existing session and a newly paired device.
@@ -184,11 +210,31 @@ pub(super) fn register(r: &mut Routes) {
             let removed = blocking(move || auth.revoke(&id))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
-            Ok(send(
-                if removed { 200 } else { 404 },
-                &json!({"ok": removed}),
-                &[],
-            ))
+            if !removed {
+                return Err(device_gone());
+            }
+            ok(json!({"ok": true}))
+        },
+    );
+
+    r.add(
+        Method::POST,
+        "/api/devices/:id/rename",
+        false,
+        |app: Arc<App>, mut ctx: Ctx| async move {
+            let body: RenameBody = json_body_as(&mut ctx, 4096).await?;
+            let Some(name) = body.name.as_deref().and_then(device_name) else {
+                return Err(action_err(400, "invalid_name", "Enter a name."));
+            };
+            let id = ctx.param("id").to_string();
+            let auth = app.d.auth.clone();
+            let renamed = blocking(move || auth.rename(&id, &name))
+                .await?
+                .map_err(|_| ApiError::Internal)?;
+            if !renamed {
+                return Err(device_gone());
+            }
+            ok(json!({"ok": true}))
         },
     );
 
@@ -196,10 +242,17 @@ pub(super) fn register(r: &mut Routes) {
         Method::POST,
         "/api/devices/pairing-code",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move {
+        |app: Arc<App>, ctx: Ctx| async move {
             let auth = app.d.auth.clone();
             let (code, expires_at) = blocking(move || auth.create_pairing_code()).await?;
-            ok(json!({"code": code, "expiresAt": expires_at}))
+            let link = qr::pairing_link(&app.pairing_origin(&ctx.headers), &code);
+            let body = PairingCode {
+                qr: qr::modules(&link),
+                link,
+                code,
+                expires_at,
+            };
+            ok(serde_json::to_value(body).map_err(|_| ApiError::Internal)?)
         },
     );
 

@@ -1,8 +1,8 @@
 <!--
   Settings: a grouped list. The computer Briardr runs on (with Power) first, then Usage (when its plugin
-  is on), this device (devices, notifications, terminal, key bar, installing the app) and Briardr itself
-  (plugins and their settings, diagnostics, about). Each row opens its section as a page at
-  /settings/<section>, with a way back to the list.
+  is on), this device (devices, notifications, appearance, terminal, key bar, installing the app) and
+  Briardr itself (plugins and their settings, diagnostics, about). Each row opens its section as a page
+  at /settings/<section>, with a way back to the list.
 -->
 <script lang="ts">
   import { caps, HostLabel } from '../host.ts';
@@ -12,9 +12,11 @@
   import { pushStatus } from '../push.ts';
   import { navigate } from '../router.ts';
   import { prefs, toast } from '../store.ts';
+  import { THEMES, themeChoice } from '../theme.ts';
   import { Icon, type IconName } from '../ui/icons/index.ts';
   import { ago } from '../ui/kit.ts';
   import AboutSection from './settings/AboutSection.svelte';
+  import AppearanceSection from './settings/AppearanceSection.svelte';
   import DevicesSection from './settings/DevicesSection.svelte';
   import DiagnosticsSection from './settings/DiagnosticsSection.svelte';
   import HerdrSection from './settings/HerdrSection.svelte';
@@ -60,6 +62,7 @@
   const plugin = $derived(settingsSections.value.find((x) => x.id === section));
   const TITLES: Record<string, string> = {
     devices: 'Devices',
+    appearance: 'Appearance',
     terminal: 'Terminal',
     keybar: 'Key bar',
     install: 'Install app',
@@ -156,6 +159,7 @@
         <div class="card">
           {@render row('devices', 'device', 'Devices', devices === null ? null : String(devices))}
           {@render row('notifications', 'bell', 'Notifications', push)}
+          {@render row('appearance', 'moon', 'Appearance', THEMES[themeChoice()])}
           {@render row('terminal', 'terminal', 'Terminal', `${prefs.value.fontSize} pt`)}
           {@render row('keybar', 'keyboard', 'Key bar')}
           {@render row('install', 'download', 'Install app')}
@@ -177,6 +181,8 @@
       <HerdrSection {s} {save} />
     {:else if section === 'devices'}
       <DevicesSection />
+    {:else if section === 'appearance'}
+      <AppearanceSection />
     {:else if section === 'terminal'}
       <TerminalSection />
     {:else if section === 'keybar'}
@@ -184,7 +190,7 @@
     {:else if section === 'install'}
       <InstallSection />
     {:else if section === 'notifications'}
-      <NotificationsSection {s} {save} />
+      <NotificationsSection {s} />
     {:else if section === 'plugins'}
       <PluginsSection />
     {:else if section === 'power' && hasPower}

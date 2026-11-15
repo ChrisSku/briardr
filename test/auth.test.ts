@@ -97,6 +97,31 @@ describe('authentication', () => {
     assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).status, 200);
     assert.equal(await closing, 4401);
     assert.equal((await request(s, 'GET', '/api/state', undefined, { cookie })).status, 401);
+    assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).json.error, 'device_gone');
+  });
+
+  test('a device can be renamed; an empty name and an unknown device are refused', async () => {
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'to rename');
+    assert.ok(p.ok);
+    const rename = (id: string, name: unknown) => request(s, 'POST', `/api/devices/${id}/rename`, { name });
+    assert.equal((await rename(p.device.id, '  Work phone ')).status, 200);
+    const { devices } = (await request(s, 'GET', '/api/devices')).json;
+    assert.equal(devices.find((d: any) => d.id === p.device.id).name, 'Work phone');
+    assert.equal((await request(s, 'GET', '/api/session', undefined, { cookie: `__Host-briardr=${p.cookie}` })).json.device.name, 'Work phone', 'it stays signed in');
+    for (const name of ['', '   ', '\u0007\n', null, undefined]) assert.equal((await rename(p.device.id, name)).json.error, 'invalid_name');
+    assert.equal((await rename(p.device.id, 42)).json.error, 'bad_json');
+    assert.equal((await rename('no-such-device', 'x')).json.error, 'device_gone');
+    assert.equal((await request(s, 'POST', `/api/devices/${p.device.id}/rename`, { name: 'x' }, { cookie: false })).status, 401);
+  });
+
+  test('a pairing code from a signed-in device comes with a link and its QR code, for where Briardr was reached', async () => {
+    const r = (await request(s, 'POST', '/api/devices/pairing-code')).json;
+    assert.match(r.code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    // The code is in the fragment, which browsers send to no server.
+    assert.equal(r.link, `${s.base}/#pair=${r.code}`);
+    assert.ok(r.qr.length >= 21 && r.qr.every((row: string) => row.length === r.qr.length && /^[01]+$/.test(row)), 'a square of modules');
+    // (Paired in-process: the HTTP pairing route is rate-limited by the tests above, as it should be.)
+    assert.ok(s.run.auth.pair(r.code, 'by link').ok);
   });
 
   test('security headers are present on app and API responses', async () => {

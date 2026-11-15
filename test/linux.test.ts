@@ -70,6 +70,22 @@ describe('WireGuard (direct mode on a tunnel address)', () => {
       await d.close();
     }
   });
+
+  test('a pairing link opens Briardr where the device showing it reached it, and from the host itself the tunnel address', async () => {
+    const s = await startServer({ config: { publicOrigin: WG, hostnames: ['briardr.lan'] } });
+    try {
+      const opens = async (host: string) => {
+        const r = (await request(s, 'POST', '/api/devices/pairing-code', undefined, { host, origin: `https://${host}` })).json;
+        assert.equal(new URL(r.link).hash, `#pair=${r.code}`);
+        return new URL(r.link).origin;
+      };
+      assert.equal(await opens(`localhost:${s.port}`), WG, 'not localhost, which another device can’t open');
+      assert.equal(await opens(`127.0.0.1:${s.port}`), WG);
+      assert.equal(await opens(`briardr.lan:${s.port}`), `https://briardr.lan:${s.port}`);
+    } finally {
+      await s.close();
+    }
+  });
 });
 
 // ---------- proxy mode, end to end (requests as Caddy forwards them) ----------
@@ -179,6 +195,11 @@ describe('proxy mode', () => {
     const closing = closed(live);
     s.run.auth.revoke(p.device.id);
     assert.equal(await closing, 4401);
+  });
+
+  test('a pairing link opens the public origin', async () => {
+    const r = await call('POST', '/api/devices/pairing-code', { body: {} });
+    assert.equal(r.json.link, `${ORIGIN}/#pair=${r.json.code}`);
   });
 
   test('security headers frame only the preview origins', async () => {

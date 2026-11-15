@@ -9,6 +9,9 @@ const STREAM_LOCK = 'briardr.stream.';
 const initialUrl = new URL(location.href);
 let initialPath = initialUrl.pathname;
 const fromAlert = initialUrl.searchParams.get('from') === 'alert';
+/** The one-time code a pairing link brought in its fragment (the QR code in Settings → Devices and from
+ *  `briardr pair`). The address loses it right below: a code has no place in the history. */
+export const linkedCode = /^#pair=([A-Za-z0-9]{4}-?[A-Za-z0-9]{4})$/.exec(initialUrl.hash)?.[1].toUpperCase() ?? '';
 const restoring = initialPath === '/' || initialPath === '';
 if (restoring) initialPath = lastPath.value || '/agents';
 

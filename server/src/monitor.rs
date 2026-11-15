@@ -14,7 +14,7 @@ use crate::config::{read_json, write_file_atomic, BriardrConfig};
 use crate::diag::Diagnostics;
 use crate::herdr::model::{AgentState, Model, StreamKind};
 use crate::herdr::state::{HerdrEvent, HerdrReader, Transition};
-use crate::push::Push;
+use crate::push::{Alert, Push};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
@@ -59,6 +59,9 @@ pub struct AlertPayload {
     pub kind: AlertKind,
     pub title: String,
     pub body: String,
+    /// The title and body with the stream's names, for the devices that take names; None when the
+    /// stream isn't known.
+    pub named: Option<(String, String)>,
     pub stream_id: String,
     pub tag: String,
     /// Agents blocked on the user right now (the Agents list's "Needs you"), for the icon badge.
@@ -69,24 +72,32 @@ type SendFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 /// Where alerts go: Web Push in production, a recorder in tests.
 pub trait AlertSink: Send + Sync {
+    /// Whether an alert of this kind should be made at all. `host` is the host's own setting; a sink
+    /// that knows its devices says yes when one of them chose to get the kind anyway.
+    fn wanted(&self, _kind: &str, host: bool) -> bool {
+        host
+    }
+
     fn send(&self, payload: AlertPayload, ttl_secs: u32) -> SendFuture<'_>;
 }
 
 impl AlertSink for Push {
+    fn wanted(&self, kind: &str, _host: bool) -> bool {
+        Push::wanted(self, kind)
+    }
+
     fn send(&self, payload: AlertPayload, ttl_secs: u32) -> SendFuture<'_> {
         Box::pin(async move {
-            Push::send_counted(
-                self,
-                payload.kind.as_str(),
-                &payload.title,
-                &payload.body,
-                Some(payload.stream_id),
-                &payload.tag,
-                None,
-                ttl_secs,
-                Some(payload.attention),
-            )
-            .await;
+            let alert = Alert {
+                kind: payload.kind.as_str().to_string(),
+                title: payload.title,
+                body: payload.body,
+                named: payload.named,
+                stream_id: Some(payload.stream_id),
+                tag: payload.tag,
+                attention: Some(payload.attention),
+            };
+            self.send_alert(&alert, None, ttl_secs).await;
         })
     }
 }
@@ -311,11 +322,10 @@ impl Monitor {
         let (Some(kind), Some(to)) = (alert_kind_for(t.from, t.to, t.kind), t.to) else {
             return;
         };
-        let enabled = match kind {
-            AlertKind::NeedsYou => cfg.needs_you,
-            AlertKind::Finished => cfg.finished,
-            AlertKind::Ready => cfg.ready,
-        };
+        let enabled = self
+            .inner
+            .sink
+            .wanted(kind.as_str(), cfg.sends(kind.as_str()));
         let key = alert_key(&t.terminal_id, to, t.state_change_seq);
         if !enabled {
             st.log.push((key, "disabled"));
@@ -387,65 +397,57 @@ impl Monitor {
         self.inner.sink.send(payload, ttl_secs).await;
     }
 
-    /// Notification text. Names only when the setting allows and the stream is known; never terminal text.
+    /// Notification text, plain and, when the stream is known, with its names (which devices get
+    /// is up to them and the host's `includeNames`); never terminal text.
     pub fn payload(&self, kind: AlertKind, stream_id: &str) -> AlertPayload {
         let model = self.inner.reader.model();
-        let include_names = (self.inner.cfg)().notifications.include_names;
-        let tag = format!("stream:{stream_id}");
         let attention = model.as_ref().map_or(0, |m| {
             m.streams
                 .iter()
                 .filter(|s| s.kind == StreamKind::Agent && s.state == Some(AgentState::Blocked))
                 .count() as u32
         });
-        let stream = model
-            .as_ref()
-            .and_then(|m| m.streams.iter().find(|s| s.id == stream_id));
-        match stream {
-            Some(s) if include_names => {
-                let verb = match kind {
-                    AlertKind::NeedsYou => "Needs you",
-                    AlertKind::Finished => "Finished",
-                    AlertKind::Ready => "Ready for input",
-                };
-                let ws = model
-                    .as_ref()
-                    .and_then(|m| m.workspaces.iter().find(|w| w.id == s.workspace_id))
-                    .map(|w| w.name.as_str());
-                let proj = model
-                    .as_ref()
-                    .and_then(|m| m.projects.iter().find(|p| p.id == s.project_id))
-                    .map(|p| p.name.as_str());
-                let body = [ws, proj]
-                    .into_iter()
-                    .flatten()
-                    .filter(|n| !n.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-                AlertPayload {
-                    kind,
-                    title: utf16_cut(&format!("{verb}: {}", s.name), 120),
-                    body: utf16_cut(&body, 160),
-                    stream_id: stream_id.to_string(),
-                    tag,
-                    attention,
-                }
-            }
-            _ => {
-                let title = match kind {
-                    AlertKind::NeedsYou => "An agent needs you",
-                    AlertKind::Finished => "An agent finished",
-                    AlertKind::Ready => "An agent is ready for input",
-                };
-                AlertPayload {
-                    kind,
-                    title: title.to_string(),
-                    body: "Open Briardr to see which one.".to_string(),
-                    stream_id: stream_id.to_string(),
-                    tag,
-                    attention,
-                }
-            }
+        let named = model.as_ref().and_then(|m| {
+            let s = m.streams.iter().find(|s| s.id == stream_id)?;
+            let verb = match kind {
+                AlertKind::NeedsYou => "Needs you",
+                AlertKind::Finished => "Finished",
+                AlertKind::Ready => "Ready for input",
+            };
+            let ws = m
+                .workspaces
+                .iter()
+                .find(|w| w.id == s.workspace_id)
+                .map(|w| w.name.as_str());
+            let proj = m
+                .projects
+                .iter()
+                .find(|p| p.id == s.project_id)
+                .map(|p| p.name.as_str());
+            let body = [ws, proj]
+                .into_iter()
+                .flatten()
+                .filter(|n| !n.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            Some((
+                utf16_cut(&format!("{verb}: {}", s.name), 120),
+                utf16_cut(&body, 160),
+            ))
+        });
+        let title = match kind {
+            AlertKind::NeedsYou => "An agent needs you",
+            AlertKind::Finished => "An agent finished",
+            AlertKind::Ready => "An agent is ready for input",
+        };
+        AlertPayload {
+            kind,
+            title: title.to_string(),
+            body: "Open Briardr to see which one.".to_string(),
+            named,
+            stream_id: stream_id.to_string(),
+            tag: format!("stream:{stream_id}"),
+            attention,
         }
     }
 }
@@ -735,7 +737,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn payloads_never_contain_terminal_text_and_names_can_be_removed() {
+    async fn payloads_never_contain_terminal_text_and_come_with_and_without_names() {
         let dir = Scratch::new("monitor-payload");
         let s = setup(dir.join("monitor.json"), 60);
         s.reader.set(vec![stream("a", AgentState::Working, 1)]);
@@ -743,20 +745,22 @@ mod tests {
         s.reader.move_to("a", AgentState::Blocked, 9);
         let sent = sent_at_least(&s.sink, 1).await;
         let p = &sent[0].0;
-        assert_eq!(p.title, "Needs you: agent a");
-        assert_eq!(p.body, "api \u{00B7} backend");
+        assert_eq!(
+            p.named,
+            Some((
+                "Needs you: agent a".to_string(),
+                "api \u{00B7} backend".to_string()
+            ))
+        );
         assert!(
             !format!("{p:?}").contains("SECRET"),
             "terminal title/text never included"
         );
-        lock(&s.cfg).notifications.include_names = false;
-        s.reader.move_to("a", AgentState::Done, 10);
-        let sent = sent_at_least(&s.sink, 2).await;
-        let p = &sent[1].0;
-        assert_eq!(p.title, "An agent finished");
+        // Without names, for the devices that don't take them.
+        assert_eq!(p.title, "An agent needs you");
         assert_eq!(p.body, "Open Briardr to see which one.");
-        let debug = format!("{p:?}");
-        assert!(!debug.contains("agent a") && !debug.contains("api"));
+        let p = s.mon.payload(AlertKind::Finished, "gone");
+        assert_eq!((p.title.as_str(), p.named), ("An agent finished", None));
     }
 
     #[tokio::test]

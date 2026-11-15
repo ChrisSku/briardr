@@ -148,7 +148,9 @@ update ships with the next release. Push a changeset to Dependabot's branch when
 something users notice.
 
 Bun, Rust and the linters ([`mise.toml`](../mise.toml)) and the Herdr, herdr-core and Caddy versions
-([`deploy/versions.env`](../deploy/versions.env)) are updated by hand.
+([`deploy/versions.env`](../deploy/versions.env)) are updated by hand, and so is a new major version of
+TypeScript: it stays on 5 until svelte-check can check the client with TypeScript 7 (the comment in
+`dependabot.yml` says why).
 
 ## Releases
 

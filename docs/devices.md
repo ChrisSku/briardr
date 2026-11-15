@@ -17,7 +17,8 @@ device to that server. No native Briardr client is required.
 2. Choose **Share → Add to Home Screen** and add Briardr.
 3. Open Briardr from the Home Screen. Pair here: the installed app may have a separate sign-in from
    Safari, so a Safari pairing may not carry over.
-4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install.
+4. On the host, run `briardr pair`, or `scripts/setup-linux.sh pair` for a managed Linux install. On a
+   device that is already signed in, Settings → Devices → **Add a device** gives a code too.
 5. Enter the one-time code and a device name in Briardr. The code expires after ten minutes.
 6. Enable and test notifications in Briardr Settings → Notifications.
 
@@ -39,10 +40,19 @@ the device, with its autocorrection, editing and the keyboard's dictation, also 
 message you close without inserting is kept as that stream's draft, and the last messages you inserted
 are listed under Recent. Drafts and recent messages stay on the device.
 
+**Select image…** and **Select file…** in the same menu take several at once, and with a mouse or
+trackpad you can drop files (not folders) on a terminal you control. You see them all before they are
+sent and can remove any. They are uploaded to a private folder on the host, and their paths are
+inserted as one paste, never followed by Enter: for an agent each on a line of its own (Claude Code
+attaches an image path that has a line to itself), for a shell as arguments.
+
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.
 Hold Shift to select without the program seeing the drag. Briardr can't tell which programs asked for
 the mouse, so the selection also shows while a program like that handles the same drag itself.
+
+Briardr is light or dark as the device is. Settings → Appearance keeps it light or dark on that device
+whatever its system says, the terminal included.
 
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
@@ -77,6 +87,20 @@ Open the URL in a modern browser and pair. If the browser offers **Install app**
 screen**, use it and pair inside that installation. These client combinations need additional
 device testing; please report the OS, browser, access mode, and observed behavior when helping test.
 Windows hosting is a separate concern and is not currently supported.
+
+## Pair with a QR code
+
+`briardr pair` in a terminal and Settings → Devices → **Add a device** show a QR code beside the
+one-time code. Scanning it with the new device's camera opens Briardr with the code filled in; you still
+name the device and choose **Sign in**. The code is in the part of the link after `#`, which browsers
+send to no server or proxy, and Briardr takes it out of the address as soon as it has read it. It's the
+same code, so it still works once and expires after ten minutes.
+
+The QR code opens the address `briardr pair` prints. In Settings it opens the address the signed-in
+device uses, unless that's the host itself (`localhost`). The new device needs the same network and
+certificate trust as for typing the address: with Briardr's local CA, [trust it](#trust-briardrs-local-ca)
+first. On an iPhone or iPad the camera opens Safari, and the Home Screen app signs in separately: scan
+to get to Briardr, add it to the Home Screen, and enter the code in the installed app.
 
 ## Trust Briardr's local CA
 
@@ -117,6 +141,15 @@ Settings → Notifications also says when the permission, this device's subscrip
 record of it disagree, and repairs what it can (Repair renews an expired subscription). Where the
 platform supports badges, the app icon shows how many agents need you.
 
+Each device chooses its own alerts there, under **This device**: Needs you, Finished, Ready for input,
+low battery and **Include names** (workspace and stream names in them), and **Quiet hours**, a span of
+its day without any. A choice a device never made follows the host's `notifications` setting. The host
+keeps the choices until the device is revoked, so they stay when alerts are turned off and on again or
+repaired. Quiet hours follow the device's clock, summer time included; after a trip to another time
+zone, they follow the new one once Briardr is opened there. Alerts in quiet hours are dropped, not sent
+later, so the app icon's badge catches up with the next alert or when Briardr opens; while Briardr is
+open on screen, its own banners still show.
+
 Then close or background the app, trigger an agent needing attention, and check that the alert
 arrives and opens the correct stream. Test once on Wi-Fi and once on mobile data with the VPN
 connected if needed. Notifications need the host to remain awake and online, and require outbound
@@ -139,6 +172,12 @@ storage. **Repair offline app** removes the service worker and its caches and in
 notes, drafts, pairing, and settings stay. A device keeps this build's offline shell and the previous
 one, the 200 most recent plugin files, and cached terminal screens of streams opened in the last 30
 days (at most 100).
+
+## Device names
+
+Settings → Devices and `briardr devices` list every signed-in device by the name it got at pairing.
+The pencil beside a device renames it, from any signed-in device; the device stays signed in. A name
+keeps at most 60 characters.
 
 ## Lost device or changed URL
 

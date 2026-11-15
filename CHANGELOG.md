@@ -5,6 +5,18 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.24
+
+- **Changes: comment on lines of a diff and send the comments to the agent.** Tap a line number in a diff (a second number makes a range), choose Comment and say what should change. The comments stay on this device, for each stream, until you send or clear them, and their lines stay marked while the file is unchanged. Review shows them with an optional note and sends them to the terminal as one paste; Briardr never presses Enter. Plugins get the same prompt sheet that Files and Changes use: `PromptSheet` and `codeBlock` in `@briardr/sdk`. ([#48](https://github.com/ChrisSku/briardr/pull/48))
+- **Each device chooses its own alerts, and can have quiet hours.** In Settings → Notifications, the switches for Needs you, Finished, Ready for input, low battery and Include names now apply to the device you set them on; before, turning one off on a phone turned it off for every device. A device that never chose follows the host's `notifications` setting, so nothing changes until you touch a switch, and the host keeps a device's choices until it is revoked, through turning alerts off and on and repairs. "Quiet hours" keeps a span of the device's day free of alerts (22:00 to 07:00 unless you change it), on the device's own clock, summer time included; alerts in them aren't sent later. A device revoked with `briardr revoke` while Briardr wasn't running no longer gets alerts once Briardr starts again. ([#49](https://github.com/ChrisSku/briardr/pull/49))
+- **Briardr can stay light or dark on a device, whatever its system says.** Choose System, Light or Dark in Settings → Appearance; System, which follows the device as before, is the default. The choice is kept on that device, the terminal and diagrams follow it, and Briardr opens in it without a flash of the other theme. ([#47](https://github.com/ChrisSku/briardr/pull/47))
+
+## 0.3.23
+
+- **Settings → Devices says when something fails.** A revoke, a sign-out or "Add a device" that the host couldn't carry out used to do nothing; now a message says so, and a list that can't be loaded offers "Try again". ([#45](https://github.com/ChrisSku/briardr/pull/45))
+- **Send several images or files at once, and drop files on the terminal.** "Select image…" and "Select file…" take more than one, and with a mouse or trackpad files (not folders) can be dropped on a terminal you control. All of them are reviewed in one sheet (any can be removed), uploaded in order, and their paths inserted as one paste, never followed by Enter: for an agent each path on a line of its own, for a shell as arguments. ([#41](https://github.com/ChrisSku/briardr/pull/41))
+- **Signed-in devices can be renamed.** Settings → Devices has a pencil beside each device; the device stays signed in under its new name. A name keeps at most 60 characters, without spaces around it or control characters, at pairing too. ([#45](https://github.com/ChrisSku/briardr/pull/45))
+
 ## 0.3.22
 
 - **Workspace folders on a Linux host show the home folder as `~`.** Workspaces shortened only a Mac's `/Users/name`; `/home/name` and `/root` are shortened now too. ([#36](https://github.com/ChrisSku/briardr/pull/36))
