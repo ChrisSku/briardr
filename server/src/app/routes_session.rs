@@ -45,10 +45,12 @@ fn pair_message(error: &PairError, host: &str) -> String {
     }
 }
 
+/// A revoke or rename of a device that isn't paired (any more).
 fn device_gone() -> ApiError {
     action_err(404, "device_gone", "That device is no longer signed in.")
 }
 
+/// `POST /api/devices/:id/rename`; a missing or `null` name is refused like an empty one.
 #[derive(Deserialize)]
 struct RenameBody {
     name: Option<String>,
