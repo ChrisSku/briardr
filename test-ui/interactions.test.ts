@@ -34,9 +34,11 @@ afterAll(async () => {
 
 let pairedViaUi = false;
 
-async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui'): Promise<{ ctx: BrowserContext; page: Page }> {
+/** `serviceWorkers: 'block'` for a test that answers the page's requests itself (`page.route`): a page its
+ *  service worker controls sends them past the test. */
+async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui', serviceWorkers: 'allow' | 'block' = 'allow'): Promise<{ ctx: BrowserContext; page: Page }> {
   const base = profile === 'iphone' ? devices['iPhone 15 Pro'] : { viewport: { width: 1280, height: 800 } };
-  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US' });
+  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   if (!pairedViaUi) {
@@ -577,6 +579,34 @@ describe('terminal input (iPhone)', () => {
     assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
   });
 
+  test('several files picked at once are uploaded, and their paths inserted in order as one paste without Enter', async () => {
+    await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('menuitem', { name: /Select file/ }).click();
+    await (await chooser).setFiles([
+      { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('one') },
+      { name: 'second file.txt', mimeType: 'text/plain', buffer: Buffer.from('two') },
+      { name: 'third.txt', mimeType: 'text/plain', buffer: Buffer.from('three') },
+    ]);
+    const sheet = page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('second file.txt').waitFor();
+    // One can be taken out again before sending.
+    await sheet.getByRole('button', { name: 'Remove third.txt' }).click();
+    await page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    let m: RegExpMatchArray | undefined;
+    for (let i = 0; i < 40 && !m; i++) {
+      await sleep(100);
+      const all = Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1');
+      m = [...all.matchAll(/\x1b\[200~(.*?)\x1b\[201~/gs)].filter((x) => x[1].includes('first.txt')).pop();
+    }
+    assert.ok(m, 'the paths were inserted as one bracketed paste');
+    // The pane runs a program, not an agent: the paths go as a shell's arguments.
+    assert.match(m![1], /^'?\S*briardr-uploads\/[0-9a-f]{24}\/first\.txt'? '\S*briardr-uploads\/[0-9a-f]{24}\/second file\.txt'$/);
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
+  });
+
   test('something picked before a reconnect is never inserted after it', async () => {
     const r = await page.evaluate(() => {
       const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
@@ -779,6 +809,50 @@ describe('agents list, peek, banners and links', () => {
     await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
     assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
     herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
+  });
+
+  test('files dropped on a terminal you control are offered for sending, an image as the PNG it becomes', async () => {
+    // A 40 px PNG and a log, and with `huge` a file over the 100 MB limit, dropped on the page's terminal.
+    const drop = (page: Page, huge = false) =>
+      page.locator('.term-host').evaluate(async (host, huge) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d')!.fillRect(0, 0, 40, 40);
+        const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
+        dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        if (huge) dt.items.add(new File([new ArrayBuffer(100 * 1024 * 1024 + 1)], 'huge.bin'));
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+        host.dispatchEvent(over);
+        if (!over.defaultPrevented) throw new Error('the drop was not accepted');
+        host.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      }, huge);
+    const a = await device('mac', 'mac-drop');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await openTarget(a.page);
+    // A window that only watches gets nothing from a drop, not even an upload.
+    const b = await device('mac', 'mac-drop-watching');
+    onTestFinished(() => b.ctx.close().catch(() => {}));
+    await b.page.goto(s.base + '/workspaces');
+    await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
+    await b.page.waitForSelector('[data-ownership=watching]');
+    await drop(b.page);
+    await b.page.getByText('Take control to send files.').waitFor();
+    assert.equal(await b.page.getByRole('dialog').count(), 0, 'nothing is offered for sending');
+    await b.ctx.close();
+
+    await drop(a.page, true);
+    const sheet = a.page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('shot.png').waitFor();
+    await sheet.getByText('40 × 40 px PNG').waitFor();
+    await sheet.getByText('build.log').waitFor();
+    // A file over the limit holds the others back until it's removed.
+    await sheet.getByText('over the 100 MB limit').waitFor();
+    assert.ok(await sheet.getByRole('button', { name: 'Upload and insert 3 paths' }).isDisabled());
+    await sheet.getByRole('button', { name: 'Remove huge.bin' }).click();
+    assert.ok(await a.page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).isEnabled());
+    assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
   });
 
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
@@ -1404,6 +1478,36 @@ describe('settings', () => {
     assert.equal(values[1], branch);
     assert.ok(values[2].startsWith(commit!.replace(/-dirty$/, '')));
     await a.ctx.close();
+  });
+});
+
+describe('devices', () => {
+  test('a device can be renamed; a revoke or a pairing code that fails says so and changes nothing', async () => {
+    const a = await device('iphone', 'phone-devices', 'block');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const other = s.run.auth.pair(s.run.auth.createPairingCode().code, 'old tablet');
+    assert.ok(other.ok);
+    await a.page.goto(s.base + '/settings/devices');
+    const row = (name: string) => a.page.locator('#set-devices .row', { hasText: name });
+    await row('old tablet').getByRole('button', { name: 'Rename old tablet' }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Rename device' });
+    await sheet.getByLabel('Name').fill('Kitchen tablet');
+    await sheet.getByRole('button', { name: 'Save' }).click();
+    await row('Kitchen tablet').waitFor();
+    assert.equal(await row('old tablet').count(), 0);
+
+    // The host can't do it (here: every change to a device fails).
+    await a.page.route((url) => url.pathname.startsWith('/api/devices/'), (route) =>
+      route.request().method() === 'GET' ? route.continue() : route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal","message":"The host couldn’t save that."}' }),
+    );
+    await row('Kitchen tablet').getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByRole('dialog', { name: 'Revoke Kitchen tablet?' }).getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    await row('Kitchen tablet').waitFor();
+    await a.page.getByText('The host couldn’t save that.').waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    assert.equal(await a.page.locator('.pair-code').count(), 0);
   });
 });
 
