@@ -773,7 +773,7 @@ impl App {
                 }
                 app.d.hub.close_device(&id, 4401);
                 app.d.previews.close_device(&id);
-                let _ = app.d.push.unsubscribe_device(&id);
+                let _ = app.d.push.forget_device(&id);
             }
         });
     }

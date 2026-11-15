@@ -501,7 +501,7 @@ describe('notifications', () => {
     assert.equal((await hostHas(page)).subscribed, false);
   });
 
-  test('a device chooses its own alerts and quiet hours, which leaves the host’s settings and other devices alone', async () => {
+  test('a device chooses its own alerts and quiet hours, which leaves the host’s settings alone and outlasts turning alerts off', async () => {
     const { page } = await homeScreenApp('push choices', { permission: 'granted', sub: { endpoint: 'https://push.example/choices' }, wanted: true });
     await page.goto(proxy.base + '/settings/notifications');
     await controlled(page);
@@ -509,36 +509,44 @@ describe('notifications', () => {
     const mine = page.getByRole('region', { name: 'This device' });
     const finished = mine.getByRole('switch', { name: /^Finished/ });
     const ready = mine.getByRole('switch', { name: /^Ready for input/ });
-    // Until it chooses, the device follows the host: Finished is on there, Ready for input off.
+    const names = mine.getByRole('switch', { name: /^Include names/ });
+    // Until it chooses, the device follows the host: Finished and names are on there, Ready for input off.
     await waitUntil('the switches to be this device’s', async () => await finished.isEnabled());
-    assert.equal(await finished.isChecked(), true);
-    assert.equal(await ready.isChecked(), false);
+    assert.deepEqual([await finished.isChecked(), await ready.isChecked(), await names.isChecked()], [true, false, true]);
     const host = async () => (await page.evaluate(async () => (await fetch('/api/settings')).json())).notifications;
     const before = await host();
 
     await finished.uncheck();
     await ready.check();
-    await waitUntil('the host to keep the choices', async () => JSON.stringify((await hostHas(page)).prefs) === '{"finished":false,"ready":true}');
+    await names.uncheck();
+    await waitUntil('the host to keep the choices', async () => JSON.stringify((await hostHas(page)).prefs) === '{"finished":false,"ready":true,"includeNames":false}');
     await mine.getByRole('switch', { name: /^Quiet hours/ }).check();
     await mine.getByLabel('From').waitFor();
     assert.equal(await mine.getByLabel('From').inputValue(), '22:00');
     assert.equal(await mine.getByLabel('To').inputValue(), '07:00');
     await mine.getByLabel('To').fill('06:30');
-    const offset = await page.evaluate(() => -new Date().getTimezoneOffset());
-    await waitUntil('the quiet hours to be kept', async () => JSON.stringify((await hostHas(page)).prefs.quiet) === JSON.stringify({ from: 1320, to: 390, utcOffset: offset }));
+    await waitUntil('the quiet hours to be kept', async () => (await hostHas(page)).prefs.quiet?.to === 390);
+    // With this device's clock: its offset from UTC, and when that changes next, if it does.
+    const { quiet } = (await hostHas(page)).prefs;
+    assert.equal(quiet.from, 1320);
+    assert.equal(quiet.utcOffset, await page.evaluate(() => 0 - new Date().getTimezoneOffset()));
+    if (quiet.next) assert.ok(quiet.next.at > Date.now() && quiet.next.utcOffset !== quiet.utcOffset, JSON.stringify(quiet));
     assert.deepEqual(await host(), before, 'the host’s own settings didn’t change');
     // They are kept on the host: a reload shows them.
     await page.reload();
     await waitUntil('the choices to show again', async () => (await finished.isEnabled()) && !(await finished.isChecked()) && (await ready.isChecked()));
     assert.equal(await mine.getByLabel('To').inputValue(), '06:30');
 
-    // With alerts off here there is nothing to choose.
+    // With alerts off here there is nothing to choose, and turning them on again brings the choices back.
     await step(page).getByRole('button', { name: 'Turn off' }).click();
     await step(page).getByRole('button', { name: 'Allow notifications' }).waitFor();
     assert.equal(await finished.isDisabled(), true);
     await mine.getByText('Allow notifications on this device to choose which alerts it gets.').waitFor();
-    // What every device shares is still there.
-    assert.equal(await page.getByRole('region', { name: 'Every device' }).getByRole('switch', { name: /^Include names/ }).isEnabled(), true);
+    await step(page).getByRole('button', { name: 'Allow notifications' }).click();
+    await step(page).getByText('On.').waitFor();
+    await waitUntil('the switches to be this device’s again', async () => await finished.isEnabled());
+    assert.deepEqual([await finished.isChecked(), await ready.isChecked(), await names.isChecked()], [false, true, false]);
+    assert.equal(await mine.getByLabel('To').inputValue(), '06:30');
   });
 
   test('without the offline app installed, Repair says so instead of waiting for it forever', async () => {
