@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
 import { devices, webkit, type Browser } from 'playwright';
-import { closeWorkspace, freePort, herdr, SESSION, sleep, testPane, tmpDir } from '../test/helpers.ts';
+import { closeWorkspace, freePort, herdr, serverEnv, sleep, testPane, tmpDir } from '../test/helpers.ts';
 import { serverArgv } from './harness.ts';
 
 const dataDir = tmpDir('briardr-recovery-');
@@ -29,7 +29,7 @@ beforeAll(async () => {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   const port = await freePort();
   base = `https://localhost:${port}`;
-  env = { ...process.env, BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: SESSION, BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '', BRIARDR_NO_DICTATION: '1' };
+  env = serverEnv(dataDir, port);
   ws = testPane('briardr-recovery');
   herdr('pane', 'rename', ws.pane, 'recovery target');
   await startServer();

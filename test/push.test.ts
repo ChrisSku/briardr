@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pushKeys, request, startServer, waitUntil, type TestServer } from './helpers.ts';
+import { pushKeys, request, startServer, tmpDir, waitUntil, type TestServer } from './helpers.ts';
 
 describe('notification endpoints', () => {
   let s: TestServer;
@@ -59,5 +59,35 @@ describe('notification endpoints', () => {
     assert.deepEqual(Object.keys(kept()), [s.deviceId]);
     assert.deepEqual((await choose({ ready: null, includeNames: null, quiet: null })).json.prefs, {});
     assert.deepEqual(kept(), {}, 'nothing chosen, nothing kept');
+  });
+});
+
+describe('low-battery alerts', () => {
+  let s: TestServer;
+  beforeAll(async () => {
+    // A pmset first on the PATH says this machine's battery is nearly empty. The server never asks it: it runs
+    // on a fake Mac (the test hooks), whose battery each test sets.
+    const bin = tmpDir('briardr-pmset-');
+    const batt = "Now drawing from 'Battery Power'\\n -InternalBattery-0 (id=1)\\t5%%; discharging; 0:20 remaining present: true\\n";
+    fs.writeFileSync(path.join(bin, 'pmset'), `#!/bin/sh\n[ "$*" = "-g batt" ] && printf "${batt}"\n`, { mode: 0o755 });
+    s = await startServer({ platform: 'macos', env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  });
+  afterAll(() => s.close());
+
+  test('come from the battery the test sets, never this machine’s, once per level', async () => {
+    const titles: string[] = [];
+    s.run.push.sendImpl = async (_sub, body) => (titles.push(JSON.parse(body).title), { statusCode: 201 });
+    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/battery', keys: pushKeys() } })).status, 200);
+    const battery = async () => (await request(s, 'GET', '/api/mac')).json.mac.battery; // reads the battery now
+    assert.deepEqual(await battery(), { present: true, percent: 80, source: 'ac', charging: true, charged: false, minutes: 65, timeKind: 'until_full' });
+
+    s.run.power.battery(15, false);
+    assert.equal((await battery()).percent, 15);
+    await waitUntil('the low-battery alert', async () => (await request(s, 'GET', '/api/state'), titles.length > 0));
+    await battery();
+    s.run.power.battery(15, true);
+    await battery();
+    await request(s, 'GET', '/api/state');
+    assert.deepEqual(titles, ['Mac battery at 15%'], 'one alert for 20%, none for the same level again or for plugging in');
   });
 });

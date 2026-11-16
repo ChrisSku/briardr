@@ -18,10 +18,10 @@ mise run install
 
 Bun, Rust and the linters come from [`mise.toml`](../mise.toml). `mise run install` also installs the
 git hooks in [`lefthook.yml`](../lefthook.yml): Rust formatting before each commit, and the changeset,
-version, typecheck, clippy and workflow lint checks before each push, with `mise run test` when the push
-changes code and `mise run test:ui` when it changes the client or its tests. Skip one job for a push with
-`LEFTHOOK_EXCLUDE=ui git push`; CI runs everything again, for every change. Commit lockfile changes
-only when intentionally changing dependencies. No npm package publication is required; `private: true` and
+version, typecheck, clippy, crate license and workflow lint checks before each push, with `mise run test`
+when the push changes code and `mise run test:ui` when it changes the client or its tests. Skip one job
+for a push with `LEFTHOOK_EXCLUDE=ui git push`; CI runs everything again, for every change. Commit
+lockfile changes only when intentionally changing dependencies. No npm package publication is required; `private: true` and
 Cargo's `publish = false` prevent accidental registry publication while the source remains open.
 
 ## Run without touching your everyday Herdr session
@@ -60,6 +60,8 @@ mise run build          # production web bundle
 mise run check          # cargo fmt and clippy, warnings are errors
 mise run test           # Rust unit/fixture tests, then Bun integration tests
 mise run lint           # the GitHub workflows (actionlint), the Linux setup helper and the installer (shellcheck)
+mise run deps:check     # the server's crates: licenses on the allow-list, crates.io only (cargo-deny)
+mise run deps:audit     # known advisories in the crates and the npm packages (needs the network)
 ```
 
 The integration suite builds a debug server with test hooks and the client (into
@@ -93,6 +95,8 @@ The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust ser
 suite, browser checks, shell helper, and generated deployment files, and packages the
 [release archives](#release-archives) for every platform, for every pull request and every commit on
 `main` (a branch is checked once it has a pull request). macOS integrations require Mac-specific testing.
+The [audit workflow](../.github/workflows/audit.yml) checks the dependencies for advisories
+(`mise run deps:audit`) on the same changes and every morning; see [Dependency updates](#dependency-updates).
 
 ## Browser checks
 
@@ -138,7 +142,11 @@ CI then tests it on Linux.
 
 The `test-hooks` Cargo feature adds `/__test/*` endpoints. At runtime they also require
 `BRIARDR_TEST_HOOKS=1` and a loopback peer. Build deployed binaries with `mise run build:server`
-without this feature; a reverse proxy is itself a loopback peer.
+without this feature; a reverse proxy is itself a loopback peer. With the hooks on, the battery, Always
+on and Sleep Mac run on a fake Mac on its power adapter instead of `pmset`, `caffeinate` and `sudo`, so
+no test depends on the battery or sleep settings of the machine running it, or changes them. A test
+sets that Mac's battery with `run.power.battery` (`POST /__test/power`); servers a test starts itself
+get the hooks from `serverEnv` in `test/helpers.ts`.
 
 For a dedicated test deployment, [`scripts/smoke-deployment.ts`](../scripts/smoke-deployment.ts)
 exercises pairing, terminals, uploads, notes, Git changes, docs, previews, and an optional Briardr
@@ -154,6 +162,19 @@ a vulnerable dependency gets a pull request of its own as soon as GitHub learns 
 requests run every check. They bring no changeset, and the changeset check lets them through: what they
 update ships with the next release. Push a changeset to Dependabot's branch when an update changes
 something users notice.
+
+Two checks look at the dependencies themselves. `mise run deps:check` fails when a crate in
+`server/Cargo.lock` has a license outside the allow-list in [`server/deny.toml`](../server/deny.toml) (the
+licenses the crates have today, each compatible with Briardr's MIT license) or comes from anywhere but
+crates.io, and lists crates in two versions as warnings. It runs with the other required checks and before
+each push that changes the crates. `mise run deps:audit` fails on a known advisory in the crates (RustSec's
+database) or in the npm packages (`bun audit`). Advisories are published at any time, about dependencies
+nobody changed, so it runs in a [workflow of its own](../.github/workflows/audit.yml) for each pull request,
+each commit on `main` and every morning, and isn't a required check: a new advisory turns it red without
+blocking merges or releases. Fix one with a pull request that updates the dependency (`bun audit fix`,
+`mise exec -- cargo update --manifest-path server/Cargo.toml -p <crate>`). While no fixed version
+exists, ignore the advisory with the reason: in `[advisories] ignore` in `server/deny.toml` for a crate,
+with `--ignore <GHSA id>` on the `bun audit` line in [`mise.toml`](../mise.toml) for a package.
 
 Bun, Rust and the linters ([`mise.toml`](../mise.toml)) and the Herdr, herdr-core and Caddy versions
 ([`deploy/versions.env`](../deploy/versions.env)) are updated by hand, and so is a new major version of

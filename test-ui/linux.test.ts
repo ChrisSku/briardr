@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import { devices, webkit, type Browser, type Page } from 'playwright';
-import { closeWorkspace, freePort, herdr, SESSION, sleep, testPane, tmpDir } from '../test/helpers.ts';
+import { closeWorkspace, freePort, herdr, serverEnv, sleep, testPane, tmpDir } from '../test/helpers.ts';
 import { serverArgv } from './harness.ts';
 
 const dataDir = tmpDir('briardr-linux-ui-');
@@ -19,15 +19,11 @@ let anon: Page;
 let paired: Page;
 let ws: { pane: string; workspace: string };
 
-function serverEnv(port: number): NodeJS.ProcessEnv {
-  return { ...process.env, BRIARDR_PLATFORM: 'linux', BRIARDR_DATA_DIR: dataDir, BRIARDR_HERDR_SESSION: SESSION, BRIARDR_PORT: String(port), BRIARDR_PREVIEW_PORT: String(port + 1), BRIARDR_LISTEN: '' };
-}
-
 beforeAll(async () => {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   const port = await freePort();
   base = `https://localhost:${port}`;
-  const env = serverEnv(port);
+  const env = { ...serverEnv(dataDir, port), BRIARDR_PLATFORM: 'linux' };
   ws = testPane('briardr-linux-ui');
   herdr('pane', 'rename', ws.pane, 'linux target');
   server = spawn(...serverArgv('serve'), { env, stdio: ['ignore', 'ignore', fs.openSync(logFile, 'w')] });
