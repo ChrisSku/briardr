@@ -8,9 +8,10 @@ use axum::http::Method;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, js_number, json_body, now_ms, ok, raw_body, response, stream_gone, upload_body,
-    ApiError, App, Ctx, Routes, JSON_LIMIT,
+    action_err, js_number, json_body, json_body_as, now_ms, ok, raw_body, response, stream_gone,
+    upload_body, ApiError, App, Ctx, Routes, JSON_LIMIT,
 };
+use crate::actions::NewStream;
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
@@ -226,20 +227,22 @@ pub(super) fn register(r: &mut Routes) {
     );
 
     r.add(
+        Method::GET,
+        "/api/agents",
+        false,
+        |app: Arc<App>, _ctx: Ctx| async move {
+            ok(serde_json::to_value(app.d.actions.agents().await)
+                .map_err(|_| ApiError::Internal)?)
+        },
+    );
+
+    r.add(
         Method::POST,
         "/api/streams",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_stream(
-                    &field(&b, "projectId"),
-                    &field(&b, "kind"),
-                    &field(&b, "name"),
-                )
-                .await?)
+            let req: NewStream = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_stream(req).await?)
         },
     );
 
