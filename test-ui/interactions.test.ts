@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, holdTitle, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -34,9 +34,11 @@ afterAll(async () => {
 
 let pairedViaUi = false;
 
-async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui'): Promise<{ ctx: BrowserContext; page: Page }> {
+/** `serviceWorkers: 'block'` for a test that answers the page's requests itself (`page.route`): a page its
+ *  service worker controls sends them past the test. */
+async function device(profile: 'iphone' | 'mac' = 'iphone', name = 'ui', serviceWorkers: 'allow' | 'block' = 'allow'): Promise<{ ctx: BrowserContext; page: Page }> {
   const base = profile === 'iphone' ? devices['iPhone 15 Pro'] : { viewport: { width: 1280, height: 800 } };
-  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US' });
+  const ctx = await browser.newContext({ ...base, ignoreHTTPSErrors: true, locale: 'en-US', serviceWorkers });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('pageerror', e.message));
   if (!pairedViaUi) {
@@ -577,6 +579,34 @@ describe('terminal input (iPhone)', () => {
     assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
   });
 
+  test('several files picked at once are uploaded, and their paths inserted in order as one paste without Enter', async () => {
+    await page.getByRole('button', { name: 'Insert text, image or file' }).click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('menuitem', { name: /Select file/ }).click();
+    await (await chooser).setFiles([
+      { name: 'first.txt', mimeType: 'text/plain', buffer: Buffer.from('one') },
+      { name: 'second file.txt', mimeType: 'text/plain', buffer: Buffer.from('two') },
+      { name: 'third.txt', mimeType: 'text/plain', buffer: Buffer.from('three') },
+    ]);
+    const sheet = page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('second file.txt').waitFor();
+    // One can be taken out again before sending.
+    await sheet.getByRole('button', { name: 'Remove third.txt' }).click();
+    await page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    let m: RegExpMatchArray | undefined;
+    for (let i = 0; i < 40 && !m; i++) {
+      await sleep(100);
+      const all = Buffer.from((await bytesSeen()).join(''), 'hex').toString('latin1');
+      m = [...all.matchAll(/\x1b\[200~(.*?)\x1b\[201~/gs)].filter((x) => x[1].includes('first.txt')).pop();
+    }
+    assert.ok(m, 'the paths were inserted as one bracketed paste');
+    // The pane runs a program, not an agent: the paths go as a shell's arguments.
+    assert.match(m![1], /^'?\S*briardr-uploads\/[0-9a-f]{24}\/first\.txt'? '\S*briardr-uploads\/[0-9a-f]{24}\/second file\.txt'$/);
+    await sleep(300);
+    assert.ok(!(await bytesSeen()).join('').endsWith('0d'), 'Enter was not pressed');
+  });
+
   test('something picked before a reconnect is never inserted after it', async () => {
     const r = await page.evaluate(() => {
       const ctl = (document.querySelector('.term-host') as any).briardrTerminal;
@@ -735,6 +765,26 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('an agent’s row shows what its terminal title says it’s doing, and Jump finds it by that', async () => {
+    await settleShell();
+    holdTitle(ws.pane, 'Reviewing the parser');
+    herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
+    // The pane stays an agent's, as the tests after this one find it; only its title goes.
+    onTestFinished(async () => {
+      await settleShell();
+      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
+    });
+    const a = await device('iphone', 'phone-task');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    await row.locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+    // VoiceOver hears it with the rest of the row.
+    await row.getByRole('button', { name: /ui target.*Reviewing the parser/ }).waitFor();
+    await a.page.getByRole('button', { name: 'Jump to a stream' }).click();
+    await a.page.getByLabel('Search streams').fill('parser');
+    await a.page.locator('#jump-list .row-main', { hasText: 'ui target' }).locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+  });
+
   test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
     const a = await device('mac', 'mac-peek-paste');
     onTestFinished(() => a.ctx.close().catch(() => {}));
@@ -762,6 +812,50 @@ describe('agents list, peek, banners and links', () => {
     await waitUntil('the paste into the open stream', () => pastes.includes('into-stream'));
     assert.deepEqual(pastes, ['into-stream'], 'what was pasted into Peek was not sent');
     herdr('pane', 'send-keys', ws.pane, 'ctrl+c'); // the pasted text leaves the shell's input line
+  });
+
+  test('files dropped on a terminal you control are offered for sending, an image as the PNG it becomes', async () => {
+    // A 40 px PNG and a log, and with `huge` a file over the 100 MB limit, dropped on the page's terminal.
+    const drop = (page: Page, huge = false) =>
+      page.locator('.term-host').evaluate(async (host, huge) => {
+        const c = document.createElement('canvas');
+        c.width = c.height = 40;
+        c.getContext('2d')!.fillRect(0, 0, 40, 40);
+        const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
+        const dt = new DataTransfer();
+        dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
+        dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        if (huge) dt.items.add(new File([new ArrayBuffer(100 * 1024 * 1024 + 1)], 'huge.bin'));
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+        host.dispatchEvent(over);
+        if (!over.defaultPrevented) throw new Error('the drop was not accepted');
+        host.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+      }, huge);
+    const a = await device('mac', 'mac-drop');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await openTarget(a.page);
+    // A window that only watches gets nothing from a drop, not even an upload.
+    const b = await device('mac', 'mac-drop-watching');
+    onTestFinished(() => b.ctx.close().catch(() => {}));
+    await b.page.goto(s.base + '/workspaces');
+    await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
+    await b.page.waitForSelector('[data-ownership=watching]');
+    await drop(b.page);
+    await b.page.getByText('Take control to send files.').waitFor();
+    assert.equal(await b.page.getByRole('dialog').count(), 0, 'nothing is offered for sending');
+    await b.ctx.close();
+
+    await drop(a.page, true);
+    const sheet = a.page.getByRole('dialog', { name: 'Send 3 files' });
+    await sheet.getByText('shot.png').waitFor();
+    await sheet.getByText('40 × 40 px PNG').waitFor();
+    await sheet.getByText('build.log').waitFor();
+    // A file over the limit holds the others back until it's removed.
+    await sheet.getByText('over the 100 MB limit').waitFor();
+    assert.ok(await sheet.getByRole('button', { name: 'Upload and insert 3 paths' }).isDisabled());
+    await sheet.getByRole('button', { name: 'Remove huge.bin' }).click();
+    assert.ok(await a.page.getByRole('dialog', { name: 'Send 2 files' }).getByRole('button', { name: 'Upload and insert 2 paths' }).isEnabled());
+    assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
   });
 
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
@@ -1390,6 +1484,128 @@ describe('settings', () => {
   });
 });
 
+describe('appearance', () => {
+  test('a device can stay light or dark whatever its system says, in the terminal too, and go back to following it', async () => {
+    const a = await device('iphone', 'phone-theme');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const refused: string[] = [];
+    a.page.on('console', (m) => /Content Security Policy|Refused to/i.test(m.text()) && refused.push(m.text()));
+    const page = () => a.page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      canvas: getComputedStyle(document.documentElement).getPropertyValue('--bg-canvas').trim().toLowerCase(),
+      bar: document.querySelector('meta[name="theme-color"]')!.getAttribute('content'),
+    }));
+    // The terminal's background as the page resolves it: its colours are the --term-* tokens as built (#fff).
+    const terminal = () => a.page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('i'));
+      probe.style.color = (document.querySelector('.term-host') as any).briardrTerminal.term.options.theme.background;
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    });
+    const choose = async (label: string) => {
+      await a.page.goto(s.base + '/settings/appearance');
+      await a.page.locator('#set-appearance label', { hasText: label }).click();
+    };
+    assert.deepEqual(await page(), { theme: 'light', canvas: '#f6f5f3', bar: '#f6f5f3' }, 'the system is light');
+
+    await choose('Dark');
+    assert.deepEqual(await page(), { theme: 'dark', canvas: '#0d0c0b', bar: '#0d0c0b' });
+    await a.page.goto(s.base + '/settings');
+    await a.page.locator('.set-row', { hasText: 'Appearance' }).getByText('Dark').waitFor();
+    await openTarget(a.page);
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
+    // Each of the terminal's colours comes from its --term-* token.
+    const unset = await a.page.evaluate(() => Object.entries((document.querySelector('.term-host') as any).briardrTerminal.term.options.theme).filter(([, v]) => !CSS.supports('color', v as string)).map(([k]) => k));
+    assert.deepEqual(unset, []);
+    // The choice is applied before the page paints, so a launch doesn't flash the system's theme.
+    await a.page.reload();
+    assert.equal((await page()).theme, 'dark');
+
+    await choose('Light');
+    await a.page.emulateMedia({ colorScheme: 'dark' });
+    assert.equal((await page()).theme, 'light', 'light although the system is dark now');
+    await choose('System');
+    assert.equal((await page()).theme, 'dark');
+    // An open terminal follows a change of theme.
+    await openTarget(a.page);
+    assert.equal(await terminal(), 'rgb(10, 10, 9)');
+    await a.page.emulateMedia({ colorScheme: 'light' });
+    await waitUntil('the open terminal to turn light', async () => (await terminal()) === 'rgb(255, 255, 255)');
+    assert.equal((await page()).theme, 'light');
+    // The theme script is in the page itself, allowed by its hash.
+    assert.deepEqual(refused, []);
+  });
+});
+
+describe('devices', () => {
+  test('a device can be renamed; a revoke or a pairing code that fails says so and changes nothing', async () => {
+    const a = await device('iphone', 'phone-devices', 'block');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const other = s.run.auth.pair(s.run.auth.createPairingCode().code, 'old tablet');
+    assert.ok(other.ok);
+    await a.page.goto(s.base + '/settings/devices');
+    const row = (name: string) => a.page.locator('#set-devices .row', { hasText: name });
+    await row('old tablet').getByRole('button', { name: 'Rename old tablet' }).click();
+    const sheet = a.page.getByRole('dialog', { name: 'Rename device' });
+    await sheet.getByLabel('Name').fill('Kitchen tablet');
+    await sheet.getByRole('button', { name: 'Save' }).click();
+    await row('Kitchen tablet').waitFor();
+    assert.equal(await row('old tablet').count(), 0);
+
+    // The host can't do it (here: every change to a device fails).
+    await a.page.route((url) => url.pathname.startsWith('/api/devices/'), (route) =>
+      route.request().method() === 'GET' ? route.continue() : route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal","message":"The host couldn’t save that."}' }),
+    );
+    await row('Kitchen tablet').getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByRole('dialog', { name: 'Revoke Kitchen tablet?' }).getByRole('button', { name: 'Revoke' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    await row('Kitchen tablet').waitFor();
+    await a.page.getByText('The host couldn’t save that.').waitFor({ state: 'detached' });
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    await a.page.getByText('The host couldn’t save that.').waitFor();
+    assert.equal(await a.page.locator('.pair-code').count(), 0);
+  });
+});
+
+describe('pairing by link', () => {
+  test('Add a device shows a QR code; its link opens the pairing screen with the code filled in and out of the address', async () => {
+    const a = await device('iphone', 'phone-add-device');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.emulateMedia({ colorScheme: 'dark' });
+    await a.page.goto(s.base + '/settings/devices');
+    const answer = a.page.waitForResponse((r) => r.url().endsWith('/api/devices/pairing-code'));
+    await a.page.getByRole('button', { name: 'Add a device' }).click();
+    const { code, link } = await (await answer).json();
+    assert.equal(link, `${s.base}/#pair=${code}`, 'the code is in the fragment, which reaches no server');
+    await a.page.getByRole('img', { name: /^QR code/ }).waitFor();
+    assert.equal(await a.page.locator('.pair-code .code').innerText(), code);
+    assert.match(await a.page.locator('.pair-code').innerText(), new RegExp(`open ${new URL(link).host} there`));
+    // A camera reads dark modules on a light quiet zone, so the dark theme leaves the code as it is.
+    assert.equal(await a.page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+    const fill = (sel: string) => a.page.locator(sel).evaluate((e) => getComputedStyle(e).fill);
+    assert.deepEqual([await fill('.pair-qr rect'), await fill('.pair-qr path')], ['rgb(255, 255, 255)', 'rgb(0, 0, 0)']);
+    assert.ok((await a.page.locator('.pair-qr path').getAttribute('d'))!.length > 500);
+
+    // The new device: what its camera opens.
+    const ctx = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, locale: 'en-US' });
+    onTestFinished(() => ctx.close().catch(() => {}));
+    const page = await ctx.newPage();
+    let pairings = 0;
+    page.on('request', (r) => void (r.url().endsWith('/api/pair') && pairings++));
+    await page.goto(link);
+    assert.equal(await page.getByLabel('Pairing code').inputValue(), code);
+    assert.equal(new URL(page.url()).hash, '', 'the code doesn’t stay in the address');
+    await page.getByText('add Briardr to the Home Screen first').waitFor();
+    assert.equal(pairings, 0, 'opening the link doesn’t sign in by itself');
+    await page.getByLabel('Name for this device').fill('scanned');
+    const paired = page.waitForResponse((r) => r.url().endsWith('/api/pair'));
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    assert.equal((await paired).status(), 200);
+    await page.waitForSelector('.count-strip');
+  });
+});
+
 describe('key bar settings', () => {
   test('the default keys show unless the pane’s app has keys of its own; the keys send what they show', async () => {
     const { ctx, page } = await device('iphone', 'phone-keybar');
@@ -1631,5 +1847,81 @@ describe('Files prompt', () => {
     await a.page.waitForSelector('[role=tab][aria-selected=true]:has-text("Terminal")');
     const stored = await a.page.evaluate(() => localStorage.getItem('briardr.files.prompt'));
     assert.equal(stored, '{}');
+  });
+});
+
+describe('Changes review', () => {
+  test('lines picked in a diff take a comment; the comments go to the terminal as one paste, without Enter', async () => {
+    const fs = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const repo = testPane('briardr-ui-changes');
+    onTestFinished(() => closeWorkspace(repo.workspace));
+    herdr('pane', 'rename', repo.pane, 'changes target');
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir });
+    git('init', '-q');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ntwo\nthree\n');
+    git('add', 'a.txt');
+    git('commit', '-q', '-m', 'first');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\nTWO\nthree\n');
+    await s.run.herdr.refresh();
+
+    const a = await device('iphone', 'phone-changes-review');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const pastes: string[] = [];
+    a.page.on('websocket', (sock) => sock.on('framesent', ({ payload }) => {
+      if (typeof payload !== 'string') return;
+      try { const m = JSON.parse(payload); if (m.t === 'input') pastes.push(m.paste ? m.paste.text : JSON.stringify(m)); } catch {}
+    }));
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.locator('.tree-streams .row-main', { hasText: 'changes target' }).click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).click();
+    const diff = a.page.getByRole('region', { name: 'Diff of a.txt' });
+    // Tapping a number picks that line, a second number makes a range; tapping the text doesn't.
+    await diff.locator('.dl-add').click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Line 2' }).waitFor();
+    await diff.locator('.dl-ctx').last().click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Lines 2–3' }).waitFor();
+    await diff.locator('.dl-del').click({ position: { x: 120, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Lines 2–3' }).waitFor();
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('Use a constant');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    assert.equal(await diff.locator('.is-noted').count(), 2);
+
+    const bar = a.page.getByRole('region', { name: 'Review', exact: true });
+    await bar.getByText('1 comment for the agent').waitFor();
+    await bar.getByRole('button', { name: 'Review…' }).click();
+    await a.page.getByLabel('Note for the agent (optional)').fill('Small review');
+    await a.page.getByRole('button', { name: 'Send to terminal' }).click();
+    // Sending clears the review and shows the terminal, where Enter is pressed.
+    await a.page.waitForSelector('[role=tab][aria-selected=true]:has-text("Terminal")');
+    await sleep(300);
+    assert.deepEqual(pastes, ['Small review\n\na.txt 2-3\n```diff\n+TWO\n three\n```\nUse a constant'], 'one paste and no Enter');
+    assert.equal(await a.page.evaluate(() => localStorage.getItem('briardr.changes.review')), '{}');
+
+    // In a long diff the selection bar stays in view, above the review bar.
+    const long = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long);
+    git('add', 'b.txt');
+    git('commit', '-q', '-m', 'second');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), long.replace(/^line \d*3$/gm, '$& changed'));
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    await a.page.getByRole('button', { name: 'Refresh changes' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
+    const tall = a.page.getByRole('region', { name: 'Diff of b.txt' });
+    await tall.locator('.dl-add').first().click({ position: { x: 14, y: 4 } });
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('First');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    await bar.getByText('1 comment for the agent').waitFor();
+    await tall.locator('.dl-ctx').first().click({ position: { x: 14, y: 4 } });
+    await a.page.locator('.diff-sel-label', { hasText: 'Line 1' }).waitFor();
+    const viewport = a.page.viewportSize()!;
+    const selbar = (await a.page.getByRole('toolbar', { name: 'Selected lines' }).boundingBox())!;
+    const review = (await bar.boundingBox())!;
+    assert.ok(selbar.y + selbar.height <= review.y, 'the selection bar sits above the review bar');
+    assert.ok(review.y + review.height <= viewport.height, 'both are in view');
   });
 });

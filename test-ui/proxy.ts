@@ -11,7 +11,7 @@ interface Socket {
   url: string;
   headers: Record<string, string>;
   up?: WebSocket;
-  queue: (string | Buffer)[];
+  queue: (string | Buffer<ArrayBuffer>)[];
 }
 
 export interface Proxy {

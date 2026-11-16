@@ -2,6 +2,7 @@
 // seen markers and review checkmarks persist in this browser only.
 import type { Snippet } from 'svelte';
 import { derived, load, persisted, save, State, state } from './reactive.svelte.ts';
+import type { ThemeChoice } from './theme.ts';
 import type { Group, HerdrHealth, HostCaps, MacSummary, Model } from './types.ts';
 
 export { persisted };
@@ -58,7 +59,14 @@ export const live = derived(() => conn.value.state === 'online');
 export const stale = derived(() => conn.value.state !== 'online' || !herdr.value?.ok);
 
 // ---------- device-only preferences ----------
-export const prefs = persisted('briardr.prefs', {
+export const prefs = persisted<{
+  fontSize: number;
+  bracketedPaste: boolean;
+  screenReaderTerminal: boolean;
+  lowBatteryInApp: boolean;
+  /** Light or dark whatever the system says (web/src/theme.ts); missing until it's chosen. */
+  theme?: ThemeChoice;
+}>('briardr.prefs', {
   fontSize: 13,
   bracketedPaste: true,
   screenReaderTerminal: false,

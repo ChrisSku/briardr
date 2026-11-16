@@ -1,7 +1,9 @@
 // Safety rule: every request that reads or controls work is authenticated.
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import { closed, request, startServer, until, upgradeStatus, ws, type TestServer } from './helpers.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { closed, pushKeys, request, startServer, until, upgradeStatus, waitUntil, ws, type TestServer } from './helpers.ts';
 
 let s: TestServer;
 beforeAll(async () => {
@@ -97,6 +99,57 @@ describe('authentication', () => {
     assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).status, 200);
     assert.equal(await closing, 4401);
     assert.equal((await request(s, 'GET', '/api/state', undefined, { cookie })).status, 401);
+    assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).json.error, 'device_gone');
+  });
+
+  test('`briardr revoke` on the host does the same while Briardr runs, and the server never brings the device back', async () => {
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'lost phone');
+    assert.ok(p.ok);
+    const lost = { cookie: `__Host-briardr=${p.cookie}` };
+    const id = p.device.id;
+    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/lost', keys: pushKeys() } }, lost)).status, 200);
+    assert.equal((await request(s, 'PUT', '/api/notifications/device', { ready: false }, lost)).status, 200);
+    const live = ws(s, '/ws/live?v=1', lost);
+    await until(live, (m) => m.t === 'model');
+    const closing = closed(live);
+
+    assert.equal(s.run.cli('revoke', id).trim(), 'Revoked.');
+    assert.equal((await request(s, 'GET', '/api/state', undefined, lost)).status, 401, 'refused from the next request on');
+    assert.equal(await closing, 4401);
+    const read = (file: string) => JSON.parse(fs.readFileSync(path.join(s.dataDir, file), 'utf8'));
+    await waitUntil('its alerts to stop', () => !read('secrets/push-subscriptions.json').some((sub: any) => sub.deviceId === id) && !(id in read('state/device-alerts.json')));
+
+    // Saving the last-seen times (once a minute) writes the devices file again: without the lost phone.
+    s.run.auth.flush();
+    assert.ok(!read('secrets/devices.json').some((d: any) => d.id === id));
+    assert.ok(!s.run.cli('devices').includes(id));
+    assert.equal((await request(s, 'GET', '/api/state', undefined, lost)).status, 401);
+    assert.equal((await request(s, 'GET', '/api/state')).status, 200, 'the other devices stay signed in');
+    assert.equal(s.run.cli('revoke', id).trim(), 'No such device.');
+  });
+
+  test('a device can be renamed; an empty name and an unknown device are refused', async () => {
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'to rename');
+    assert.ok(p.ok);
+    const rename = (id: string, name: unknown) => request(s, 'POST', `/api/devices/${id}/rename`, { name });
+    assert.equal((await rename(p.device.id, '  Work phone ')).status, 200);
+    const { devices } = (await request(s, 'GET', '/api/devices')).json;
+    assert.equal(devices.find((d: any) => d.id === p.device.id).name, 'Work phone');
+    assert.equal((await request(s, 'GET', '/api/session', undefined, { cookie: `__Host-briardr=${p.cookie}` })).json.device.name, 'Work phone', 'it stays signed in');
+    for (const name of ['', '   ', '\u0007\n', null, undefined]) assert.equal((await rename(p.device.id, name)).json.error, 'invalid_name');
+    assert.equal((await rename(p.device.id, 42)).json.error, 'bad_json');
+    assert.equal((await rename('no-such-device', 'x')).json.error, 'device_gone');
+    assert.equal((await request(s, 'POST', `/api/devices/${p.device.id}/rename`, { name: 'x' }, { cookie: false })).status, 401);
+  });
+
+  test('a pairing code from a signed-in device comes with a link and its QR code, for where Briardr was reached', async () => {
+    const r = (await request(s, 'POST', '/api/devices/pairing-code')).json;
+    assert.match(r.code, /^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    // The code is in the fragment, which browsers send to no server.
+    assert.equal(r.link, `${s.base}/#pair=${r.code}`);
+    assert.ok(r.qr.length >= 21 && r.qr.every((row: string) => row.length === r.qr.length && /^[01]+$/.test(row)), 'a square of modules');
+    // (Paired in-process: the HTTP pairing route is rate-limited by the tests above, as it should be.)
+    assert.ok(s.run.auth.pair(r.code, 'by link').ok);
   });
 
   test('security headers are present on app and API responses', async () => {

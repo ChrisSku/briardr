@@ -3,7 +3,7 @@
 // vendor's push service only relays opaque bytes. VAPID (RFC 8292) identifies the server with an
 // ES256 JWT. Delivery is tracked honestly: sent -> accepted (push service returned 2xx) ->
 // delivered (the device's service worker confirmed).
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 
-use crate::config::{read_json, write_file_atomic, ConfigError};
+use crate::config::{present, read_json, write_file_atomic, ConfigError, NotificationsConfig};
 use crate::diag::Diagnostics;
 use crate::http;
 
@@ -49,6 +49,168 @@ pub struct PushSub {
     pub endpoint: String,
     pub keys: PushKeys,
     pub created_at: u64,
+}
+
+/// A device's own choices for its alerts. A choice it didn't make follows the host's setting
+/// (`notifications` in the configuration). Kept by device apart from its subscription, so they outlast
+/// a repair, an expired subscription and alerts turned off and on, until the device is revoked.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DevicePrefs {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub needs_you: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub low_battery: Option<bool>,
+    /// Workspace and stream names in its alerts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_names: Option<bool>,
+    /// Hours of the day when the device gets no alerts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<QuietHours>,
+}
+
+/// A span of the device's day, in minutes after its midnight; `from` after `to` runs over midnight.
+/// The host can't see the device's time zone, so the device says how far its clock is ahead of UTC and
+/// when that changes next (summer time), and says it again when it opens Briardr after a change.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuietHours {
+    pub from: u16,
+    pub to: u16,
+    /// Minutes the device's clock is ahead of UTC.
+    pub utc_offset: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<OffsetChange>,
+}
+
+/// A coming change of the device's UTC offset.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OffsetChange {
+    /// When it changes, in ms since the epoch.
+    pub at: u64,
+    pub utc_offset: i32,
+}
+
+/// UTC−12 to UTC+14, in minutes.
+const UTC_OFFSETS: std::ops::RangeInclusive<i32> = -720..=840;
+
+impl QuietHours {
+    /// Whether the device's clock is in the span at `now_ms`.
+    pub fn covers(&self, now_ms: u64) -> bool {
+        let offset = match self.next {
+            Some(next) if now_ms >= next.at => next.utc_offset,
+            _ => self.utc_offset,
+        };
+        let minute = ((now_ms / 60_000) as i64 + i64::from(offset)).rem_euclid(1440);
+        let (from, to) = (i64::from(self.from), i64::from(self.to));
+        if from <= to {
+            (from..to).contains(&minute)
+        } else {
+            minute >= from || minute < to
+        }
+    }
+
+    fn valid(&self) -> bool {
+        self.from < 1440
+            && self.to < 1440
+            && UTC_OFFSETS.contains(&self.utc_offset)
+            && self
+                .next
+                .is_none_or(|n| UTC_OFFSETS.contains(&n.utc_offset))
+    }
+}
+
+impl DevicePrefs {
+    fn is_unset(&self) -> bool {
+        *self == DevicePrefs::default()
+    }
+
+    /// The device's own choice for a kind of alert ("needs_you", "finished", "ready", "battery"), if
+    /// it made one.
+    pub fn choice(&self, kind: &str) -> Option<bool> {
+        match kind {
+            "needs_you" => self.needs_you,
+            "finished" => self.finished,
+            "ready" => self.ready,
+            "battery" => self.low_battery,
+            _ => None,
+        }
+    }
+
+    /// Whether the device gets an alert of this kind now: its own choice, else the host's setting, and
+    /// nothing in its quiet hours.
+    pub fn takes(&self, kind: &str, host: &NotificationsConfig, now_ms: u64) -> bool {
+        self.choice(kind).unwrap_or_else(|| host.sends(kind))
+            && !self.quiet.is_some_and(|q| q.covers(now_ms))
+    }
+
+    /// Whether its alerts name the workspace and stream.
+    pub fn names(&self, host: &NotificationsConfig) -> bool {
+        self.include_names.unwrap_or(host.include_names)
+    }
+}
+
+/// A change to a device's choices (`PUT /api/notifications/device`). A field left out stays as it is;
+/// `null` takes the choice back (the host's setting again) or ends the quiet hours.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefsChange {
+    #[serde(default, deserialize_with = "present")]
+    pub needs_you: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    pub finished: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    pub ready: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    pub low_battery: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    pub include_names: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "present")]
+    pub quiet: Option<Option<QuietHours>>,
+}
+
+impl PrefsChange {
+    pub fn valid(&self) -> bool {
+        self.quiet.flatten().is_none_or(|q| q.valid())
+    }
+
+    fn apply(self, prefs: &mut DevicePrefs) {
+        fn set<T>(choice: &mut Option<T>, change: Option<Option<T>>) {
+            if let Some(change) = change {
+                *choice = change;
+            }
+        }
+        set(&mut prefs.needs_you, self.needs_you);
+        set(&mut prefs.finished, self.finished);
+        set(&mut prefs.ready, self.ready);
+        set(&mut prefs.low_battery, self.low_battery);
+        set(&mut prefs.include_names, self.include_names);
+        set(&mut prefs.quiet, self.quiet);
+    }
+}
+
+/// The host's own alert settings, which devices follow where they didn't choose.
+pub type HostAlerts = Arc<dyn Fn() -> NotificationsConfig + Send + Sync>;
+
+/// One alert. `named` is the same title and body with workspace and stream names, for the devices that
+/// take names; the others get `title` and `body`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alert {
+    /// "needs_you" | "finished" | "ready" | "battery" | "test"
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub named: Option<(String, String)>,
+    /// Stream to open when tapped.
+    pub stream_id: Option<String>,
+    pub tag: String,
+    /// Agents that need attention now, for the app's icon badge.
+    pub attention: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -124,14 +286,17 @@ pub type Sender = Arc<dyn Fn(PushSub, String, SendOpts) -> SendFuture + Send + S
 
 struct State {
     subs: Vec<PushSub>,
+    /// Each device's own choices, by device id; devices that chose nothing aren't here.
+    prefs: BTreeMap<String, DevicePrefs>,
     deliveries: Vec<DeliveryRecord>,
     subject: String,
 }
 
 struct Inner {
     subs_file: PathBuf,
+    prefs_file: PathBuf,
     state: Mutex<State>,
-    /// Serializes writes of the subscriptions file, so the file ends up with the latest state.
+    /// Serializes writes of the files, so each ends up with the latest state.
     save_lock: Mutex<()>,
 }
 
@@ -140,6 +305,7 @@ pub struct Push {
     diag: Arc<Diagnostics>,
     inner: Arc<Inner>,
     sender: Mutex<Sender>,
+    host: HostAlerts,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -150,7 +316,9 @@ impl Push {
     pub fn new(
         vapid_file: &Path,
         subs_file: PathBuf,
+        prefs_file: PathBuf,
         subject: String,
+        host: HostAlerts,
         diag: Arc<Diagnostics>,
     ) -> io::Result<Push> {
         let vapid = match read_json::<Option<VapidKeys>>(vapid_file, None) {
@@ -163,21 +331,67 @@ impl Push {
             }
         };
         let subs = read_json::<Vec<PushSub>>(&subs_file, Vec::new());
+        let prefs = read_json::<BTreeMap<String, DevicePrefs>>(&prefs_file, BTreeMap::new());
         let client = http::client(SEND_TIMEOUT).map_err(io::Error::other)?;
         Ok(Push {
             vapid,
             diag,
             inner: Arc::new(Inner {
                 subs_file,
+                prefs_file,
                 state: Mutex::new(State {
                     subs,
+                    prefs,
                     deliveries: Vec::new(),
                     subject,
                 }),
                 save_lock: Mutex::new(()),
             }),
             sender: Mutex::new(default_sender(client)),
+            host,
         })
+    }
+
+    /// Whether an alert of this kind is worth making: the host sends it, or a subscribed device chose
+    /// to get it anyway. Which devices it reaches, quiet hours included, is decided when it is sent.
+    pub fn wanted(&self, kind: &str) -> bool {
+        if (self.host)().sends(kind) {
+            return true;
+        }
+        let st = lock(&self.inner.state);
+        st.subs.iter().any(|s| {
+            st.prefs
+                .get(&s.device_id)
+                .is_some_and(|p| p.choice(kind) == Some(true))
+        })
+    }
+
+    /// What this device chose for its alerts.
+    pub fn prefs(&self, device_id: &str) -> DevicePrefs {
+        lock(&self.inner.state)
+            .prefs
+            .get(device_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Changes a device's choices and returns them as they are now.
+    pub fn change_prefs(
+        &self,
+        device_id: &str,
+        change: PrefsChange,
+    ) -> Result<DevicePrefs, PushError> {
+        let prefs = {
+            let mut st = lock(&self.inner.state);
+            let mut prefs = st.prefs.remove(device_id).unwrap_or_default();
+            change.apply(&mut prefs);
+            if !prefs.is_unset() {
+                st.prefs.insert(device_id.to_string(), prefs.clone());
+            }
+            prefs
+        };
+        persist_prefs(&self.inner)?;
+        Ok(prefs)
     }
 
     pub fn public_key(&self) -> String {
@@ -226,11 +440,40 @@ impl Push {
         Ok(())
     }
 
+    /// Alerts turned off on this device: the host stops sending, and keeps what the device chose.
     pub fn unsubscribe_device(&self, device_id: &str) -> Result<(), PushError> {
         lock(&self.inner.state)
             .subs
             .retain(|s| s.device_id != device_id);
         persist(&self.inner)?;
+        Ok(())
+    }
+
+    /// A revoked device: its subscription and its choices go.
+    pub fn forget_device(&self, device_id: &str) -> Result<(), PushError> {
+        self.forget_unless(|id| id != device_id)
+    }
+
+    /// Forgets every device not in `paired`, such as one revoked while Briardr wasn't running.
+    pub fn forget_unpaired(&self, paired: &HashSet<String>) -> Result<(), PushError> {
+        self.forget_unless(|id| paired.contains(id))
+    }
+
+    /// Removes the subscriptions and choices of the devices `keep` says no to, and saves what changed.
+    fn forget_unless(&self, keep: impl Fn(&str) -> bool) -> Result<(), PushError> {
+        let (subs, prefs) = {
+            let mut st = lock(&self.inner.state);
+            let (subs, prefs) = (st.subs.len(), st.prefs.len());
+            st.subs.retain(|s| keep(&s.device_id));
+            st.prefs.retain(|id, _| keep(id));
+            (subs != st.subs.len(), prefs != st.prefs.len())
+        };
+        if subs {
+            persist(&self.inner)?;
+        }
+        if prefs {
+            persist_prefs(&self.inner)?;
+        }
         Ok(())
     }
 
@@ -254,8 +497,9 @@ impl Push {
             .map(|s| s.endpoint.clone())
     }
 
-    /// Send to every subscribed device (or one device). Resolves with one delivery record per
-    /// device, in subscription order.
+    /// Send to every subscribed device that takes this kind of alert now (`DevicePrefs::takes`), or to
+    /// one device whatever it chose (a test). Resolves with one delivery record per device, in
+    /// subscription order.
     #[allow(clippy::too_many_arguments)]
     pub async fn send(
         &self,
@@ -267,41 +511,51 @@ impl Push {
         only_device: Option<&str>,
         ttl_secs: u32,
     ) -> Vec<DeliveryRecord> {
-        self.send_counted(
-            kind,
-            title,
-            body,
+        let alert = Alert {
+            kind: kind.to_string(),
+            title: title.to_string(),
+            body: body.to_string(),
+            named: None,
             stream_id,
-            tag,
-            only_device,
-            ttl_secs,
-            None,
-        )
-        .await
+            tag: tag.to_string(),
+            attention: None,
+        };
+        self.send_alert(&alert, only_device, ttl_secs).await
     }
 
-    /// `send`, with the number of agents that need attention now (`attention`, for the icon badge).
-    #[allow(clippy::too_many_arguments)]
-    pub async fn send_counted(
+    /// `send` for an alert that may name its stream and carries the icon badge's count.
+    pub async fn send_alert(
         &self,
-        kind: &str,
-        title: &str,
-        body: &str,
-        stream_id: Option<String>,
-        tag: &str,
+        alert: &Alert,
         only_device: Option<&str>,
         ttl_secs: u32,
-        attention: Option<u32>,
     ) -> Vec<DeliveryRecord> {
+        let Alert {
+            kind,
+            tag,
+            stream_id,
+            attention,
+            ..
+        } = alert;
+        let kind = kind.as_str();
         let only_device = only_device.filter(|d| !d.is_empty());
         let sender = lock(&self.sender).clone();
+        let host = (self.host)();
+        let now = now_ms();
         let (targets, subject) = {
             let st = lock(&self.inner.state);
-            let targets: Vec<PushSub> = st
+            let no_choices = DevicePrefs::default();
+            let targets: Vec<(PushSub, bool)> = st
                 .subs
                 .iter()
-                .filter(|s| only_device.is_none_or(|d| s.device_id == d))
-                .cloned()
+                .filter_map(|s| {
+                    let prefs = st.prefs.get(&s.device_id).unwrap_or(&no_choices);
+                    let to = match only_device {
+                        Some(d) => s.device_id == d,
+                        None => prefs.takes(kind, &host, now),
+                    };
+                    to.then(|| (s.clone(), prefs.names(&host)))
+                })
                 .collect();
             (targets, st.subject.clone())
         };
@@ -312,7 +566,7 @@ impl Push {
         let topic = topic_for(tag);
 
         let mut set = tokio::task::JoinSet::new();
-        for (index, sub) in targets.iter().enumerate() {
+        for (index, (sub, names)) in targets.iter().enumerate() {
             let id = random_id();
             let rec = DeliveryRecord {
                 id: id.clone(),
@@ -325,15 +579,19 @@ impl Push {
                 error: None,
             };
             lock(&self.inner.state).deliveries.push(rec.clone());
+            let (title, body) = match &alert.named {
+                Some((title, body)) if *names => (title, body),
+                _ => (&alert.title, &alert.body),
+            };
             let payload = PushPayload {
                 id,
                 kind: kind.to_string(),
-                title: title.to_string(),
-                body: body.to_string(),
+                title: title.clone(),
+                body: body.clone(),
                 stream_id: stream_id.clone(),
-                tag: tag.to_string(),
+                tag: tag.clone(),
                 ts: now_ms(),
-                attention,
+                attention: *attention,
             };
             let job = Delivery {
                 index,
@@ -483,12 +741,26 @@ fn trim(inner: &Inner) {
 
 /// Write the subscriptions file (owner-only) after every change.
 fn persist(inner: &Inner) -> Result<(), ConfigError> {
+    write_state(inner, &inner.subs_file, |st| {
+        serde_json::to_string_pretty(&st.subs)
+    })
+}
+
+/// Write the devices' choices (owner-only) after every change.
+fn persist_prefs(inner: &Inner) -> Result<(), ConfigError> {
+    write_state(inner, &inner.prefs_file, |st| {
+        serde_json::to_string_pretty(&st.prefs)
+    })
+}
+
+fn write_state(
+    inner: &Inner,
+    file: &Path,
+    data: impl FnOnce(&State) -> serde_json::Result<String>,
+) -> Result<(), ConfigError> {
     let _save = lock(&inner.save_lock);
-    let data = {
-        let st = lock(&inner.state);
-        serde_json::to_string_pretty(&st.subs)?
-    };
-    write_file_atomic(&inner.subs_file, data.as_bytes(), 0o600)
+    let data = data(&lock(&inner.state))?;
+    write_file_atomic(file, data.as_bytes(), 0o600)
 }
 
 fn now_ms() -> u64 {
@@ -715,6 +987,7 @@ mod tests {
     use super::*;
     use crate::scratch::Scratch;
     use p256::ecdsa::VerifyingKey;
+    use serde_json::json;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
@@ -725,10 +998,18 @@ mod tests {
     }
 
     fn new_push(dir: &Path) -> Push {
+        let host = crate::config::default_config(&Default::default(), Path::new("/home/test"))
+            .notifications;
+        new_push_with(dir, host)
+    }
+
+    fn new_push_with(dir: &Path, host: NotificationsConfig) -> Push {
         Push::new(
             &dir.join("vapid.json"),
             dir.join("subs.json"),
+            dir.join("device-alerts.json"),
             "https://briardr.test".to_string(),
+            Arc::new(move || host.clone()),
             diagnostics(dir),
         )
         .expect("push")
@@ -811,6 +1092,202 @@ mod tests {
         assert_eq!(payload["id"], rec.id.as_str());
         assert_eq!(seen[0].1.urgency, "high");
         assert_eq!(seen[0].1.ttl, DEFAULT_TTL_SECS);
+    }
+
+    #[test]
+    fn quiet_hours_follow_the_device_clock_and_run_over_midnight() {
+        let span = |from: u16, to: u16, utc_offset: i32| QuietHours {
+            from,
+            to,
+            utc_offset,
+            next: None,
+        };
+        let at = |h: u64, m: u64| (h * 60 + m) * 60_000; // UTC, on day 0
+                                                         // 22:00 to 07:00 on a device two hours ahead of UTC.
+        let night = span(22 * 60, 7 * 60, 120);
+        assert!(night.covers(at(20, 0)), "22:00 there");
+        assert!(night.covers(at(23, 30)), "01:30 there");
+        assert!(night.covers(at(4, 59)), "06:59 there");
+        assert!(!night.covers(at(5, 0)), "07:00 there");
+        assert!(!night.covers(at(19, 59)), "21:59 there");
+        // A span within one day, on a device behind UTC; an empty span covers nothing.
+        let nap = span(13 * 60, 14 * 60, -300);
+        assert!(nap.covers(at(18, 30)) && !nap.covers(at(19, 0)) && !nap.covers(at(13, 30)));
+        assert!(!span(600, 600, 0).covers(at(10, 0)));
+        // Summer time ends at 01:00 UTC: 03:00 becomes 02:00 there, so 07:00 comes an hour later.
+        let autumn = QuietHours {
+            next: Some(OffsetChange {
+                at: at(1, 0),
+                utc_offset: 60,
+            }),
+            ..night
+        };
+        assert!(autumn.covers(at(0, 59)), "02:59 summer time");
+        assert!(autumn.covers(at(5, 30)), "06:30 winter time");
+        assert!(!autumn.covers(at(6, 0)), "07:00 winter time");
+        assert!(autumn.covers(at(21, 0)) && !autumn.covers(at(20, 30)));
+    }
+
+    #[test]
+    fn a_change_of_choices_leaves_out_what_it_doesnt_name() {
+        let parse = |v: Value| serde_json::from_value::<PrefsChange>(v).expect("change");
+        let mut prefs = DevicePrefs {
+            needs_you: Some(false),
+            ready: Some(true),
+            ..Default::default()
+        };
+        let quiet = json!({"from": 1320, "to": 420, "utcOffset": 120});
+        parse(json!({"ready": null, "finished": false, "quiet": quiet})).apply(&mut prefs);
+        assert_eq!(prefs.needs_you, Some(false), "left out: kept");
+        assert_eq!(prefs.ready, None, "null: the host's setting again");
+        assert_eq!(prefs.finished, Some(false));
+        assert_eq!(
+            prefs.quiet.map(|q| (q.from, q.to, q.next)),
+            Some((1320, 420, None))
+        );
+        parse(json!({"quiet": null})).apply(&mut prefs);
+        assert_eq!(prefs.quiet, None);
+
+        let next = json!({"at": 1, "utcOffset": 60});
+        assert!(
+            parse(json!({"quiet": {"from": 0, "to": 1439, "utcOffset": -720, "next": next}}))
+                .valid()
+        );
+        for bad in [
+            json!({"quiet": {"from": 1440, "to": 0, "utcOffset": 0}}),
+            json!({"quiet": {"from": 0, "to": 60, "utcOffset": 900}}),
+            json!({"quiet": {"from": 0, "to": 60, "utcOffset": 0, "next": {"at": 1, "utcOffset": -800}}}),
+        ] {
+            assert!(!parse(bad.clone()).valid(), "{bad}");
+        }
+        for wrong in [
+            json!({"finished": "yes"}),
+            json!({"quiet": {"from": 0, "to": 60}}),
+            json!({"quiet": {"from": -1, "to": 60, "utcOffset": 0}}),
+        ] {
+            assert!(
+                serde_json::from_value::<PrefsChange>(wrong.clone()).is_err(),
+                "{wrong}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn each_device_gets_the_alerts_it_chose_and_none_in_its_quiet_hours() {
+        let dir = Scratch::new("push-prefs");
+        // The host sends "finished", not "ready", and names streams.
+        let mut host = crate::config::default_config(&Default::default(), Path::new("/home/test"))
+            .notifications;
+        (host.finished, host.ready, host.include_names) = (true, false, true);
+        let push = new_push_with(&dir, host.clone());
+        let (_, p256dh, auth) = receiver_keys();
+        for dev in ["follows", "muted", "eager", "asleep"] {
+            push.subscribe(dev, &format!("https://push.test/{dev}"), &p256dh, &auth)
+                .expect("subscribe");
+        }
+        let (sender, seen) = fake_sender(Ok(201));
+        push.set_sender(sender);
+        let choose = |dev: &str, change: Value| {
+            let change = serde_json::from_value(change).expect("change");
+            push.change_prefs(dev, change).expect("save")
+        };
+        choose("muted", json!({"finished": false, "includeNames": false}));
+        choose("eager", json!({"ready": true}));
+        // Quiet all day but for a minute, wherever the clock is.
+        let minute = (now_ms() / 60_000) % 1440;
+        let quiet =
+            json!({"from": (minute + 720) % 1440, "to": (minute + 719) % 1440, "utcOffset": 0});
+        choose("asleep", json!({ "quiet": quiet }));
+
+        let devices = |records: Vec<DeliveryRecord>| -> Vec<String> {
+            records.into_iter().map(|r| r.device_id).collect()
+        };
+        let named = |kind: &str| Alert {
+            kind: kind.to_string(),
+            title: "An agent finished".to_string(),
+            body: "Open Briardr to see which one.".to_string(),
+            named: Some(("Finished: agent a".to_string(), "api".to_string())),
+            stream_id: Some("s1".to_string()),
+            tag: "stream:s1".to_string(),
+            attention: Some(0),
+        };
+        // What a device was sent: the title in the payload of its delivery.
+        let title = |records: &[DeliveryRecord], dev: &str| -> Option<String> {
+            let id = &records.iter().find(|r| r.device_id == dev)?.id;
+            lock(&seen).iter().find_map(|(plain, _)| {
+                let p: Value = serde_json::from_str(plain).ok()?;
+                (p["id"] == id.as_str()).then(|| p["title"].as_str().unwrap_or("").to_string())
+            })
+        };
+        let finished = push.send_alert(&named("finished"), None, 60).await;
+        assert_eq!(
+            title(&finished, "eager").as_deref(),
+            Some("Finished: agent a")
+        );
+        assert_eq!(devices(finished), ["follows", "eager"]);
+        let ready = push.send_alert(&named("ready"), None, 60).await;
+        assert_eq!(devices(ready), ["eager"]);
+        assert!(push.wanted("ready"), "one device chose it");
+        assert!(push.wanted("finished"));
+        choose("muted", json!({"finished": null}));
+        let finished = push.send_alert(&named("finished"), None, 60).await;
+        assert_eq!(
+            title(&finished, "muted").as_deref(),
+            Some("An agent finished"),
+            "no names, its own choice"
+        );
+        assert_eq!(
+            title(&finished, "follows").as_deref(),
+            Some("Finished: agent a"),
+            "names, the host's setting"
+        );
+        // A test goes to the device that asked, whatever it chose.
+        let test = push
+            .send("test", "t", "b", None, "x", Some("asleep"), 60)
+            .await;
+        assert_eq!(devices(test), ["asleep"]);
+
+        // The choices outlast the subscription: alerts turned off and on, a new one, a restart.
+        push.unsubscribe_device("eager").expect("unsubscribe");
+        assert!(!push.wanted("ready"), "only subscribed devices count");
+        push.subscribe("eager", "https://push.test/eager-2", &p256dh, &auth)
+            .expect("subscribe again");
+        assert_eq!(push.prefs("eager").ready, Some(true));
+        let again = new_push_with(&dir, host);
+        assert_eq!(again.prefs("muted").include_names, Some(false));
+        assert_eq!(again.prefs("follows"), DevicePrefs::default());
+        assert_eq!(again.prefs("asleep").quiet.map(|q| q.utc_offset), Some(0));
+        let saved: Value = serde_json::from_str(
+            &fs::read_to_string(dir.join("device-alerts.json")).expect("choices file"),
+        )
+        .expect("choices");
+        assert_eq!(saved["muted"], json!({"includeNames": false}));
+        assert!(
+            saved.get("follows").is_none(),
+            "only devices that chose something"
+        );
+        let mode = fs::metadata(dir.join("device-alerts.json"))
+            .expect("meta")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        // Choosing nothing again leaves nothing behind.
+        choose("eager", json!({"ready": null}));
+        assert!(!fs::read_to_string(dir.join("device-alerts.json"))
+            .expect("file")
+            .contains("eager"));
+
+        // Revoked, now or while Briardr wasn't running: subscription and choices go.
+        again.forget_device("muted").expect("forget");
+        assert!(!again.has_device("muted"));
+        assert_eq!(again.prefs("muted"), DevicePrefs::default());
+        let paired = HashSet::from(["follows".to_string()]);
+        again.forget_unpaired(&paired).expect("forget");
+        assert_eq!(again.device_count(), 1);
+        assert_eq!(again.prefs("asleep"), DevicePrefs::default());
+        let restarted = new_push(&dir);
+        assert_eq!(restarted.device_count(), 1);
+        assert_eq!(restarted.prefs("asleep"), DevicePrefs::default());
     }
 
     #[tokio::test]

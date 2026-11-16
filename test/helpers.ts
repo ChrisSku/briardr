@@ -242,7 +242,11 @@ export interface Running {
     createPairingCode(): { code: string };
     pair(code: string, name: string, ip?: string): any;
     revoke(id: string): boolean;
+    /** Saves the devices file, as the server does once a minute when a device was seen. */
+    flush(): void;
   };
+  /** Runs `briardr <args>` on the server's data directory, as on the host, and returns what it printed. */
+  cli(...args: string[]): string;
   herdr: { refresh(): Promise<unknown> };
   app: { listRoutes(): { method: string; pattern: string; public: boolean }[]; d: { previews: { open(device: string, port: number): Promise<any> } } };
   push: { sendImpl: (sub: unknown, body: string, opts: object) => unknown; readonly subject: string };
@@ -337,17 +341,19 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
   const missing = (name: string): never => {
     throw new Error(`test hook for ${name} is not available on the Rust server yet`);
   };
+  const cli = (...args: string[]) => execFileSync(bin, args, { env: { ...env, BRIARDR_DATA_DIR: s.dataDir }, encoding: 'utf8' });
   const shim = {
     auth: {
       createPairingCode: () => {
-        const out = execFileSync(bin, ['pair'], { env: { ...env, BRIARDR_DATA_DIR: s.dataDir }, encoding: 'utf8' });
-        const m = out.match(/[A-Z0-9]{4}-[A-Z0-9]{4}/);
+        const m = cli('pair').match(/[A-Z0-9]{4}-[A-Z0-9]{4}/);
         if (!m) throw new Error('no pairing code');
         return { code: m[0] };
       },
       pair: (code: string, name: string, ip?: string) => hook('POST', '/auth/pair', { code, name, ip }),
       revoke: (id: string) => hook('POST', '/auth/revoke', { id }),
+      flush: () => hook('POST', '/auth/flush', {}),
     },
+    cli,
     herdr: { refresh: async () => hook('POST', '/herdr/refresh', {}) },
     app: {
       listRoutes: () => hook('GET', '/routes'),
@@ -525,6 +531,13 @@ export function closed(sock: WebSocket, ms = WAIT): Promise<number> {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A real P-256 subscription key pair, as a browser would create, for `/api/notifications/subscribe`. */
+export function pushKeys(): { p256dh: string; auth: string } {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.generateKeys();
+  return { p256dh: ecdh.getPublicKey('base64url'), auth: Buffer.alloc(16, 7).toString('base64url') };
+}
+
 /** Herdr CLI against the isolated session only. */
 export function herdr(...args: string[]): any {
   const env: NodeJS.ProcessEnv = {};
@@ -535,6 +548,12 @@ export function herdr(...args: string[]): any {
   } catch {
     return out;
   }
+}
+
+/** Sets a pane's terminal title, as an agent does, and keeps it: `cat` holds back the shell's prompt, which
+ *  sets the title again where the prompt has it (bash on Ubuntu). Ctrl+C ends it. */
+export function holdTitle(pane: string, title: string) {
+  herdr('pane', 'run', pane, `printf '\\033]0;${title}\\007'; cat`);
 }
 
 /** A dedicated test workspace with a shell pane in a disposable folder. */

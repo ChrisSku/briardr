@@ -22,6 +22,7 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
+use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -249,6 +250,33 @@ fn strip_port(host: &str) -> &str {
     }
 }
 
+/// The name in a Host header, lowercased, without its port or an IPv6 address's brackets.
+fn host_name(host: &str) -> String {
+    let host = host.to_lowercase();
+    if let Some(rest) = host.strip_prefix('[') {
+        // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
+        match rest.find(']') {
+            Some(i) => rest[..i].to_string(),
+            None => {
+                let mut r = rest.to_string();
+                r.pop();
+                r
+            }
+        }
+    } else {
+        strip_port(&host).to_string()
+    }
+}
+
+/// Whether a host name is this computer's own (localhost or a loopback address), which another device
+/// can't open.
+fn is_loopback_name(name: &str) -> bool {
+    name == "localhost"
+        || name
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+}
+
 // ---------- request helpers ----------
 
 /// Read a request body, refusing it as soon as it grows past the limit (413 `too_large`).
@@ -273,12 +301,15 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
 
 /// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
 pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
+    json_body_as(ctx, limit).await
+}
+
+/// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
+pub async fn json_body_as<T: DeserializeOwned>(ctx: &mut Ctx, limit: usize) -> Result<T, ApiError> {
     let body = std::mem::replace(&mut ctx.body, Body::empty());
     let buf = read_body(&ctx.headers, body, limit).await?;
-    if buf.is_empty() {
-        return Ok(json!({}));
-    }
-    serde_json::from_slice(&buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
+    let buf: &[u8] = if buf.is_empty() { b"{}" } else { &buf };
+    serde_json::from_slice(buf).map_err(|_| action_err(400, "bad_json", "Invalid JSON"))
 }
 
 /// The raw body, for uploads and dictation.
@@ -592,6 +623,8 @@ pub struct AppDeps {
     pub notes: Arc<Notes>,
     pub web_dir: PathBuf,
     pub allowed_hosts: Arc<RwLock<HashSet<String>>>,
+    /// The address devices open, as `briardr pair` prints it (`public_origin_of`).
+    pub public_origin: String,
     pub dictation_helper: Arc<RwLock<Option<PathBuf>>>,
     pub ca_profile: Option<String>,
     /// (wanted, effective) TLS mode.
@@ -773,7 +806,7 @@ impl App {
                 }
                 app.d.hub.close_device(&id, 4401);
                 app.d.previews.close_device(&id);
-                let _ = app.d.push.unsubscribe_device(&id);
+                let _ = app.d.push.forget_device(&id);
             }
         });
     }
@@ -832,20 +865,7 @@ impl App {
     }
 
     pub fn host_allowed(&self, headers: &HeaderMap) -> bool {
-        let host = header_str(headers, "host").unwrap_or("").to_lowercase();
-        let name = if let Some(rest) = host.strip_prefix('[') {
-            // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
-            match rest.find(']') {
-                Some(i) => rest[..i].to_string(),
-                None => {
-                    let mut r = rest.to_string();
-                    r.pop();
-                    r
-                }
-            }
-        } else {
-            strip_port(&host).to_string()
-        };
+        let name = host_name(header_str(headers, "host").unwrap_or(""));
         self.d
             .allowed_hosts
             .read()
@@ -865,6 +885,18 @@ impl App {
         match self.proxy(&self.cfg()) {
             Some((public_origin, _)) => origin == public_origin,
             None => origin == format!("https://{}", header_str(headers, "host").unwrap_or("null")),
+        }
+    }
+
+    /// Where a new device opens Briardr: where this request reached it (a Host the Host check allowed),
+    /// as another device on that network does. Behind a proxy, or from the host itself (localhost), it's
+    /// the address `briardr pair` prints.
+    pub fn pairing_origin(&self, headers: &HeaderMap) -> String {
+        match header_str(headers, "host") {
+            Some(host) if !self.in_proxy_mode() && !is_loopback_name(&host_name(host)) => {
+                format!("https://{host}")
+            }
+            _ => self.d.public_origin.clone(),
         }
     }
 
@@ -1108,8 +1140,9 @@ impl App {
         }
     }
 
-    /// The Content-Security-Policy for the page: the usual one, with its inline import map allowed by the
-    /// hash the build writes next to it (`index.html.csp`, scripts/build.ts). None without that file.
+    /// The Content-Security-Policy for the page: the usual one, with its inline scripts (the import map and
+    /// the theme) allowed by the hashes the build writes next to it (`index.html.csp`, scripts/build.ts).
+    /// None without that file.
     async fn page_csp(&self, headers: &HeaderMap, file: &str) -> Option<String> {
         let listed = tokio::fs::read_to_string(format!("{file}.csp"))
             .await
@@ -1359,15 +1392,16 @@ impl App {
         Ok(report.summary)
     }
 
-    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, when the
-    /// setting allows, to every device as a push. Wake and keep-awake events have no listener.
+    /// Power events from `poll` or `tick`. Low battery goes to live sockets and, as a push, to the
+    /// devices that take it (the host's setting, or their own choice). Wake and keep-awake events
+    /// have no listener.
     pub fn power_events(self: &Arc<Self>, events: &[PowerEvent]) {
         for ev in events {
             let PowerEvent::LowBattery(b) = ev else {
                 continue;
             };
             self.broadcast(&json!({"t": "battery", "level": b.level, "percent": b.percent, "sleeping": b.sleeping}));
-            if !self.cfg().notifications.low_battery || !self.d.caps.battery {
+            if !self.d.caps.battery || !self.d.push.wanted("battery") {
                 continue;
             }
             let percent = b.percent.map_or("null".to_string(), |p| p.to_string());
@@ -1570,6 +1604,14 @@ mod tests {
         assert_eq!(strip_port("a.b:443"), "a.b");
         assert_eq!(strip_port("[::1]:3000"), "[::1]");
         assert_eq!(strip_port("host:"), "host:");
+        assert_eq!(host_name("Mac.Tail1.ts.net:7443"), "mac.tail1.ts.net");
+        assert_eq!(host_name("[::1]:7443"), "::1");
+        assert!(
+            is_loopback_name("localhost")
+                && is_loopback_name("127.0.0.1")
+                && is_loopback_name("::1")
+        );
+        assert!(!is_loopback_name("10.8.0.1") && !is_loopback_name("mac.tail1.ts.net"));
         assert_eq!(decode_uri_component("w1%3Ap1").as_deref(), Some("w1:p1"));
         assert_eq!(decode_uri_component("%E0%A4%A"), None);
         assert_eq!(decode_uri_component("%FF"), None);

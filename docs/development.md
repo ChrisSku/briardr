@@ -83,6 +83,14 @@ For Rust-only changes, a narrower check is:
 mise exec -- cargo test --manifest-path server/Cargo.toml --features test-hooks
 ```
 
+`test/` also has unit tests of client logic that runs without a browser: key encoding, terminal links,
+routes, Markdown rendering and the like, run with the suite. They need no server or Herdr, so one can run
+by itself in well under a second while you work on that code:
+
+```sh
+mise exec -- bun test test/keys.test.ts
+```
+
 The [Linux workflow](../.github/workflows/linux.yml) checks the client, Rust server, integration
 suite, browser checks, shell helper, and generated deployment files, and packages the
 [release archives](#release-archives) for every platform, for every pull request and every commit on
@@ -165,7 +173,9 @@ exists, ignore the advisory with the reason: in `[advisories] ignore` in `server
 with `--ignore <GHSA id>` on the `bun audit` line in [`mise.toml`](../mise.toml) for a package.
 
 Bun, Rust and the linters ([`mise.toml`](../mise.toml)) and the Herdr, herdr-core and Caddy versions
-([`deploy/versions.env`](../deploy/versions.env)) are updated by hand.
+([`deploy/versions.env`](../deploy/versions.env)) are updated by hand, and so is a new major version of
+TypeScript: it stays on 5 until svelte-check can check the client with TypeScript 7 (the comment in
+`dependabot.yml` says why).
 
 ## Releases
 

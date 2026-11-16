@@ -1,7 +1,9 @@
-// Device pairing and authentication (secrets/devices.json, secrets/pairing.json).
+// Device pairing and authentication (secrets/devices.json, secrets/pairing.json, and secrets/devices.lock,
+// which every Briardr process holds while it changes the other two).
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::{self, File};
 use std::io;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -62,32 +64,137 @@ pub enum PairError {
     Locked,
 }
 
+/// The devices file is the truth: `briardr revoke` changes it from another process while Briardr runs.
+/// Every Auth reads it again when it changed, and changes it only as it is on disk.
 #[derive(Debug)]
 pub struct Auth {
     pub devices_file: PathBuf,
     pub pairing_file: PathBuf,
+    lock_file: PathBuf,
     /// Guards the devices and the pairing file, so attempt counts can't race.
-    devices: Mutex<Vec<Device>>,
+    devices: Mutex<Devices>,
     last_seen_dirty: AtomicBool,
     revoked: broadcast::Sender<String>,
 }
 
+/// The devices as the devices file last said, with the last-seen times `authenticate` changed since.
+#[derive(Debug, Default)]
+struct Devices {
+    list: Vec<Device>,
+    /// The file they were read from or saved as; another one there means another process changed it.
+    stamp: Option<Stamp>,
+}
+
+/// What tells one version of a file from another: a save (`write_file_atomic`) is a new file, so a new
+/// inode, and an edit in place changes its size or modification time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    ino: u64,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Stamp {
+    fn of(file: &Path) -> Option<Stamp> {
+        let m = fs::metadata(file).ok()?;
+        Some(Stamp {
+            ino: m.ino(),
+            len: m.len(),
+            modified: m.modified().ok(),
+        })
+    }
+}
+
+/// The devices and their files held for a change: this process's lock, then the lock file against
+/// other Briardr processes (`briardr pair`, `briardr revoke`).
+struct Held<'a> {
+    devices: MutexGuard<'a, Devices>,
+    _files: File,
+}
+
 impl Auth {
+    /// The devices file is read when they're first needed.
     pub fn new(devices_file: PathBuf, pairing_file: PathBuf) -> Self {
-        let devices = read_json::<Vec<Device>>(&devices_file, Vec::new());
         Auth {
+            lock_file: devices_file.with_extension("lock"),
             devices_file,
             pairing_file,
-            devices: Mutex::new(devices),
+            devices: Mutex::default(),
             last_seen_dirty: AtomicBool::new(false),
             revoked: broadcast::channel(16).0,
         }
     }
-    fn lock(&self) -> MutexGuard<'_, Vec<Device>> {
+    fn lock(&self) -> MutexGuard<'_, Devices> {
         self.devices.lock().unwrap_or_else(PoisonError::into_inner)
     }
+    /// The devices, read again first if the devices file changed. One that can't be read changes nothing
+    /// until it can: a passing error never signs devices out.
+    fn current(&self) -> MutexGuard<'_, Devices> {
+        let stamp = Stamp::of(&self.devices_file);
+        let mut devices = self.lock();
+        if devices.stamp != stamp {
+            if let Ok(list) = read_devices(&self.devices_file) {
+                self.adopt(&mut devices, list, stamp);
+            }
+        }
+        devices
+    }
+    /// Holds the devices for a change. The lock file comes first, so a request waiting in `current`
+    /// never waits for another process.
+    fn hold(&self) -> Result<Held<'_>, ConfigError> {
+        let files = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(0o600)
+            .open(&self.lock_file)?;
+        files.lock()?;
+        Ok(Held {
+            devices: self.lock(),
+            _files: files,
+        })
+    }
+    /// `hold`, with the devices read from the file, so a change is made to what is there now and never
+    /// brings back a device another process removed.
+    fn change(&self) -> Result<Held<'_>, ConfigError> {
+        let mut held = self.hold()?;
+        let stamp = Stamp::of(&self.devices_file);
+        let list = read_devices(&self.devices_file)?;
+        self.adopt(&mut held.devices, list, stamp);
+        Ok(held)
+    }
+    /// Takes the devices file's `list`: a device missing from it was revoked by another process and is
+    /// signed out here too (its connections closed, its alerts stopped). Last-seen times not saved yet
+    /// are kept.
+    fn adopt(&self, devices: &mut Devices, mut list: Vec<Device>, stamp: Option<Stamp>) {
+        for d in &mut list {
+            if let Some(known) = devices.list.iter().find(|k| k.id == d.id) {
+                d.last_seen_at = d.last_seen_at.max(known.last_seen_at);
+            }
+        }
+        let gone: Vec<String> = devices
+            .list
+            .iter()
+            .filter(|k| !list.iter().any(|d| d.id == k.id))
+            .map(|k| k.id.clone())
+            .collect();
+        *devices = Devices { list, stamp };
+        for id in gone {
+            let _ = self.revoked.send(id);
+        }
+    }
+    /// Saves `list` as the devices, in the file and then here, so a failed save changes neither.
+    fn save(&self, devices: &mut Devices, list: Vec<Device>) -> Result<(), ConfigError> {
+        save_devices(&self.devices_file, &list)?;
+        *devices = Devices {
+            list,
+            stamp: Stamp::of(&self.devices_file),
+        };
+        Ok(())
+    }
     pub fn list(&self) -> Vec<DeviceInfo> {
-        self.lock()
+        self.current()
+            .list
             .iter()
             .map(|d| DeviceInfo {
                 id: d.id.clone(),
@@ -101,9 +208,13 @@ impl Auth {
     pub fn subscribe_revoked(&self) -> broadcast::Receiver<String> {
         self.revoked.subscribe()
     }
+    /// Reads the devices file again if it changed, so a device revoked by another process loses its live
+    /// connections too. The caller runs this every second.
+    pub fn reload(&self) {
+        drop(self.current());
+    }
     /// Create a one-time pairing code. Only its hash is stored. Returns the code and its expiry in ms.
     pub fn create_pairing_code(&self) -> (String, u64) {
-        let _guard = self.lock();
         let mut bytes = [0u8; 8];
         rand::fill(&mut bytes);
         let raw: String = bytes
@@ -118,7 +229,9 @@ impl Auth {
             by_client: None,
         };
         // A failed write leaves no usable code, so the caller gets no_code on redeem.
-        let _ = write_pairing(&self.pairing_file, &state);
+        if let Ok(_held) = self.hold() {
+            let _ = write_pairing(&self.pairing_file, &state);
+        }
         (format!("{}-{}", &raw[..4], &raw[4..]), expires_at)
     }
     /// Returns the device and the cookie value on success.
@@ -128,7 +241,7 @@ impl Auth {
         name: &str,
         client: &str,
     ) -> Result<(Device, String), PairError> {
-        let mut devices = self.lock();
+        let mut held = self.change().map_err(|_| PairError::Invalid)?;
         let Some(mut state) = read_json::<Option<PairingState>>(&self.pairing_file, None) else {
             return Err(PairError::NoCode);
         };
@@ -182,23 +295,41 @@ impl Auth {
             created_at: now,
             last_seen_at: Some(now),
         };
-        let mut next = devices.clone();
+        let mut next = held.devices.list.clone();
         next.push(device.clone());
-        save_devices(&self.devices_file, &next).map_err(|_| PairError::Invalid)?;
-        *devices = next;
+        self.save(&mut held.devices, next)
+            .map_err(|_| PairError::Invalid)?;
         let cookie = format!("{}.{}", device.id, token);
         Ok((device, cookie))
     }
     pub fn revoke(&self, id: &str) -> Result<bool, ConfigError> {
-        let mut devices = self.lock();
-        let kept: Vec<Device> = devices.iter().filter(|d| d.id != id).cloned().collect();
-        if kept.len() == devices.len() {
+        let mut held = self.change()?;
+        let devices = &mut held.devices;
+        let kept: Vec<Device> = devices
+            .list
+            .iter()
+            .filter(|d| d.id != id)
+            .cloned()
+            .collect();
+        if kept.len() == devices.list.len() {
             return Ok(false);
         }
         // Keep the device if the change can't be saved, so the file and memory still agree.
-        save_devices(&self.devices_file, &kept)?;
-        *devices = kept;
+        self.save(devices, kept)?;
         let _ = self.revoked.send(id.to_string());
+        Ok(true)
+    }
+    /// Renames a device, with the name cleaned as at pairing; its cookie keeps working. `Ok(false)` when
+    /// there's no such device.
+    pub fn rename(&self, id: &str, name: &str) -> Result<bool, ConfigError> {
+        let mut held = self.change()?;
+        let mut next = held.devices.list.clone();
+        let Some(device) = next.iter_mut().find(|d| d.id == id) else {
+            return Ok(false);
+        };
+        device.name = clean_name(name);
+        // Keep the old name if the change can't be saved, so the file and memory still agree.
+        self.save(&mut held.devices, next)?;
         Ok(true)
     }
     /// Device for the request's cookie, if any.
@@ -209,8 +340,8 @@ impl Auth {
             return None;
         }
         let (id, token) = (&value[..dot], &value[dot + 1..]);
-        let mut devices = self.lock();
-        let device = devices.iter_mut().find(|d| d.id == id)?;
+        let mut devices = self.current();
+        let device = devices.list.iter_mut().find(|d| d.id == id)?;
         if !safe_eq_hex(&sha256(token), &device.token_hash) {
             return None;
         }
@@ -221,14 +352,25 @@ impl Auth {
         }
         Some(device.clone())
     }
-    /// Save the last-seen times that `authenticate` changed. The caller runs this about once a minute.
+    /// Save the last-seen times that `authenticate` changed, into the devices file as it is now. The
+    /// caller runs this about once a minute.
     pub fn flush_last_seen(&self) {
-        let devices = self.lock();
-        if self.last_seen_dirty.swap(false, Ordering::Relaxed)
-            && save_devices(&self.devices_file, &devices).is_err()
-        {
+        if !self.last_seen_dirty.load(Ordering::Relaxed) {
+            return;
+        }
+        // Not read or not saved: they're saved next time.
+        let Ok(mut held) = self.change() else { return };
+        self.last_seen_dirty.store(false, Ordering::Relaxed);
+        let list = held.devices.list.clone();
+        if self.save(&mut held.devices, list).is_err() {
             self.last_seen_dirty.store(true, Ordering::Relaxed);
         }
+    }
+    /// `flush_last_seen` as if a last-seen time had changed (`POST /__test/auth/flush`).
+    #[cfg(feature = "test-hooks")]
+    pub fn flush_now(&self) {
+        self.last_seen_dirty.store(true, Ordering::Relaxed);
+        self.flush_last_seen();
     }
     pub fn set_cookie_header(&self, value: &str) -> String {
         format!("{COOKIE}={value}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={COOKIE_MAX_AGE_S}")
@@ -263,6 +405,15 @@ fn now_ms() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(0))
 }
 
+/// The devices file's devices: none when there is no file yet.
+fn read_devices(file: &Path) -> Result<Vec<Device>, ConfigError> {
+    match fs::read(file) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn save_devices(file: &Path, devices: &[Device]) -> Result<(), ConfigError> {
     let data = serde_json::to_string_pretty(devices)?;
     write_file_atomic(file, data.as_bytes(), 0o600)
@@ -273,18 +424,18 @@ fn write_pairing(file: &Path, state: &PairingState) -> Result<(), ConfigError> {
     write_file_atomic(file, &data, 0o600)
 }
 
-/// Strips control characters, keeps 60 characters, and falls back to "Device".
+/// A device name as Briardr keeps it: control characters removed (`briardr devices` prints it to a
+/// terminal), trimmed, at most 60 characters. None when nothing is left.
+pub fn device_name(name: &str) -> Option<String> {
+    let kept: String = name.chars().filter(|c| !c.is_control()).collect();
+    let cut: String = kept.trim().chars().take(60).collect();
+    let cut = cut.trim_end();
+    (!cut.is_empty()).then(|| cut.to_string())
+}
+
+/// `device_name`, falling back to "Device".
 fn clean_name(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .filter(|c| !matches!(c, '\u{0}'..='\u{1f}'))
-        .take(60)
-        .collect();
-    if cleaned.is_empty() {
-        "Device".to_string()
-    } else {
-        cleaned
-    }
+    device_name(name).unwrap_or_else(|| "Device".to_string())
 }
 
 pub fn normalize_code(code: &str) -> String {
@@ -457,6 +608,126 @@ mod tests {
         assert!(!auth.revoke(&device.id).unwrap());
         assert_eq!(auth.authenticate(Some(&header)), None);
         assert_eq!(revoked.try_recv().ok(), Some(device.id.clone()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_device_revoked_by_another_process_is_signed_out_and_stays_out() {
+        let dir = Scratch::new("auth-other-process");
+        let server = auth_in(&dir);
+        let mut revoked = server.subscribe_revoked();
+        let (code, _) = server.create_pairing_code();
+        let (lost, cookie) = server
+            .pair(&code, "Lost phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let (code, _) = server.create_pairing_code();
+        let (kept, _) = server
+            .pair(&code, "Laptop", "client-b")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let header = format!("__Host-briardr={cookie}");
+        assert!(server.authenticate(Some(&header)).is_some());
+
+        // `briardr revoke` while the server runs: another process, with an Auth of its own.
+        assert!(auth_in(&dir).revoke(&lost.id).unwrap());
+        assert_eq!(server.authenticate(Some(&header)), None);
+        assert_eq!(revoked.try_recv().ok(), Some(lost.id.clone()));
+        assert_eq!(server.list().len(), 1);
+
+        // The server's later saves (last-seen times, a rename) don't bring it back.
+        server.last_seen_dirty.store(true, Ordering::Relaxed);
+        server.flush_last_seen();
+        assert!(server.rename(&kept.id, "Work laptop").unwrap());
+        assert!(!server.revoke(&lost.id).unwrap());
+        let on_disk: Vec<String> = auth_in(&dir).list().into_iter().map(|d| d.id).collect();
+        assert_eq!(on_disk, vec![kept.id.clone()]);
+        assert_eq!(server.authenticate(Some(&header)), None);
+        assert!(revoked.try_recv().is_err(), "signed out once");
+    }
+
+    #[test]
+    fn saved_last_seen_times_keep_what_another_process_changed() {
+        let dir = Scratch::new("auth-merge");
+        let server = auth_in(&dir);
+        let (code, _) = server.create_pairing_code();
+        let (device, cookie) = server
+            .pair(&code, "Phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let seen = Some(now_ms() + 60_000);
+        server.lock().list[0].last_seen_at = seen;
+        server.last_seen_dirty.store(true, Ordering::Relaxed);
+
+        assert!(auth_in(&dir).rename(&device.id, "Renamed").unwrap());
+        server.flush_last_seen();
+        let on_disk = auth_in(&dir).list();
+        assert_eq!(on_disk[0].name, "Renamed");
+        assert_eq!(on_disk[0].last_seen_at, seen);
+        let header = format!("__Host-briardr={cookie}");
+        assert_eq!(
+            server.authenticate(Some(&header)).map(|d| d.name),
+            Some("Renamed".to_string())
+        );
+    }
+
+    #[test]
+    fn a_devices_file_that_cant_be_read_changes_nothing() {
+        let dir = Scratch::new("auth-unreadable");
+        let server = auth_in(&dir);
+        let (code, _) = server.create_pairing_code();
+        let (device, cookie) = server
+            .pair(&code, "Phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let header = format!("__Host-briardr={cookie}");
+        fs::write(dir.join("devices.json"), "[{\"id\":").unwrap();
+
+        // Neither signed out on a guess nor saved over: it waits for a file it can read.
+        assert!(server.authenticate(Some(&header)).is_some());
+        assert!(server.revoke(&device.id).is_err());
+        assert!(auth_in(&dir).revoke(&device.id).is_err());
+        assert_eq!(
+            fs::read_to_string(dir.join("devices.json")).unwrap(),
+            "[{\"id\":"
+        );
+        fs::remove_file(dir.join("devices.json")).unwrap();
+        assert_eq!(
+            server.authenticate(Some(&header)),
+            None,
+            "no file, no devices"
+        );
+    }
+
+    #[test]
+    fn device_names_lose_controls_and_spaces_and_stop_at_60() {
+        assert_eq!(
+            device_name(" Work\u{7}\u{7f}\u{9b} phone\n"),
+            Some("Work phone".into())
+        );
+        assert_eq!(device_name(&"é".repeat(70)), Some("é".repeat(60)));
+        assert_eq!(
+            device_name(&format!("{} x", "a".repeat(59))),
+            Some("a".repeat(59))
+        );
+        assert_eq!(device_name(" \u{1b}\t "), None);
+        assert_eq!(clean_name(""), "Device");
+    }
+
+    #[test]
+    fn rename_keeps_the_device_signed_in_and_survives_a_restart() {
+        let dir = Scratch::new("auth-rename");
+        let auth = auth_in(&dir);
+        let (code, _) = auth.create_pairing_code();
+        let (device, cookie) = auth
+            .pair(&code, "Phone", "client-a")
+            .unwrap_or_else(|e| panic!("pair failed: {e:?}"));
+        let header = format!("__Host-briardr={cookie}");
+
+        assert!(auth.rename(&device.id, "Work\u{7} phone").unwrap());
+        assert!(!auth.rename("no-such-device", "x").unwrap());
+        assert_eq!(auth.list()[0].name, "Work phone");
+        assert_eq!(
+            auth.authenticate(Some(&header)).map(|d| d.name),
+            Some("Work phone".to_string())
+        );
+        assert_eq!(auth_in(&dir).list()[0].name, "Work phone");
         let _ = fs::remove_dir_all(&dir);
     }
 

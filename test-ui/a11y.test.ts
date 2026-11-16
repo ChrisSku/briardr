@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
 import { devices, webkit, type Browser, type Page } from 'playwright';
-import { closeWorkspace, herdr, startServer, testPane, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, holdTitle, startServer, testPane, type TestServer } from '../test/helpers.ts';
 
 const axeSource = fs.readFileSync(path.resolve('node_modules/axe-core/axe.min.js'), 'utf8');
 let s: TestServer;
@@ -17,6 +17,8 @@ beforeAll(async () => {
   ws = testPane('briardr-a11y');
   herdr('pane', 'rename', ws.pane, 'a11y target');
   herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-a11y', '--agent', 'claude', '--state', 'blocked');
+  // What it says it's doing: its rows' task line is checked too.
+  holdTitle(ws.pane, 'Checking the docs');
   fs.writeFileSync(path.join(ws.dir, 'README.md'), '# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n- [x] done\n\n```mermaid\nflowchart LR\n  A --> B\n```\n');
   await s.run.herdr.refresh();
   browser = await webkit.launch();
@@ -51,9 +53,9 @@ for (const profile of ['iphone', 'mac'] as const)
         await page.getByLabel('Pairing code').fill(s.run.auth.createPairingCode().code);
         await page.getByRole('button', { name: 'Sign in' }).click();
         await page.waitForSelector('.count-strip');
-        await page.waitForSelector('.stream-row');
+        await page.waitForSelector('.stream-row .row-task');
         problems.push(...(await audit(page, 'agents')));
-        for (const [p, sel] of [['/workspaces', '.tree'], ['/usage', '.usage-card'], ['/settings', '.set-group'], ['/settings/notifications', '#set-notifications']] as const) {
+        for (const [p, sel] of [['/workspaces', '.tree'], ['/usage', '.usage-card'], ['/settings', '.set-group'], ['/settings/notifications', '#set-notifications'], ['/settings/appearance', '#set-appearance']] as const) {
           await page.goto(s.base + p);
           await page.waitForSelector(sel);
           await page.waitForTimeout(400);

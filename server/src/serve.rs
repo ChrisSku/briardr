@@ -277,11 +277,25 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         (None, Some(dns)) => format!("https://{dns}"),
         (None, None) => public_origin.clone(),
     };
-    let push = Arc::new(
-        Push::new(&paths.vapid(), paths.push_subs(), subject, diag.clone())
-            .map_err(|e| ServeError::Other(e.to_string()))?,
-    );
     let cell = Arc::new(ConfigCell::new(cfg.clone(), paths.clone()));
+    let push = {
+        // Devices follow the host's alert settings where they didn't choose.
+        let c = cell.clone();
+        Arc::new(
+            Push::new(
+                &paths.vapid(),
+                paths.push_subs(),
+                paths.device_alerts(),
+                subject,
+                Arc::new(move || c.get().notifications),
+                diag.clone(),
+            )
+            .map_err(|e| ServeError::Other(e.to_string()))?,
+        )
+    };
+    // A device revoked while Briardr wasn't running (`briardr revoke`) gets no more alerts.
+    let paired: HashSet<String> = auth.list().into_iter().map(|d| d.id).collect();
+    let _ = push.forget_unpaired(&paired);
     let tap = StatuslineTap::new(
         PathBuf::from(cfg.usage.claude_config_dir.clone().unwrap_or_default()),
         paths.state(),
@@ -343,6 +357,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         allowed_hosts: Arc::new(RwLock::new(
             hostnames.iter().cloned().collect::<HashSet<_>>(),
         )),
+        public_origin: public_origin.clone(),
         dictation_helper,
         ca_profile,
         tls_mode: tls_mode.clone(),
@@ -453,6 +468,16 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             tick.tick().await;
             let a = auth_flush.clone();
             let _ = tokio::task::spawn_blocking(move || a.flush_last_seen()).await;
+        }
+    }));
+    // A device revoked with `briardr revoke` can't sign in from the next request on; this closes its
+    // live connections and stops its alerts as well, within a second.
+    let auth_reload = auth.clone();
+    timers.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            auth_reload.reload();
         }
     }));
 

@@ -65,6 +65,19 @@ for (const profile of ['iphone', 'mac'] as const) {
       assert.equal(await input.inputValue(), '');
       assert.equal(await src.getAttribute('aria-expanded'), 'true');
       await page.getByRole('button', { name: 'needle.ts', exact: true }).waitFor();
+      // The same words inside files: a line opens its file there, picked.
+      await input.fill('Needle Appears');
+      await page.getByText('No matching files', { exact: true }).waitFor();
+      await page.getByRole('group', { name: 'Search in' }).getByRole('button', { name: 'Contents' }).click();
+      await page.getByRole('status').filter({ hasText: '1 line found' }).waitFor();
+      await page.getByRole('button', { name: 'other.txt, line 1: needle appears only in the contents' }).click();
+      await page.locator('.code').filter({ hasText: 'needle appears only in the contents' }).waitFor();
+      await page.locator('.fv-sel-label', { hasText: 'Line 1' }).waitFor();
+      assert.equal(await page.locator('.code .cl.is-sel').count(), 1);
+      if (profile === 'iphone') await page.getByRole('button', { name: 'Back to folder' }).click();
+      await page.getByRole('searchbox', { name: 'Search in files' }).fill('nothing contains this');
+      await page.getByText('No matching lines', { exact: true }).waitFor();
+      await page.getByRole('group', { name: 'Search in' }).getByRole('button', { name: 'Names' }).click();
       await input.fill('no-such-filename');
       await page.getByText('No matching files', { exact: true }).waitFor();
       await input.press('Escape');

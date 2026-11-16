@@ -17,9 +17,11 @@ import { anon, networkKind, record } from '../diag.ts';
 import { idbGet, idbSet, type CachedScreen } from '../idb.ts';
 import { viewportInset } from '../keyboard.svelte.ts';
 import { PROTOCOL } from '../live.ts';
-import { activeMods, applyModsToText, consumeMods, fromKeyEvent, type Outgoing } from './keys.ts';
+import { applyModsToText, fromKeyEvent, type Outgoing } from './keys.ts';
 import { linkAt, registerLinkProvider } from './links.ts';
+import { activeMods, consumeMods } from './mods.ts';
 import { theHost, TheHost } from '../host.ts';
+import { onThemeChange } from '../theme.ts';
 import { deferUpdatesWhile } from '../updates.ts';
 
 // An update doesn't reload the app out from under someone typing in a terminal (web/src/updates.ts).
@@ -55,15 +57,16 @@ const PING_EVERY = 10_000;
 const PONG_DEADLINE = 5_000;
 const RESIZE_DEBOUNCE = 250;
 
-/** xterm's colours: the --term-* tokens in styles.css (xterm needs the values themselves). */
-export function themeFor(dark: boolean): ITheme {
-  return dark
-    ? { background: '#0a0a09', foreground: '#e7e3de', cursor: '#e7e3de', cursorAccent: '#0a0a09', selectionBackground: '#3a4a6b',
-        black: '#1c1c1e', red: '#ff6b61', green: '#6edc9a', yellow: '#f2c46b', blue: '#7ab2ff', magenta: '#d7a1f5', cyan: '#64d2ff', white: '#d1d1d6',
-        brightBlack: '#6e6e73', brightRed: '#ff8a80', brightGreen: '#7ee787', brightYellow: '#ffe066', brightBlue: '#8cbcff', brightMagenta: '#e5aaff', brightCyan: '#8fe3ff', brightWhite: '#ffffff' }
-    : { background: '#ffffff', foreground: '#1c1917', cursor: '#1c1917', cursorAccent: '#ffffff', selectionBackground: '#b4d2ff',
-        black: '#1c1917', red: '#c9372c', green: '#18794a', yellow: '#9a5800', blue: '#1d5fd1', magenta: '#8e3fb8', cyan: '#0b7285', white: '#d1d1d6',
-        brightBlack: '#6e6e73', brightRed: '#e0453a', brightGreen: '#2a9d48', brightYellow: '#b07800', brightBlue: '#2f7bf0', brightMagenta: '#a352d6', brightCyan: '#1491a8', brightWhite: '#ffffff' };
+/** xterm's colours for the page's theme now: the --term-* tokens in styles.css, which xterm can't read itself. */
+function terminalTheme(): ITheme {
+  const styles = getComputedStyle(document.documentElement);
+  const c = (name: string) => styles.getPropertyValue(`--term-${name}`).trim();
+  return {
+    background: c('bg'), foreground: c('fg'), cursor: c('fg'), cursorAccent: c('bg'), selectionBackground: c('selection'),
+    black: c('black'), red: c('red'), green: c('green'), yellow: c('yellow'), blue: c('blue'), magenta: c('magenta'), cyan: c('cyan'), white: c('white'),
+    brightBlack: c('bright-black'), brightRed: c('bright-red'), brightGreen: c('bright-green'), brightYellow: c('bright-yellow'),
+    brightBlue: c('bright-blue'), brightMagenta: c('bright-magenta'), brightCyan: c('bright-cyan'), brightWhite: c('bright-white'),
+  };
 }
 
 export interface ControllerOptions {
@@ -110,8 +113,7 @@ export class TerminalController {
   private programMouse = false;
   private webgl: WebglAddon | null = null;
   private desired = { cols: 80, rows: 24 };
-  private scheme = matchMedia('(prefers-color-scheme: dark)');
-  private onScheme = (e: MediaQueryListEvent) => (this.term.options.theme = themeFor(e.matches));
+  private themeOff: () => void;
 
   constructor(opts: ControllerOptions) {
     this.opts = opts;
@@ -128,7 +130,7 @@ export class TerminalController {
       disableStdin: opts.mode === 'observe',
       screenReaderMode: opts.screenReader,
       macOptionIsMeta: false,
-      theme: themeFor(this.scheme.matches),
+      theme: terminalTheme(),
       linkHandler: {
         activate: (_e, uri) => this.opts.onLink(uri),
         allowNonHttpProtocols: false,
@@ -137,8 +139,8 @@ export class TerminalController {
     this.term.loadAddon(this.serialize);
     this.term.loadAddon(new Unicode11Addon());
     this.term.unicode.activeVersion = '11';
-    // Removed in dispose(): a listener left on the media query keeps the whole terminal reachable.
-    this.scheme.addEventListener('change', this.onScheme);
+    // Removed in dispose(): a listener left on the theme keeps the whole terminal reachable.
+    this.themeOff = onThemeChange(() => (this.term.options.theme = terminalTheme()));
 
     // Typed text (on-screen keyboard or hardware keyboard) arrives here, and so do the terminal's own
     // replies to the program's queries. xterm marks typing just before (a private event); without
@@ -463,7 +465,7 @@ export class TerminalController {
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.saveNow();
       this.netOff?.();
-      this.scheme.removeEventListener('change', this.onScheme);
+      this.themeOff();
       this.resizeObs?.disconnect();
       this.webgl?.dispose();
       this.term.dispose();

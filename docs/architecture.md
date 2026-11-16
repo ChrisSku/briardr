@@ -22,7 +22,7 @@ views and actions around them.
 | `native/transcribe.swift` | Optional macOS on-device speech transcription helper. |
 | `scripts/` | Bun build tooling, release packaging, Linux installation, deployment smoke tests, and optional Mac power setup. |
 | `deploy/versions.env` | The Herdr, Caddy and Ubuntu versions Briardr installs, and the herdr-core it is tested with, with checksums. |
-| `test/`, `test-ui/`, `server/tests/` | Integration, WebKit UI, and Rust fixture tests. Rust unit tests also live beside implementation modules. |
+| `test/`, `test-ui/`, `server/tests/` | Integration and client unit tests, WebKit UI tests, and Rust fixture tests. Rust unit tests also live beside implementation modules. |
 | `bench/` | Performance and comparison tooling. |
 | `site/` | The [briardr.dev](https://briardr.dev) website, published by the Pages workflow. |
 

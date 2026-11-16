@@ -2,6 +2,7 @@
 export { default as AsOf } from './AsOf.svelte';
 export { default as Empty } from './Empty.svelte';
 export { default as Sheet } from './Sheet.svelte';
+export { default as PromptSheet } from './PromptSheet.svelte';
 export { default as StateBadge } from './StateBadge.svelte';
 export { default as ConfirmHost } from './ConfirmHost.svelte';
 export { default as MenuHost } from './MenuHost.svelte';
