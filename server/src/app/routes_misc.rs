@@ -5,12 +5,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::http::Method;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
     action_err, caps_json, js_number, js_truthy, json_body, json_body_as, lock, now_ms, ok,
     response, send, str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
 };
+use crate::config::BriardrConfig;
 use crate::herdr::backend::Target;
 use crate::herdr::core::state::CoreTarget;
 use crate::herdr::rpc::{herdr_status, HerdrTarget};
@@ -43,6 +45,70 @@ fn js_number_of(v: Option<&Value>) -> f64 {
 /// A boolean field of a JSON object, if it is one.
 fn bool_field(v: &Value, key: &str) -> Option<bool> {
     v.get(key).and_then(Value::as_bool)
+}
+
+/// What `PUT /api/settings` changes. A setting left out (or `null`) stays as it is.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct SettingsChange {
+    herdr_backend: Option<String>,
+    herdr_path: Option<String>,
+    notifications: Option<NotificationsChange>,
+    usage: Option<UsageChange>,
+    updates: Option<UpdatesChange>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct NotificationsChange {
+    include_names: Option<bool>,
+    needs_you: Option<bool>,
+    finished: Option<bool>,
+    ready: Option<bool>,
+    low_battery: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct UsageChange {
+    claude_keychain_opt_in: Option<bool>,
+    codex_enabled: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct UpdatesChange {
+    check: Option<bool>,
+}
+
+impl SettingsChange {
+    /// Made both to config.json and to the running configuration (`ConfigCell::change`).
+    fn apply(&self, cfg: &mut BriardrConfig) {
+        fn set<T: Clone>(setting: &mut T, change: &Option<T>) {
+            if let Some(value) = change {
+                *setting = value.clone();
+            }
+        }
+        set(&mut cfg.herdr_backend, &self.herdr_backend);
+        set(&mut cfg.herdr_path, &self.herdr_path);
+        if let Some(n) = &self.notifications {
+            set(&mut cfg.notifications.include_names, &n.include_names);
+            set(&mut cfg.notifications.needs_you, &n.needs_you);
+            set(&mut cfg.notifications.finished, &n.finished);
+            set(&mut cfg.notifications.ready, &n.ready);
+            set(&mut cfg.notifications.low_battery, &n.low_battery);
+        }
+        if let Some(u) = &self.usage {
+            set(
+                &mut cfg.usage.claude_keychain_opt_in,
+                &u.claude_keychain_opt_in,
+            );
+            set(&mut cfg.usage.codex_enabled, &u.codex_enabled);
+        }
+        if let Some(u) = &self.updates {
+            set(&mut cfg.updates.check, &u.check);
+        }
+    }
 }
 
 /// A string at a path in a JSON body, or "" when absent (the subscription check refuses "").
@@ -407,10 +473,8 @@ pub(super) fn register(r: &mut Routes) {
             let b = json_body(&mut ctx, 4096).await?;
             let on = b.get("on").is_some_and(js_truthy);
             let _change = app.d.cfg.lock_changes().await;
-            let mut cfg = app.cfg();
-            cfg.power.keep_awake = on;
             let cell = app.d.cfg.clone();
-            blocking(move || cell.set(cfg)).await??;
+            blocking(move || cell.change(|c| c.power.keep_awake = on)).await??;
             let power = app.d.power.clone();
             let now = now_ms();
             blocking(move || lock(&power).set_keep_awake(on, now)).await?;
@@ -467,23 +531,24 @@ pub(super) fn register(r: &mut Routes) {
         "/api/settings",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let mut change: SettingsChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
             let _change = app.d.cfg.lock_changes().await;
-            let mut cfg = app.cfg();
+            let cfg = app.cfg();
             let before = Target::of(&cfg);
-            if let Some(raw) = b.get("herdrBackend").and_then(Value::as_str) {
-                if !matches!(raw, "tui" | "core") {
-                    return Err(action_err(
-                        400,
-                        "invalid_backend",
-                        "Choose Herdr TUI or herdr-core.",
-                    ));
-                }
-                cfg.herdr_backend = raw.to_string();
+            if change
+                .herdr_backend
+                .as_deref()
+                .is_some_and(|b| !matches!(b, "tui" | "core"))
+            {
+                return Err(action_err(
+                    400,
+                    "invalid_backend",
+                    "Choose Herdr TUI or herdr-core.",
+                ));
             }
-            if let Some(raw) = b.get("herdrPath").and_then(Value::as_str) {
-                let path = raw.trim().to_string();
-                if !Path::new(&path).is_absolute() {
+            if let Some(path) = &mut change.herdr_path {
+                *path = path.trim().to_string();
+                if !Path::new(path).is_absolute() {
                     return Err(action_err(
                         400,
                         "invalid_path",
@@ -498,46 +563,18 @@ pub(super) fn register(r: &mut Routes) {
                 if st.problem.as_deref() == Some("not_found") {
                     return Err(action_err(400, "not_found", "No executable at that path."));
                 }
-                cfg.herdr_path = path;
             }
-            if let Some(n) = b.get("notifications").filter(|v| v.is_object()) {
-                if bool_field(n, "lowBattery") == Some(true) && !app.d.caps.battery {
-                    return Err(app.unsupported("Low-battery notifications"));
-                }
-                if let Some(v) = bool_field(n, "includeNames") {
-                    cfg.notifications.include_names = v;
-                }
-                if let Some(v) = bool_field(n, "needsYou") {
-                    cfg.notifications.needs_you = v;
-                }
-                if let Some(v) = bool_field(n, "finished") {
-                    cfg.notifications.finished = v;
-                }
-                if let Some(v) = bool_field(n, "ready") {
-                    cfg.notifications.ready = v;
-                }
-                if let Some(v) = bool_field(n, "lowBattery") {
-                    cfg.notifications.low_battery = v;
-                }
+            let low_battery = change.notifications.as_ref().and_then(|n| n.low_battery);
+            if low_battery == Some(true) && !app.d.caps.battery {
+                return Err(app.unsupported("Low-battery notifications"));
             }
-            if let Some(u) = b.get("usage").filter(|v| v.is_object()) {
-                if bool_field(u, "claudeKeychainOptIn") == Some(true) && !app.d.caps.claude_keychain
-                {
-                    return Err(app.unsupported("Reading Claude Code’s sign-in from the Keychain"));
-                }
-                if let Some(v) = bool_field(u, "claudeKeychainOptIn") {
-                    cfg.usage.claude_keychain_opt_in = v;
-                }
-                if let Some(v) = bool_field(u, "codexEnabled") {
-                    cfg.usage.codex_enabled = v;
-                }
+            let keychain = change.usage.as_ref().and_then(|u| u.claude_keychain_opt_in);
+            if keychain == Some(true) && !app.d.caps.claude_keychain {
+                return Err(app.unsupported("Reading Claude Code’s sign-in from the Keychain"));
             }
-            if let Some(v) = b.get("updates").and_then(|u| bool_field(u, "check")) {
-                cfg.updates.check = v;
-            }
-            let after = Target::of(&cfg);
             let cell = app.d.cfg.clone();
-            blocking(move || cell.set(cfg)).await??;
+            let after = blocking(move || cell.change(|c| change.apply(c))).await??;
+            let after = Target::of(&after);
             if after != before {
                 app.d.herdr.retarget(after).await;
                 // Open streams are the other Herdr's: their screens are told they're gone.
