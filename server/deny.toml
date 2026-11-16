@@ -1,0 +1,32 @@
+# cargo-deny's checks of the crates in Cargo.lock (https://embarkstudios.github.io/cargo-deny/).
+# `mise run deps:check` checks the licenses, the sources and duplicate versions, with every other check (CI
+# and the pre-push hook). `mise run deps:audit` checks RustSec's advisories, in a workflow of its own
+# (.github/workflows/audit.yml): they're published at any time, about code that hasn't changed.
+
+[graph]
+# The platforms Briardr is released for (scripts/package.ts): crates only Windows, Android or WebAssembly
+# builds use aren't checked.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+
+[advisories]
+# cargo-deny's defaults: a vulnerability or an unmaintained crate fails the check, and so does an unsound
+# crate the server depends on directly; a yanked version only warns. An advisory with no fixed version yet
+# can be ignored here, with the reason:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "…" }]
+
+[licenses]
+# The licenses of the crates built into the server today, each permissive and compatible with Briardr's
+# MIT license (their texts go into the release's THIRD-PARTY-NOTICES.txt). A crate under any other
+# license fails the check until its license is reviewed and added here, or allowed for that crate alone
+# (`exceptions`).
+allow = ["MIT", "Apache-2.0", "ISC", "BSD-3-Clause", "Unicode-3.0", "Zlib"]
+
+[bans]
+# Two versions of one crate, while the ecosystem moves to a new major version, are reported, not failed:
+# the tree has several.
+multiple-versions = "warn"
+
+[sources]
+# crates.io only (cargo-deny's default allow-registry): a git dependency or another registry fails.
+unknown-registry = "deny"
+unknown-git = "deny"

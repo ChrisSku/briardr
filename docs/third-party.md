@@ -19,7 +19,9 @@ dependencies, tools, or separately installed software.
 This is a project map, not a complete dependency notice bundle. Exact resolved versions are recorded
 in `bun.lock` and `server/Cargo.lock`. The [release archives](development.md#release-archives) carry
 `THIRD-PARTY-NOTICES.txt`: the license, copyright and NOTICE files of every Rust crate built into the
-server and every npm package bundled into the web client, collected by `scripts/package.ts`. Before
+server and every npm package bundled into the web client, collected by `scripts/package.ts`. Every change
+is checked against the licenses the crates may have, in [`server/deny.toml`](../server/deny.toml)
+(`mise run deps:check`). Before
 distributing compiled binaries, bundled web assets, or images any other way, inspect the resolved
 dependency licenses and include the notices required by those licenses.
 
