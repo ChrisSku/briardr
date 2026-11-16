@@ -130,7 +130,11 @@ CI then tests it on Linux.
 
 The `test-hooks` Cargo feature adds `/__test/*` endpoints. At runtime they also require
 `BRIARDR_TEST_HOOKS=1` and a loopback peer. Build deployed binaries with `mise run build:server`
-without this feature; a reverse proxy is itself a loopback peer.
+without this feature; a reverse proxy is itself a loopback peer. With the hooks on, the battery, Always
+on and Sleep Mac run on a fake Mac on its power adapter instead of `pmset`, `caffeinate` and `sudo`, so
+no test depends on the battery or sleep settings of the machine running it, or changes them. A test
+sets that Mac's battery with `run.power.battery` (`POST /__test/power`); servers a test starts itself
+get the hooks from `serverEnv` in `test/helpers.ts`.
 
 For a dedicated test deployment, [`scripts/smoke-deployment.ts`](../scripts/smoke-deployment.ts)
 exercises pairing, terminals, uploads, notes, Git changes, docs, previews, and an optional Briardr

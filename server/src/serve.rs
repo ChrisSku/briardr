@@ -23,7 +23,7 @@ use crate::monitor::{AlertSink, Monitor};
 use crate::net::{listen_addresses, missing_local_addresses, tailscale_info, TailscaleInfo};
 use crate::notes::Notes;
 use crate::platform::{capabilities, host_platform};
-use crate::power::Power;
+use crate::power::{Host, Power, SystemHost};
 use crate::preview::Previews;
 use crate::push::Push;
 use crate::terminal_hub::TerminalHub;
@@ -104,6 +104,15 @@ fn uuid_upper() -> String {
         &h[16..20],
         &h[20..32]
     )
+}
+
+/// The commands behind the battery, Always on and Sleep: this machine's, except under the test hooks.
+fn power_host() -> Box<dyn Host> {
+    #[cfg(feature = "test-hooks")]
+    if let Some(host) = crate::test_hooks::power_host() {
+        return host;
+    }
+    Box::new(SystemHost)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -261,10 +270,11 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
     let host = the_host(&caps);
     let actions = Arc::new(Actions::new(herdr.clone(), host.clone()));
     let hub = Arc::new(TerminalHub::new(herdr.clone(), diag.clone(), host.clone()));
-    let power = Arc::new(Mutex::new(Power::system(
+    let power = Arc::new(Mutex::new(Power::new(
         paths.power_state(),
         caps.clone(),
         diag.clone(),
+        power_host(),
     )));
     let public_origin = crate::public_origin_of(&cfg, ts.dns_name.as_deref())?;
     // The VAPID subject. Apple's push service rejects made-up domains (mailto:…@localhost.localdomain,
