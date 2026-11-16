@@ -1,6 +1,7 @@
 // Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory (uploads
 // too) and the test run's own Herdr session, or herdr-cores of its own. Nothing here touches the developer's
-// real panes or terminals, and runs in parallel (other worktrees, other agents) don't share anything.
+// real panes or terminals, or reads the Mac's battery, and runs in parallel (other worktrees, other agents)
+// don't share anything.
 // The binary is `BRIARDR_SERVER_BIN`, else server/target/debug/briardr (`mise run build:test-server`): a build
 // with the loopback test hooks (/__test/*), which stand in for reaching into the server from a test.
 import { execFileSync, spawn } from 'node:child_process';
@@ -253,7 +254,27 @@ export interface Running {
   app: { listRoutes(): { method: string; pattern: string; public: boolean }[]; d: { previews: { open(device: string, port: number): Promise<any> } } };
   push: { sendImpl: (sub: unknown, body: string, opts: object) => unknown; readonly subject: string };
   hub: { readonly sent: unknown[]; readonly controllers: number };
+  /** The fake Mac's battery from now on: charging on the power adapter (`ac`), else on battery. The server
+   *  reads it at its next poll (GET /api/mac polls). */
+  power: { battery(percent: number, ac: boolean): void };
   readonly urls: string[];
+}
+
+/** The environment of a server under test (`briardr serve`), for tests that start their own: this run's data
+ *  and uploads folders, ports and Herdr session, and the test hooks. With the hooks on, the server runs on a
+ *  fake Mac on its power adapter (`run.power`), never this machine's battery and sleep settings. */
+export function serverEnv(dataDir: string, port: number): NodeJS.ProcessEnv {
+  return {
+    ...scrubbed(),
+    BRIARDR_DATA_DIR: dataDir,
+    BRIARDR_UPLOADS_DIR: path.join(dataDir, 'briardr-uploads'), // not the shared one in the temp directory
+    BRIARDR_HERDR_SESSION: SESSION,
+    BRIARDR_PORT: String(port),
+    BRIARDR_PREVIEW_PORT: String(port + 1),
+    BRIARDR_LISTEN: '',
+    BRIARDR_NO_DICTATION: '1',
+    BRIARDR_TEST_HOOKS: '1',
+  };
 }
 
 /** `config`: written to config.json first (e.g. proxy mode). `files`: more files written first, by path in
@@ -277,17 +298,7 @@ async function startBinary(bin: string, opts: ServerOptions): Promise<TestServer
     fs.writeFileSync(path.join(dataDir, file), text);
   }
   const port = await freePort();
-  const env: NodeJS.ProcessEnv = {
-    ...scrubbed(),
-    BRIARDR_DATA_DIR: dataDir,
-    BRIARDR_UPLOADS_DIR: path.join(dataDir, 'briardr-uploads'), // not the shared one in the temp directory
-    BRIARDR_HERDR_SESSION: SESSION,
-    BRIARDR_PORT: String(port),
-    BRIARDR_PREVIEW_PORT: String(port + 1),
-    BRIARDR_LISTEN: '',
-    BRIARDR_NO_DICTATION: '1',
-    BRIARDR_TEST_HOOKS: '1',
-  };
+  const env = serverEnv(dataDir, port);
   if (opts.platform) env.BRIARDR_PLATFORM = opts.platform;
   Object.assign(env, opts.env);
   const child = spawn(bin, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -393,6 +404,11 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
       /** Control connections open, or closed but not yet given back to Herdr. */
       get controllers() {
         return hook('GET', '/hub/controllers');
+      },
+    },
+    power: {
+      battery: (percent: number, ac: boolean) => {
+        if (!hook('POST', '/power', { percent, ac }).ok) throw new Error('the fake Mac took no battery');
       },
     },
     get urls(): string[] {

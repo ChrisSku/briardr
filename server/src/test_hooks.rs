@@ -10,14 +10,18 @@
 //   GET  /__test/push/sent                    → [plaintext payload JSON, …]
 //   GET  /__test/push/subject                 → the VAPID subject
 //   POST /__test/previews/open {device, port} → the `previews.open` result
+//   POST /__test/power {percent, ac}          → {ok}: the fake Mac's battery from now on (`power_host`)
 //   GET  /__test/urls                         → the listen URLs
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::body::Body;
 use axum::http::{Method, Request};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::app::{read_body, send, App, Resp};
+use crate::power::fake::{batt, world, FakeHost, Shared};
+use crate::power::Host;
 use crate::push::{PushSub, SendFuture, SendOpts, Sender};
 
 pub fn enabled() -> bool {
@@ -28,9 +32,30 @@ pub fn enabled() -> bool {
 
 static URLS: OnceLock<Vec<String>> = OnceLock::new();
 static PUSHED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static POWER: OnceLock<Shared> = OnceLock::new();
 
 pub fn set_urls(urls: Vec<String>) {
     let _ = URLS.set(urls);
+}
+
+/// The Mac a server under test runs on: on its power adapter at 80%, with the sudoers rule for Always on.
+fn power() -> &'static Shared {
+    POWER.get_or_init(|| world(batt(80, true), "SleepDisabled\t0\n", true))
+}
+
+/// With the hooks on, the battery, Always on and Sleep run on that fake Mac instead of this machine's
+/// pmset, caffeinate and sudo: no test depends on the battery or sleep settings of the machine running it
+/// (a low battery once sent a test's new subscription an extra alert), and none changes them.
+pub fn power_host() -> Option<Box<dyn Host>> {
+    enabled().then(|| Box::new(FakeHost(power().clone())) as Box<dyn Host>)
+}
+
+/// `POST /__test/power`.
+#[derive(Deserialize)]
+struct SetBattery {
+    percent: u32,
+    /// Charging on the power adapter, else discharging on battery.
+    ac: bool,
 }
 
 fn is_loopback(peer: Option<&str>) -> bool {
@@ -144,6 +169,13 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
                 _ => json!({"ok": false, "error": "invalid_port"}),
             }
         }
+        (Method::POST, "/power") => match serde_json::from_value::<SetBattery>(body) {
+            Ok(b) => {
+                power().lock().unwrap_or_else(|e| e.into_inner()).batt = batt(b.percent, b.ac);
+                json!({"ok": true})
+            }
+            Err(_) => json!({"ok": false, "error": "invalid"}),
+        },
         (Method::GET, "/urls") => json!(URLS.get().cloned().unwrap_or_default()),
         _ => return send(404, &json!({"error": "not_found"}), &[]),
     };

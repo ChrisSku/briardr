@@ -2,8 +2,9 @@
 // sleep, and Sleep Mac. On other hosts nothing is run: the summary carries the host name only.
 //
 // The controller takes time as a `now` argument (ms) and has no timers of its own. The server calls
-// `poll` every 60 s, `tick` every 5 s, and `release` on exit. Commands go through `Host`, so
-// tests never touch the Mac's real sleep settings.
+// `poll` every 60 s, `tick` every 5 s, and `release` on exit. Commands go through `Host`: the unit
+// tests and the servers under test run on `fake`, so no test reads the Mac's real battery or touches
+// its sleep settings.
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
@@ -169,7 +170,7 @@ pub trait Hold: Send {
     fn stop(&mut self);
 }
 
-/// The real commands. Tests use a fake `Host` instead.
+/// The real commands. Tests use `fake::FakeHost` instead.
 pub struct SystemHost;
 
 impl Host for SystemHost {
@@ -591,11 +592,6 @@ impl Power {
         }
     }
 
-    /// A controller that runs the real commands.
-    pub fn system(state_file: PathBuf, caps: HostCapabilities, diag: Arc<Diagnostics>) -> Self {
-        Self::new(state_file, caps, diag, Box::new(SystemHost))
-    }
-
     /// Whether this host has any power integration at all.
     pub fn supported(&self) -> bool {
         self.caps.battery || self.caps.keep_awake || self.caps.sleep
@@ -922,13 +918,114 @@ impl Power {
     }
 }
 
+/// A Mac in memory, for the unit tests and the servers under test (`test_hooks::power_host`): `pmset`
+/// says what the `World` holds, and every command is recorded instead of run.
+#[cfg(any(test, feature = "test-hooks"))]
+pub mod fake {
+    use std::sync::{Arc, Mutex, MutexGuard};
+
+    use super::{Hold, Host};
+
+    pub struct World {
+        pub batt: String,
+        pub asserts: String,
+        pub settings: String,
+        pub sudo_ok: bool,
+        pub name: String,
+        pub calls: Vec<String>,
+    }
+
+    pub type Shared = Arc<Mutex<World>>;
+
+    /// A Mac called Studio that nothing else holds awake, with `pmset -g batt` saying `batt` and
+    /// `pmset -g` saying `settings`; `sudo_ok` when it has the sudoers rule for `pmset disablesleep`.
+    pub fn world(batt: String, settings: &str, sudo_ok: bool) -> Shared {
+        Arc::new(Mutex::new(World {
+            batt,
+            asserts: "No assertions.".into(),
+            settings: settings.into(),
+            sudo_ok,
+            name: "Studio".into(),
+            calls: Vec::new(),
+        }))
+    }
+
+    pub struct FakeHost(pub Shared);
+    struct FakeHold(Shared);
+
+    fn lock(w: &Shared) -> MutexGuard<'_, World> {
+        w.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    impl Hold for FakeHold {
+        fn is_running(&mut self) -> bool {
+            true
+        }
+        fn stop(&mut self) {
+            lock(&self.0).calls.push("caffeinate-stop".into());
+        }
+    }
+
+    impl Host for FakeHost {
+        fn pmset_batt(&mut self) -> String {
+            let mut w = lock(&self.0);
+            w.calls.push("pmset-batt".into());
+            w.batt.clone()
+        }
+        fn pmset_assertions(&mut self) -> String {
+            let mut w = lock(&self.0);
+            w.calls.push("pmset-assertions".into());
+            w.asserts.clone()
+        }
+        fn pmset_settings(&mut self) -> String {
+            let mut w = lock(&self.0);
+            w.calls.push("pmset-settings".into());
+            w.settings.clone()
+        }
+        fn computer_name(&mut self) -> String {
+            let mut w = lock(&self.0);
+            w.calls.push("scutil".into());
+            w.name.clone()
+        }
+        fn hostname(&mut self) -> String {
+            lock(&self.0).calls.push("hostname".into());
+            "host.local".into()
+        }
+        fn set_sleep_disabled(&mut self, on: bool) -> bool {
+            let mut w = lock(&self.0);
+            w.calls.push(format!("sudo-disablesleep-{}", on as u8));
+            if w.sudo_ok {
+                w.settings = format!("SleepDisabled\t{}\n", on as u8);
+            }
+            w.sudo_ok
+        }
+        fn hold_idle_sleep(&mut self) -> Option<Box<dyn Hold>> {
+            lock(&self.0).calls.push("caffeinate-start".into());
+            Some(Box::new(FakeHold(self.0.clone())))
+        }
+        fn sleep_now(&mut self) {
+            lock(&self.0).calls.push("sleepnow".into());
+        }
+    }
+
+    /// What `pmset -g batt` says with the internal battery at `percent`, charging on the power adapter
+    /// (`ac`) or discharging.
+    pub fn batt(percent: u32, ac: bool) -> String {
+        if ac {
+            format!("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1234567)\t{percent}%; charging; 1:05 remaining present: true")
+        } else {
+            format!("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1234567)\t{percent}%; discharging; 2:15 remaining present: true")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::fake::{batt, world, FakeHost, Shared};
     use super::*;
     use crate::platform::capabilities;
     use crate::scratch::Scratch;
     use std::fs;
-    use std::sync::Mutex;
 
     fn fixture_cases(func: &str) -> Vec<(String, Value)> {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/power");
@@ -990,92 +1087,6 @@ mod tests {
                 "{path}"
             );
         }
-    }
-
-    #[derive(Default)]
-    struct World {
-        batt: String,
-        asserts: String,
-        settings: String,
-        sudo_ok: bool,
-        name: String,
-        calls: Vec<String>,
-    }
-
-    type Shared = Arc<Mutex<World>>;
-
-    struct FakeHost(Shared);
-    struct FakeHold(Shared);
-
-    impl Hold for FakeHold {
-        fn is_running(&mut self) -> bool {
-            true
-        }
-        fn stop(&mut self) {
-            self.0.lock().unwrap().calls.push("caffeinate-stop".into());
-        }
-    }
-
-    impl Host for FakeHost {
-        fn pmset_batt(&mut self) -> String {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push("pmset-batt".into());
-            w.batt.clone()
-        }
-        fn pmset_assertions(&mut self) -> String {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push("pmset-assertions".into());
-            w.asserts.clone()
-        }
-        fn pmset_settings(&mut self) -> String {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push("pmset-settings".into());
-            w.settings.clone()
-        }
-        fn computer_name(&mut self) -> String {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push("scutil".into());
-            w.name.clone()
-        }
-        fn hostname(&mut self) -> String {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push("hostname".into());
-            "host.local".into()
-        }
-        fn set_sleep_disabled(&mut self, on: bool) -> bool {
-            let mut w = self.0.lock().unwrap();
-            w.calls.push(format!("sudo-disablesleep-{}", on as u8));
-            if w.sudo_ok {
-                w.settings = format!("SleepDisabled\t{}\n", on as u8);
-            }
-            w.sudo_ok
-        }
-        fn hold_idle_sleep(&mut self) -> Option<Box<dyn Hold>> {
-            self.0.lock().unwrap().calls.push("caffeinate-start".into());
-            Some(Box::new(FakeHold(self.0.clone())))
-        }
-        fn sleep_now(&mut self) {
-            self.0.lock().unwrap().calls.push("sleepnow".into());
-        }
-    }
-
-    fn batt(percent: u32, ac: bool) -> String {
-        if ac {
-            format!("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1234567)\t{percent}%; charging; 1:05 remaining present: true")
-        } else {
-            format!("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1234567)\t{percent}%; discharging; 2:15 remaining present: true")
-        }
-    }
-
-    fn world(batt: String, settings: &str, sudo_ok: bool) -> Shared {
-        Arc::new(Mutex::new(World {
-            batt,
-            asserts: "No assertions.".into(),
-            settings: settings.into(),
-            sudo_ok,
-            name: "Studio".into(),
-            calls: Vec::new(),
-        }))
     }
 
     fn count(w: &Shared, call: &str) -> usize {
