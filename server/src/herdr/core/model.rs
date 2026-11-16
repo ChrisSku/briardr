@@ -56,6 +56,23 @@ fn basename(path: &str) -> &str {
     path.trim_end_matches('/').rsplit('/').next().unwrap_or("")
 }
 
+/// A terminal's title as Herdr TUI reports it (`terminal_title_stripped`): without the spinner or
+/// status glyph an agent puts in front of it (Claude Code's "✳ " or "⠂ "), which changes as it works.
+fn stripped_title(title: &str) -> Option<&str> {
+    let title = title.trim();
+    let mut chars = title.chars();
+    let glyph = chars.next().is_some_and(
+        |c| matches!(c, '\u{2800}'..='\u{28ff}' | '·' | '✢' | '✳' | '✶' | '✻' | '✽' | '◐'..='◓'),
+    );
+    let rest = chars.as_str();
+    let title = if glyph && (rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+        rest.trim_start()
+    } else {
+        title
+    };
+    (!title.is_empty()).then_some(title)
+}
+
 /// The terminals a layout node shows, left to right and top to bottom.
 fn leaves<'a>(node: &'a Value, out: &mut Vec<&'a str>) {
     if let Some(t) = node.pointer("/content/terminal").and_then(Value::as_str) {
@@ -112,7 +129,7 @@ fn stream(t: &Value, workspace: &str, project: &str, prev: Option<&Stream>, now:
     };
     let state = (kind == StreamKind::Agent).then(|| agent_state(t));
     let label = text(t, "name").map(String::from);
-    let title = text(t, "title");
+    let title = text(t, "title").and_then(stripped_title);
     let name = label
         .clone()
         .or_else(|| title.map(String::from))
@@ -515,6 +532,35 @@ mod tests {
         assert_eq!(names, ["web", "vite", "Neovim"]);
         assert_eq!(m.streams[0].label.as_deref(), Some("web"));
         assert_eq!(m.streams[2].folder.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn titles_leave_out_an_agents_spinner_as_herdr_tui_does() {
+        let titles = [
+            "⠂ Fix the login test",
+            "  ✳ Fix the login test ",
+            "✳",
+            "✳Fix",
+            "● Fix",
+        ];
+        let ts: Vec<Value> = titles
+            .iter()
+            .enumerate()
+            .map(|(i, title)| terminal(&format!("t{i}"), json!({"title": title})))
+            .collect();
+        let m = normalize(&ts, &BTreeMap::new(), None, None, 5);
+        let titles: Vec<Option<&str>> = m.streams.iter().map(|s| s.title.as_deref()).collect();
+        assert_eq!(
+            titles,
+            [
+                Some("Fix the login test"),
+                Some("Fix the login test"),
+                None,
+                Some("✳Fix"),
+                Some("● Fix"),
+            ]
+        );
+        assert_eq!(m.streams[0].name, "Fix the login test", "and so the name");
     }
 
     #[test]

@@ -537,6 +537,12 @@ export function herdr(...args: string[]): any {
   }
 }
 
+/** Sets a pane's terminal title, as an agent does, and keeps it: `cat` holds back the shell's prompt, which
+ *  sets the title again where the prompt has it (bash on Ubuntu). Ctrl+C ends it. */
+export function holdTitle(pane: string, title: string) {
+  herdr('pane', 'run', pane, `printf '\\033]0;${title}\\007'; cat`);
+}
+
 /** A dedicated test workspace with a shell pane in a disposable folder. */
 export function testPane(label: string): { pane: string; workspace: string; dir: string } {
   ensureSession();
