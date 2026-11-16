@@ -164,6 +164,44 @@ fn parse_status(text: &str) -> HerdrStatus {
     }
 }
 
+/// The agent kinds this Herdr's `agent.start` takes, in its order, as its CLI lists them: the socket API
+/// has no list of them. Empty when Herdr can't be run or lists none.
+pub async fn herdr_agent_kinds(t: &HerdrTarget) -> Vec<String> {
+    let mut cmd = Command::new(&t.herdr_path);
+    cmd.args(["agent", "start", "--help"])
+        .env_clear()
+        .envs(scrubbed_env())
+        .kill_on_drop(true);
+    match tokio::time::timeout(t.timeout, cmd.output()).await {
+        Ok(Ok(out)) => parse_agent_kinds(&String::from_utf8_lossy(&out.stdout)),
+        _ => Vec::new(),
+    }
+}
+
+/// The `--kind` option's `[possible values: pi, claude, …]` in `herdr agent start --help`.
+fn parse_agent_kinds(help: &str) -> Vec<String> {
+    const VALUES: &str = "[possible values: ";
+    let after_kind = help.find("--kind").map_or("", |i| &help[i..]);
+    let Some(list) = after_kind
+        .find(VALUES)
+        .map(|i| &after_kind[i + VALUES.len()..])
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(list, _)| list)
+    else {
+        return Vec::new();
+    };
+    list.split(',')
+        .map(str::trim)
+        .filter(|k| {
+            (1..=32).contains(&k.len())
+                && k.starts_with(|c: char| c.is_ascii_lowercase())
+                && k.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+        .map(String::from)
+        .collect()
+}
+
 /// One request per connection. Errors: timeout | unreachable | socket | closed | the Herdr error code.
 pub async fn herdr_request(
     socket: &Path,
@@ -451,6 +489,24 @@ mod tests {
         let keys: Vec<&str> = scrubbed.iter().map(|(k, _)| k.as_str()).collect();
         assert_eq!(keys, vec!["HOME", "PATH", "HERDRX"]);
         assert!(!scrubbed_env().iter().any(|(k, _)| k.starts_with("HERDR_")));
+    }
+
+    #[test]
+    fn herdr_rpc_agent_kinds_from_the_cli_help() {
+        // As Herdr 0.9.3 to 0.9.5 print it (cut short).
+        let help = "Start a supported interactive agent in an existing pane\n\nUsage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS] [-- [AGENT_ARG]...]\n\nOptions:\n      --kind <KIND>\n          Supported agent kind and canonical executable\n          \n          [possible values: pi, claude, codex, gemini, agy, qodercli]\n\n      --pane <ID>\n          Existing pane at an interactive shell prompt\n";
+        assert_eq!(
+            parse_agent_kinds(help),
+            ["pi", "claude", "codex", "gemini", "agy", "qodercli"]
+        );
+        let odd = "--kind <KIND>\n [possible values: claude, Bad Kind, ../x, , codex]\n";
+        assert_eq!(
+            parse_agent_kinds(odd),
+            ["claude", "codex"],
+            "only kind-shaped names"
+        );
+        assert!(parse_agent_kinds("Usage: herdr agent start\n").is_empty());
+        assert!(parse_agent_kinds("--pane <ID>\n [possible values: a, b").is_empty());
     }
 
     #[test]

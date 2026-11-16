@@ -8,7 +8,7 @@ use std::path::Path;
 use futures_util::future::join_all;
 use serde_json::{json, Value};
 
-use super::{err, from_herdr, ActionError, Actions};
+use super::{err, from_herdr, prompt_args, ActionError, Actions};
 use crate::herdr::core::layout;
 use crate::herdr::core::model::{qualify, split_machine, OTHER};
 use crate::herdr::core::state::CoreState;
@@ -20,9 +20,9 @@ fn env() -> Value {
     json!({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "herdr"})
 }
 
-/// An agent as the Herdr app starts one: in the person's shell (on macOS a login shell, for its
-/// PATH), which stays when the agent exits.
-fn agent_argv(program: &str, shell: Option<String>) -> Vec<String> {
+/// An agent's command as the Herdr app starts one: in the person's shell (on macOS a login shell, for
+/// its PATH), which stays when the agent exits. The shell gets the command as arguments, never as source.
+fn agent_argv(command: Vec<String>, shell: Option<String>) -> Vec<String> {
     let sh = shell
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "/bin/sh".to_string());
@@ -35,21 +35,23 @@ fn agent_argv(program: &str, shell: Option<String>) -> Vec<String> {
         (false, false) => "\"$@\"; exec \"$0\" -i",
     };
     let flags = if login { "-lic" } else { "-ic" };
-    vec![sh.clone(), flags.into(), script.into(), sh, program.into()]
+    let mut argv = vec![sh.clone(), flags.into(), script.into(), sh];
+    argv.extend(command);
+    argv
 }
 
-/// An agent on another machine, started as the app starts one there: in that machine's shell (it
-/// may run with a bare PATH, so through its login profile), which stays when the agent exits.
-fn remote_agent_argv(program: &str) -> Vec<String> {
+/// An agent's command on another machine, started as the app starts one there: in that machine's
+/// shell (it may run with a bare PATH, so through its login profile), which stays when the agent exits.
+fn remote_agent_argv(command: Vec<String>) -> Vec<String> {
     let script = r#"shell=${SHELL:-/bin/sh}
 case "${shell##*/}" in
   fish) exec "$shell" -lic 'command $argv[2..]; exec $argv[1] -li' "$shell" "$@" ;;
   sh|bash|zsh|dash|ksh) exec "$shell" -lic '"$@"; exec "$0" -li' "$shell" "$@" ;;
   *) exec sh -c '"$@"; exec "${SHELL:-sh}" -i' sh "$@" ;;
 esac"#;
-    ["sh", "-c", script, "sh", program]
-        .map(String::from)
-        .to_vec()
+    let mut argv = ["sh", "-c", script, "sh"].map(String::from).to_vec();
+    argv.extend(command);
+    argv
 }
 
 fn not_a_space() -> ActionError {
@@ -198,13 +200,21 @@ impl Actions {
         project: &Project,
         cwd: Option<String>,
         kind: &str,
+        prompt: Option<&str>,
     ) -> Result<Value, ActionError> {
         let (machine, tab) = split_machine(&project.id);
         let machine = if project.id == OTHER { "" } else { machine };
+        let mut command = vec![kind.to_string()];
+        command.extend(
+            prompt
+                .and_then(|p| prompt_args(kind, p))
+                .into_iter()
+                .flatten(),
+        );
         let argv = match kind {
             "shell" => Vec::new(),
-            program if machine.is_empty() => agent_argv(program, std::env::var("SHELL").ok()),
-            program => remote_agent_argv(program),
+            _ if machine.is_empty() => agent_argv(command, std::env::var("SHELL").ok()),
+            _ => remote_agent_argv(command),
         };
         let space = split_machine(&project.workspace_id).1;
         let place = (project.id != OTHER).then_some((space, tab));
@@ -298,20 +308,37 @@ mod tests {
 
     #[test]
     fn agents_start_as_the_herdr_app_starts_them() {
-        let argv = agent_argv("claude", Some("/bin/zsh".into()));
+        let claude = || vec!["claude".to_string()];
+        let argv = agent_argv(claude(), Some("/bin/zsh".into()));
         let (flags, script) = if cfg!(target_os = "macos") {
             ("-lic", "\"$@\"; exec \"$0\" -li")
         } else {
             ("-ic", "\"$@\"; exec \"$0\" -i")
         };
         assert_eq!(argv, ["/bin/zsh", flags, script, "/bin/zsh", "claude"]);
-        assert_eq!(agent_argv("codex", None)[0], "/bin/sh");
-        assert!(agent_argv("codex", Some("/opt/bin/fish".into()))[2].starts_with("command $argv"));
-        let remote = remote_agent_argv("claude");
+        assert_eq!(agent_argv(claude(), None)[0], "/bin/sh");
+        assert!(agent_argv(claude(), Some("/opt/bin/fish".into()))[2].starts_with("command $argv"));
+        let remote = remote_agent_argv(claude());
         assert_eq!(
             (remote[0].as_str(), remote[4].as_str()),
             ("sh", "claude"),
             "that machine's shell, found there"
         );
+    }
+
+    #[test]
+    fn a_prompt_is_one_argument_of_the_agent_never_shell_source() {
+        let prompt = "it's $HOME; `touch x` \\' ; echo \"done\"";
+        let mut command = vec!["codex".to_string()];
+        command.extend(prompt_args("codex", prompt).unwrap());
+        assert_eq!(command, ["codex", "--", prompt]);
+        for shell in ["/bin/zsh", "/opt/bin/fish"] {
+            assert_eq!(
+                agent_argv(command.clone(), Some(shell.into()))[4..],
+                command,
+                "{shell}"
+            );
+        }
+        assert_eq!(remote_agent_argv(command.clone())[4..], command);
     }
 }

@@ -6,13 +6,14 @@ mod core;
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 use tokio::time::sleep;
 
 use crate::herdr::backend::{Backend, Herdr};
-use crate::herdr::model::{Model, Stream, StreamKind};
-use crate::herdr::rpc::HerdrError;
+use crate::herdr::model::{tool_label, Model, Stream, StreamKind};
+use crate::herdr::rpc::{herdr_agent_kinds, HerdrError};
 use crate::herdr::state::{HerdrReader, HerdrState};
 
 #[derive(Debug, Error)]
@@ -102,11 +103,14 @@ fn utf16_prefix(s: &str, max: usize) -> &str {
 
 /// Label text: control characters removed, trimmed, cut to `max` UTF-16 code units, empty becomes None.
 fn clean_label(v: &Value, max: usize) -> Option<String> {
-    let raw = if v.is_null() {
-        String::new()
-    } else {
-        js_string(v)
-    };
+    if v.is_null() {
+        return None;
+    }
+    clean_text(&js_string(v), max)
+}
+
+/// `clean_label` for text.
+fn clean_text(raw: &str, max: usize) -> Option<String> {
     let stripped: String = raw
         .chars()
         .filter(|&c| c > '\u{1f}' && c != '\u{7f}')
@@ -207,6 +211,121 @@ fn put(map: &mut Map<String, Value>, key: &str, value: Option<Value>) {
     if let Some(v) = value {
         map.insert(key.to_string(), v);
     }
+}
+
+/// `POST /api/streams`: a shell or an agent in a project, optionally named (Herdr TUI), and an agent's
+/// first message.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewStream {
+    pub project_id: String,
+    /// "shell", or one of the agents `Actions::agents` offers.
+    pub kind: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Handed to the agent as an argument when it starts, never typed into its terminal.
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
+/// `GET /api/agents`: what a new stream can start, and how long its prompt can be.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Agents {
+    pub agents: Vec<AgentChoice>,
+    pub max_prompt: usize,
+}
+
+/// An agent a new stream can start.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct AgentChoice {
+    pub kind: String,
+    pub name: String,
+    /// Whether it takes a first message when it starts.
+    pub prompt: bool,
+}
+
+/// A prompt's longest length, in UTF-16 code units as the sheet's field counts them.
+pub const MAX_PROMPT: usize = 2000;
+
+/// The agents Briardr has always started, first in the list.
+const FIRST_AGENTS: [&str; 2] = ["claude", "codex"];
+
+/// Herdr TUI's agent kinds as the sheet offers them, Claude and Codex first; none listed: those two.
+fn agent_choices(kinds: Vec<String>) -> Vec<AgentChoice> {
+    let kinds = if kinds.is_empty() {
+        FIRST_AGENTS.map(String::from).to_vec()
+    } else {
+        kinds
+    };
+    let (mut first, rest): (Vec<String>, Vec<String>) = kinds
+        .into_iter()
+        .partition(|k| FIRST_AGENTS.contains(&k.as_str()));
+    first.sort_by_key(|k| FIRST_AGENTS.iter().position(|f| f == k));
+    first
+        .into_iter()
+        .chain(rest)
+        .map(|kind| AgentChoice {
+            name: tool_label(&kind),
+            prompt: prompt_args(&kind, "").is_some(),
+            kind,
+        })
+        .collect()
+}
+
+/// How an agent takes a first message when it starts, if it does: Claude Code and Codex read it as
+/// their prompt argument, after `--` so that one starting with a dash stays a prompt. Other agents'
+/// arguments differ (OpenCode's first argument is a folder), so they start without one.
+fn prompt_args(kind: &str, prompt: &str) -> Option<Vec<String>> {
+    matches!(kind, "claude" | "codex").then(|| vec!["--".to_string(), prompt.to_string()])
+}
+
+/// A prompt as it's handed over: trimmed, and None when empty. Refused for what takes none, when too
+/// long, and with control characters, which Herdr TUI refuses in arguments (a line break included).
+fn clean_prompt(kind: &str, prompt: Option<&str>) -> Result<Option<String>, ActionError> {
+    let Some(prompt) = prompt.map(js_trim).filter(|p| !p.is_empty()) else {
+        return Ok(None);
+    };
+    if prompt_args(kind, prompt).is_none() {
+        return Err(err(
+            400,
+            "prompt_not_supported",
+            "Only Claude and Codex start with a prompt.",
+        ));
+    }
+    if prompt.encode_utf16().count() > MAX_PROMPT {
+        return Err(err(
+            400,
+            "prompt_too_long",
+            format!("A prompt can be at most {MAX_PROMPT} characters."),
+        ));
+    }
+    if prompt.chars().any(char::is_control) {
+        return Err(err(400, "invalid_prompt", "Write the prompt on one line."));
+    }
+    Ok(Some(prompt.to_string()))
+}
+
+/// The shells in which Herdr's quoting of agent arguments (POSIX single quotes) keeps any text text.
+fn quotes_arguments(shell: &str) -> bool {
+    let name = shell.rsplit('/').next().unwrap_or(shell);
+    matches!(
+        name.trim_start_matches('-'),
+        "sh" | "bash" | "dash" | "zsh" | "ksh" | "mksh"
+    )
+}
+
+/// What `pane.process_info` says about a pane's processes.
+#[derive(Deserialize)]
+struct ProcessInfo {
+    shell_pid: u64,
+    foreground_processes: Vec<PaneProcess>,
+}
+
+#[derive(Deserialize)]
+struct PaneProcess {
+    pid: u64,
+    name: String,
 }
 
 /// Agent display name from a label, kind, and names already taken.
@@ -323,6 +442,35 @@ impl Actions {
         ))
     }
 
+    /// The name of a pane's shell once it waits at its prompt (alone in the foreground, as Herdr wants
+    /// it for starting an agent), or None if it doesn't by the deadline.
+    async fn pane_shell(&self, pane_id: &Option<Value>, deadline: Instant) -> Option<String> {
+        loop {
+            let info = self
+                .call("pane.process_info", json!({ "pane_id": pane_id }))
+                .await
+                .ok()
+                .and_then(|r| {
+                    serde_json::from_value::<ProcessInfo>(r["process_info"].clone()).ok()
+                });
+            if let Some(ProcessInfo {
+                shell_pid,
+                foreground_processes,
+            }) = info
+            {
+                if let [only] = foreground_processes.as_slice() {
+                    if only.pid == shell_pid {
+                        return Some(only.name.clone());
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            sleep(Duration::from_millis(200)).await;
+        }
+    }
+
     pub async fn create_workspace(
         &self,
         label_in: &Value,
@@ -421,26 +569,36 @@ impl Actions {
         Ok(Value::Object(out))
     }
 
-    pub async fn create_stream(
-        &self,
-        project_id: &Value,
-        kind_in: &Value,
-        label_in: &Value,
-    ) -> Result<Value, ActionError> {
-        let kind = js_string(kind_in);
-        if !matches!(kind.as_str(), "shell" | "claude" | "codex") {
+    /// The agents a new stream can start: Herdr TUI's kinds, Claude and Codex first. herdr-core has no
+    /// list of agents (the Herdr app keeps its agent menu to itself), so there it's the two Briardr has
+    /// always started, which are also what Herdr TUI gets when its CLI doesn't list its kinds.
+    pub async fn agents(&self) -> Agents {
+        let kinds = match self.herdr.backend() {
+            Backend::Tui(h) => herdr_agent_kinds(&h.herdr_target()).await,
+            Backend::Core(_) => Vec::new(),
+        };
+        Agents {
+            agents: agent_choices(kinds),
+            max_prompt: MAX_PROMPT,
+        }
+    }
+
+    pub async fn create_stream(&self, req: NewStream) -> Result<Value, ActionError> {
+        let kind = req.kind;
+        if kind != "shell" && !self.agents().await.agents.iter().any(|a| a.kind == kind) {
             return Err(err(
                 400,
                 "invalid_kind",
-                "Choose a shell, Claude, or Codex.",
+                "Choose a shell or an agent Herdr can start.",
             ));
         }
+        let prompt = clean_prompt(&kind, req.prompt.as_deref())?;
         let gone = || err(404, "project_gone", "That project no longer exists.");
         let model = self.herdr.model().ok_or_else(gone)?;
         let project = model
             .projects
             .iter()
-            .find(|p| project_id.as_str() == Some(p.id.as_str()))
+            .find(|p| p.id == req.project_id)
             .ok_or_else(gone)?;
         let in_project: Vec<&Stream> = model
             .streams
@@ -460,7 +618,9 @@ impl Actions {
                     ws.and_then(|w| w.cwd.clone())
                 })
                 .filter(|c| !c.is_empty());
-            return self.core_create_stream(project, cwd, &kind).await;
+            return self
+                .core_create_stream(project, cwd, &kind, prompt.as_deref())
+                .await;
         }
         let first = in_project
             .first()
@@ -518,7 +678,7 @@ impl Actions {
             )
             .await?;
         let pane_id = field(&r, &["pane", "pane_id"]);
-        let label = clean_label(label_in, 60);
+        let label = req.name.as_deref().and_then(|n| clean_text(n, 60));
         if let Some(label) = &label {
             self.call("pane.rename", json!({ "pane_id": pane_id, "label": label }))
                 .await?;
@@ -537,11 +697,24 @@ impl Actions {
                 .map(str::to_string)
                 .collect();
             let name = agent_name_from(label.as_deref(), &kind, &taken);
-            let agent_label = if kind == "claude" { "Claude" } else { "Codex" };
+            let agent_label = tool_label(&kind);
             let deadline = Instant::now() + Duration::from_secs(8);
+            // Herdr types the agent's command into the pane's shell, its arguments quoted for POSIX
+            // shells: in another shell (fish, say) a prompt's backslash could end the quotes.
+            let args = match &prompt {
+                None => Vec::new(),
+                Some(p) => match self.pane_shell(&pane_id, deadline).await {
+                    Some(shell) if quotes_arguments(&shell) => {
+                        prompt_args(&kind, p).unwrap_or_default()
+                    }
+                    _ => {
+                        note = Some(format!("{agent_label} started without your prompt: Briardr hands one over only in sh, bash, zsh, dash or ksh."));
+                        Vec::new()
+                    }
+                },
+            };
             loop {
-                let params =
-                    json!({ "name": name, "kind": kind, "pane_id": pane_id, "timeout_ms": 30_000 });
+                let params = json!({ "name": name, "kind": kind, "pane_id": pane_id, "args": args, "timeout_ms": 30_000 });
                 let Err(e) = self.tui()?.request("agent.start", params).await else {
                     break;
                 };
@@ -923,6 +1096,121 @@ mod tests {
         assert!(name.len() <= 32);
     }
 
+    #[test]
+    fn agent_choices_put_claude_and_codex_first_and_say_which_take_a_prompt() {
+        let kinds = ["pi", "claude", "codex", "gemini", "agy"].map(String::from);
+        let choices = agent_choices(kinds.to_vec());
+        let kinds: Vec<&str> = choices.iter().map(|a| a.kind.as_str()).collect();
+        assert_eq!(kinds, ["claude", "codex", "pi", "gemini", "agy"]);
+        assert_eq!(
+            choices[0],
+            AgentChoice {
+                kind: "claude".into(),
+                name: "Claude".into(),
+                prompt: true
+            }
+        );
+        assert_eq!((choices[2].name.as_str(), choices[2].prompt), ("Pi", false));
+        let none = agent_choices(Vec::new());
+        assert_eq!(
+            none.iter().map(|a| a.kind.as_str()).collect::<Vec<_>>(),
+            ["claude", "codex"],
+            "herdr-core, or a Herdr whose CLI lists no kinds"
+        );
+        let without_codex = agent_choices(vec!["gemini".into(), "claude".into()]);
+        assert_eq!(without_codex[0].kind, "claude");
+        assert_eq!(without_codex.len(), 2, "only what Herdr starts");
+    }
+
+    #[test]
+    fn prompts_are_trimmed_capped_on_one_line_and_only_for_agents_that_take_one() {
+        assert_eq!(
+            clean_prompt("claude", Some("  fix the login bug ")).unwrap(),
+            Some("fix the login bug".into())
+        );
+        assert_eq!(clean_prompt("codex", Some("   ")).unwrap(), None);
+        assert_eq!(clean_prompt("shell", None).unwrap(), None);
+        let code = |kind: &str, p: &str| clean_prompt(kind, Some(p)).unwrap_err().code;
+        assert_eq!(code("shell", "ls"), "prompt_not_supported");
+        assert_eq!(code("gemini", "hi"), "prompt_not_supported");
+        assert_eq!(code("claude", "one\ntwo"), "invalid_prompt");
+        assert_eq!(code("claude", "esc \u{1b}[A"), "invalid_prompt");
+        let longest = "é".repeat(MAX_PROMPT);
+        assert!(clean_prompt("codex", Some(&longest)).is_ok());
+        assert_eq!(code("codex", &format!("{longest}x")), "prompt_too_long");
+        assert_eq!(
+            code("codex", &"😀".repeat(MAX_PROMPT / 2 + 1)),
+            "prompt_too_long",
+            "UTF-16 units, as the field counts"
+        );
+        assert_eq!(
+            prompt_args("claude", "-p go"),
+            Some(vec!["--".into(), "-p go".into()]),
+            "after --, a leading dash stays the prompt's"
+        );
+    }
+
+    #[test]
+    fn prompts_go_only_through_shells_that_keep_quoted_text_text() {
+        for shell in ["zsh", "-zsh", "bash", "/bin/sh", "dash", "ksh", "mksh"] {
+            assert!(quotes_arguments(shell), "{shell}");
+        }
+        for shell in [
+            "fish", "-fish", "tcsh", "csh", "nu", "xonsh", "elvish", "pwsh", "",
+        ] {
+            assert!(!quotes_arguments(shell), "{shell}");
+        }
+    }
+
+    #[test]
+    fn a_new_stream_request_is_typed() {
+        let req: NewStream =
+            serde_json::from_value(json!({"projectId": "w1:t1", "kind": "claude", "prompt": "hi"}))
+                .unwrap();
+        assert_eq!(
+            (
+                req.project_id.as_str(),
+                req.kind.as_str(),
+                req.name,
+                req.prompt.as_deref()
+            ),
+            ("w1:t1", "claude", None, Some("hi"))
+        );
+        assert!(
+            serde_json::from_value::<NewStream>(json!({"projectId": "w1:t1", "kind": 3})).is_err()
+        );
+        assert!(serde_json::from_value::<NewStream>(json!({"kind": "shell"})).is_err());
+    }
+
+    fn new_stream(kind: &str, prompt: Option<&str>) -> NewStream {
+        NewStream {
+            project_id: "p-1".into(),
+            kind: kind.into(),
+            name: None,
+            prompt: prompt.map(String::from),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_stream_checks_the_kind_and_the_prompt_before_herdr() {
+        let (actions, _scratch) = offline("the server");
+        let code = async |req| actions.create_stream(req).await.unwrap_err().code;
+        assert_eq!(
+            code(new_stream("gemini", None)).await,
+            "invalid_kind",
+            "a Herdr whose CLI lists no kinds: Claude and Codex"
+        );
+        assert_eq!(
+            code(new_stream("shell", Some("hi"))).await,
+            "prompt_not_supported"
+        );
+        assert_eq!(
+            code(new_stream("claude", Some("a\nb"))).await,
+            "invalid_prompt"
+        );
+        assert_eq!(code(new_stream("claude", Some("go"))).await, "project_gone");
+    }
+
     #[tokio::test]
     async fn create_workspace_rejects_missing_folder_before_herdr() {
         let (actions, _scratch) = offline("the server");
@@ -961,12 +1249,12 @@ mod tests {
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
         let e = actions
-            .create_stream(&json!("p-1"), &json!("shell"), &Value::Null)
+            .create_stream(new_stream("shell", None))
             .await
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "project_gone"));
         let e = actions
-            .create_stream(&json!("p-1"), &json!("vim"), &Value::Null)
+            .create_stream(new_stream("vim", None))
             .await
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (400, "invalid_kind"));
