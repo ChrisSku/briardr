@@ -22,8 +22,10 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 hyper = { version = "1", features = ["server", "client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "http1", "client-legacy"] }
-# Preview: forwarding WebSockets to the dev server (same version axum uses), and stream/sink helpers.
-tokio-tungstenite = "0.30"
+# Preview: forwarding WebSockets to the dev server, and stream/sink helpers. tokio-tungstenite stays on the
+# version axum's `ws` feature uses, so the server builds one WebSocket library: Dependabot leaves its minor
+# version alone (.github/dependabot.yml), and it moves by hand with axum (`cargo tree -i tokio-tungstenite`).
+tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tower = "0.5"
 # Streaming request bodies with a size limit (already in the tree through axum).
@@ -38,7 +40,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.11"
 # SHA-1 only for the Changes "reviewed" signature; devices store these digests, so they must not change.
-sha1 = "0.11"
+# The version axum and tungstenite use for the WebSocket handshake, kept with them like tokio-tungstenite.
+sha1 = "0.10"
 rand = "0.10"
 base64 = "0.23"
 hex = "0.4"
