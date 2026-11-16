@@ -4,6 +4,7 @@ bun = "1.4.2"
 rust = { version = "1.99.0", components = "rustfmt,clippy" } # `mise run check` uses both
 actionlint = "1.7.12" # `mise run lint`: the GitHub workflows (it runs shellcheck on their scripts too)
 shellcheck = "0.11.0"
+cargo-deny = "0.20.2" # `mise run deps:check` and `deps:audit`: the server's crates (server/deny.toml)
 
 [env]
 _.path = ["{{config_root}}/node_modules/.bin"]
@@ -49,6 +50,23 @@ run = ["bun --bun tsc -p tsconfig.json", "bun --bun svelte-check --tsconfig web/
 [tasks.check]
 description = "Server format and lint checks"
 run = ["cargo fmt --manifest-path server/Cargo.toml --check", "cargo clippy --manifest-path server/Cargo.toml --all-targets --all-features -- -D warnings"]
+
+[tasks."deps:check"]
+description = "Check the server's crates: licenses on the allow-list, crates.io as the only source, duplicate versions as warnings (cargo-deny, server/deny.toml)"
+# Without the inclusion graphs, each duplicate takes a few lines instead of forty (`cargo tree -i <crate>`
+# shows what brings a crate in).
+run = "cargo deny --manifest-path server/Cargo.toml --locked check --hide-inclusion-graph licenses sources bans"
+
+[tasks."deps:audit"]
+description = "Check the dependencies for known advisories: the server's crates (RustSec, cargo-deny) and the client's, the tests' and the scripts' packages (bun audit); needs the network"
+# Both run, so one report lists every advisory. An advisory with no fixed version yet is ignored with a
+# reason in server/deny.toml, or with `--ignore <GHSA id>` on bun audit here.
+run = """
+status=0
+cargo deny --manifest-path server/Cargo.toml --locked check advisories || status=1
+bun audit || status=1
+exit $status
+"""
 
 [tasks.serve]
 description = "Run Briardr against the configured Herdr session"
