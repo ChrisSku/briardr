@@ -470,6 +470,16 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             let _ = tokio::task::spawn_blocking(move || a.flush_last_seen()).await;
         }
     }));
+    // A device revoked with `briardr revoke` can't sign in from the next request on; this closes its
+    // live connections and stops its alerts as well, within a second.
+    let auth_reload = auth.clone();
+    timers.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            auth_reload.reload();
+        }
+    }));
 
     // The first check waits a minute, so a Briardr restarting again and again doesn't ask each time.
     let (c, d) = (cell.clone(), diag.clone());

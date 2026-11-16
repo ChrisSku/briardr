@@ -1,6 +1,7 @@
 <!-- A modifier: tap = next key only, double tap = lock, hold = chord while held. -->
 <script lang="ts">
-  import { mods, type Mod, type ModMode } from '../../../terminal/keys.ts';
+  import type { Mod } from '../../../terminal/keys.ts';
+  import { mods, type ModMode } from '../../../terminal/mods.ts';
   import { capture } from './capture.ts';
 
   let { m, label, name }: { m: Mod; label: string; name: string } = $props();

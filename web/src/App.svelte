@@ -10,7 +10,8 @@
   import { onMount } from 'svelte';
   import { pluginContext } from './plugins/context.ts';
   import { appTabs, loadBuiltins, streamTabs } from './plugins/registry.svelte.ts';
-  import { navigate, route, type Route } from './router.ts';
+  import { navigate, route } from './router.ts';
+  import type { Route } from './routes.ts';
   import AgentsList from './screens/AgentsList.svelte';
   import AgentsScreen from './screens/AgentsScreen.svelte';
   import ConnectionBar from './screens/ConnectionBar.svelte';
