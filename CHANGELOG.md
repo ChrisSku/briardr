@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.27
+
+- **The server's dependencies are updated past three RustSec advisories.** rustls-webpki 0.103.17 (RUSTSEC-2026-0382), and crypto-bigint 0.7.11 (RUSTSEC-2026-0387) and ctutils 0.4.8 (RUSTSEC-2026-0385), which the Web Push encryption uses. Nothing to change in your setup. ([#56](https://github.com/ChrisSku/briardr/pull/56))
+
 ## 0.3.26
 
 - **An agent's row shows what it's working on.** In the Agents and Workspaces lists and in Jump, an agent's row has a line with its terminal title (Claude Code sets it to the task at hand), unless it only repeats the stream's name, the agent's own name or where it runs (a path, or a shell prompt's "user@host: ~/app"). Jump and the Workspaces search find agents by it too. With the Herdr app, a stream named after its terminal's title no longer starts with the agent's spinner. ([#46](https://github.com/ChrisSku/briardr/pull/46))
