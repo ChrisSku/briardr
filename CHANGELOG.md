@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.25
+
+- **Pair a device by scanning a QR code.** `briardr pair` (in a terminal) and Settings → Devices → Add a device show a QR code beside the one-time code. The new device's camera opens Briardr with the code filled in, and you still name the device and choose Sign in. The code travels after the link's `#`, which browsers send to no server or proxy, Briardr takes it out of the address once it has read it, and it still works once and expires after ten minutes. From the host itself (`localhost`), Settings shows the address `briardr pair` prints, which other devices can open. On an iPhone or iPad the pairing screen reminds you to add Briardr to the Home Screen first, since the Home Screen app signs in separately. ([#51](https://github.com/ChrisSku/briardr/pull/51))
+
 ## 0.3.24
 
 - **Changes: comment on lines of a diff and send the comments to the agent.** Tap a line number in a diff (a second number makes a range), choose Comment and say what should change. The comments stay on this device, for each stream, until you send or clear them, and their lines stay marked while the file is unchanged. Review shows them with an optional note and sends them to the terminal as one paste; Briardr never presses Enter. Plugins get the same prompt sheet that Files and Changes use: `PromptSheet` and `codeBlock` in `@briardr/sdk`. ([#48](https://github.com/ChrisSku/briardr/pull/48))
