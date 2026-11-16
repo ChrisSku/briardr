@@ -1,7 +1,9 @@
 // Safety rule: every request that reads or controls work is authenticated.
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import { closed, request, startServer, until, upgradeStatus, ws, type TestServer } from './helpers.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { closed, pushKeys, request, startServer, until, upgradeStatus, waitUntil, ws, type TestServer } from './helpers.ts';
 
 let s: TestServer;
 beforeAll(async () => {
@@ -98,6 +100,32 @@ describe('authentication', () => {
     assert.equal(await closing, 4401);
     assert.equal((await request(s, 'GET', '/api/state', undefined, { cookie })).status, 401);
     assert.equal((await request(s, 'DELETE', `/api/devices/${id}`)).json.error, 'device_gone');
+  });
+
+  test('`briardr revoke` on the host does the same while Briardr runs, and the server never brings the device back', async () => {
+    const p = s.run.auth.pair(s.run.auth.createPairingCode().code, 'lost phone');
+    assert.ok(p.ok);
+    const lost = { cookie: `__Host-briardr=${p.cookie}` };
+    const id = p.device.id;
+    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/lost', keys: pushKeys() } }, lost)).status, 200);
+    assert.equal((await request(s, 'PUT', '/api/notifications/device', { ready: false }, lost)).status, 200);
+    const live = ws(s, '/ws/live?v=1', lost);
+    await until(live, (m) => m.t === 'model');
+    const closing = closed(live);
+
+    assert.equal(s.run.cli('revoke', id).trim(), 'Revoked.');
+    assert.equal((await request(s, 'GET', '/api/state', undefined, lost)).status, 401, 'refused from the next request on');
+    assert.equal(await closing, 4401);
+    const read = (file: string) => JSON.parse(fs.readFileSync(path.join(s.dataDir, file), 'utf8'));
+    await waitUntil('its alerts to stop', () => !read('secrets/push-subscriptions.json').some((sub: any) => sub.deviceId === id) && !(id in read('state/device-alerts.json')));
+
+    // Saving the last-seen times (once a minute) writes the devices file again: without the lost phone.
+    s.run.auth.flush();
+    assert.ok(!read('secrets/devices.json').some((d: any) => d.id === id));
+    assert.ok(!s.run.cli('devices').includes(id));
+    assert.equal((await request(s, 'GET', '/api/state', undefined, lost)).status, 401);
+    assert.equal((await request(s, 'GET', '/api/state')).status, 200, 'the other devices stay signed in');
+    assert.equal(s.run.cli('revoke', id).trim(), 'No such device.');
   });
 
   test('a device can be renamed; an empty name and an unknown device are refused', async () => {
