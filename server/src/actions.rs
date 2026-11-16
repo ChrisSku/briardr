@@ -267,17 +267,21 @@ fn agent_choices(kinds: Vec<String>) -> Vec<AgentChoice> {
         .chain(rest)
         .map(|kind| AgentChoice {
             name: tool_label(&kind),
-            prompt: prompt_args(&kind, "").is_some(),
+            prompt: takes_prompt(&kind),
             kind,
         })
         .collect()
 }
 
-/// How an agent takes a first message when it starts, if it does: Claude Code and Codex read it as
-/// their prompt argument, after `--` so that one starting with a dash stays a prompt. Other agents'
-/// arguments differ (OpenCode's first argument is a folder), so they start without one.
-fn prompt_args(kind: &str, prompt: &str) -> Option<Vec<String>> {
-    matches!(kind, "claude" | "codex").then(|| vec!["--".to_string(), prompt.to_string()])
+/// Whether an agent takes a first message when it starts: Claude Code and Codex read one as their
+/// prompt argument. Other agents' arguments differ (OpenCode's first is a folder), so they start without.
+fn takes_prompt(kind: &str) -> bool {
+    matches!(kind, "claude" | "codex")
+}
+
+/// A first message as those agents' arguments: after `--`, so that one starting with a dash stays a prompt.
+fn prompt_args(prompt: &str) -> Vec<String> {
+    vec!["--".to_string(), prompt.to_string()]
 }
 
 /// A prompt as it's handed over: trimmed, and None when empty. Refused for what takes none, when too
@@ -286,7 +290,7 @@ fn clean_prompt(kind: &str, prompt: Option<&str>) -> Result<Option<String>, Acti
     let Some(prompt) = prompt.map(js_trim).filter(|p| !p.is_empty()) else {
         return Ok(None);
     };
-    if prompt_args(kind, prompt).is_none() {
+    if !takes_prompt(kind) {
         return Err(err(
             400,
             "prompt_not_supported",
@@ -453,19 +457,12 @@ impl Actions {
                 .and_then(|r| {
                     serde_json::from_value::<ProcessInfo>(r["process_info"].clone()).ok()
                 });
-            if let Some(ProcessInfo {
-                shell_pid,
-                foreground_processes,
-            }) = info
-            {
-                if let [only] = foreground_processes.as_slice() {
-                    if only.pid == shell_pid {
-                        return Some(only.name.clone());
-                    }
-                }
-            }
-            if Instant::now() >= deadline {
-                return None;
+            let shell = info.and_then(|i| match i.foreground_processes.as_slice() {
+                [only] if only.pid == i.shell_pid => Some(only.name.clone()),
+                _ => None,
+            });
+            if shell.is_some() || Instant::now() >= deadline {
+                return shell;
             }
             sleep(Duration::from_millis(200)).await;
         }
@@ -704,9 +701,7 @@ impl Actions {
             let args = match &prompt {
                 None => Vec::new(),
                 Some(p) => match self.pane_shell(&pane_id, deadline).await {
-                    Some(shell) if quotes_arguments(&shell) => {
-                        prompt_args(&kind, p).unwrap_or_default()
-                    }
+                    Some(shell) if quotes_arguments(&shell) => prompt_args(p),
                     _ => {
                         note = Some(format!("{agent_label} started without your prompt: Briardr hands one over only in sh, bash, zsh, dash or ksh."));
                         Vec::new()
@@ -1144,8 +1139,8 @@ mod tests {
             "UTF-16 units, as the field counts"
         );
         assert_eq!(
-            prompt_args("claude", "-p go"),
-            Some(vec!["--".into(), "-p go".into()]),
+            prompt_args("-p go"),
+            ["--", "-p go"],
             "after --, a leading dash stays the prompt's"
         );
     }

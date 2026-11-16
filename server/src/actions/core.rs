@@ -205,12 +205,7 @@ impl Actions {
         let (machine, tab) = split_machine(&project.id);
         let machine = if project.id == OTHER { "" } else { machine };
         let mut command = vec![kind.to_string()];
-        command.extend(
-            prompt
-                .and_then(|p| prompt_args(kind, p))
-                .into_iter()
-                .flatten(),
-        );
+        command.extend(prompt.map(prompt_args).into_iter().flatten());
         let argv = match kind {
             "shell" => Vec::new(),
             _ if machine.is_empty() => agent_argv(command, std::env::var("SHELL").ok()),
@@ -330,7 +325,7 @@ mod tests {
     fn a_prompt_is_one_argument_of_the_agent_never_shell_source() {
         let prompt = "it's $HOME; `touch x` \\' ; echo \"done\"";
         let mut command = vec!["codex".to_string()];
-        command.extend(prompt_args("codex", prompt).unwrap());
+        command.extend(prompt_args(prompt));
         assert_eq!(command, ["codex", "--", prompt]);
         for shell in ["/bin/zsh", "/opt/bin/fish"] {
             assert_eq!(
