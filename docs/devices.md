@@ -182,8 +182,10 @@ keeps at most 60 characters.
 ## Lost device or changed URL
 
 Revoke a lost device in Settings → Devices, or run `briardr devices` followed by
-`briardr revoke DEVICE_ID` on the host. For managed WireGuard, also run
-`scripts/setup-linux.sh wg-remove NAME`. Deleting the Home Screen icon does not revoke the device.
+`briardr revoke DEVICE_ID` on the host. Either way it is signed out at once, whether or not Briardr is
+running: its next request is refused, its open pages disconnect, and it gets no more alerts. For managed
+WireGuard, also run `scripts/setup-linux.sh wg-remove NAME`. Deleting the Home Screen icon does not
+revoke the device.
 If Briardr cannot save the revocation, it reports an error and the device keeps access. Restore write
 access to the data directory (or free disk space), then retry the revocation.
 

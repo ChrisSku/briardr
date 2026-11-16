@@ -1,11 +1,12 @@
 <!--
-  Jump search: open any stream by name, project, workspace or folder. Streams that need input come
-  first; the rest are ordered by their latest activity: opened on this device, finished, or started
-  working. It opens at the top, just under the screen's header, and never reaches under the keyboard,
-  so the field stays in place while the list shrinks.
+  Jump search: open any stream by name, project, workspace, folder or what an agent says it's doing.
+  Streams that need input come first; the rest are ordered by their latest activity: opened on this
+  device, finished, or started working. It opens at the top, just under the screen's header, and never
+  reaches under the keyboard, so the field stays in place while the list shrinks.
 -->
 <script module lang="ts">
   import { model } from '../store.ts';
+  import { taskOf } from '../task.ts';
   import type { Stream } from '../types.ts';
 
   let open = $state(false);
@@ -14,7 +15,7 @@
   export function matches(s: Stream, q: string): boolean {
     if (!q) return true;
     const m = model.value;
-    const hay = [s.name, s.folder, s.cwd, s.tool, m?.workspaces.find((w) => w.id === s.workspaceId)?.name, m?.projects.find((p) => p.id === s.projectId)?.name].filter(Boolean).join(' ').toLowerCase();
+    const hay = [s.name, taskOf(s), s.folder, s.cwd, s.tool, m?.workspaces.find((w) => w.id === s.workspaceId)?.name, m?.projects.find((p) => p.id === s.projectId)?.name].filter(Boolean).join(' ').toLowerCase();
     return q.toLowerCase().split(/\s+/).every((t) => hay.includes(t));
   }
 
@@ -77,12 +78,14 @@
 </script>
 
 {#snippet option(s: Stream, i: number)}
+  {@const task = taskOf(s)}
   <li id="jump-{i}" role="option" aria-selected={i === sel} class={['row', i === sel && 'is-sel']}>
     <button class="row-main" onclick={() => go(s)} onmouseenter={() => (sel = i)}>
       <ToolIcon tool={s.tool} kind={s.kind} state={s.state} />
       <span class="row-text">
         <span class="row-title">{s.name}</span>
         <span class="row-sub">{contextOf(s)}</span>
+        {#if task}<span class="row-sub row-task">{task}</span>{/if}
       </span>
       <span class="row-trail">
         <StateBadge state={s.state} />

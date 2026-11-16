@@ -709,27 +709,10 @@ pub fn file_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scratch::{write_executable, Scratch};
+    use crate::scratch::{git, write_executable, Scratch};
 
     fn strs(argv: &[String]) -> Vec<&str> {
         argv.iter().map(String::as_str).collect()
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(dir)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@example.com",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .status()
-            .unwrap();
-        assert!(status.success(), "git {args:?} failed");
     }
 
     #[test]

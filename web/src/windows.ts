@@ -2,7 +2,7 @@
 // share this device's stored state (reactive.svelte.ts keeps it in step), and a pane has one controller, so
 // a window opening a stream another one controls watches it instead.
 import { platform } from './install.ts';
-import { pathOf, type Route } from './router.ts';
+import { pathOf, type Route } from './routes.ts';
 import { toast } from './store.ts';
 
 /** Phones and tablets run one window of an installed app, and window.open only adds a tab. */

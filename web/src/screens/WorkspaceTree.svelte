@@ -7,6 +7,7 @@
   import { theHost } from '../host.ts';
   import { shortPath } from '../paths.ts';
   import { expandedNodes, live, model, stale } from '../store.ts';
+  import { taskOf } from '../task.ts';
   import type { AgentState, Project, Stream, Workspace } from '../types.ts';
   import { Icon } from '../ui/icons/index.ts';
   import { Empty, openMenu, StateBadge } from '../ui/kit.ts';
@@ -44,7 +45,7 @@
         const projects = (m?.projects || [])
           .filter((p) => p.workspaceId === ws.id)
           .map((p) => {
-            const streams = (m?.streams || []).filter((s) => s.projectId === p.id && (hit(ws.name, ws.cwd, p.name) || hit(s.name, s.folder, s.cwd, s.tool)));
+            const streams = (m?.streams || []).filter((s) => s.projectId === p.id && (hit(ws.name, ws.cwd, p.name) || hit(s.name, taskOf(s), s.folder, s.cwd, s.tool)));
             return { p, streams, show: hit(ws.name, ws.cwd, p.name) || streams.length > 0 };
           })
           .filter((x) => x.show);

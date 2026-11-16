@@ -9,7 +9,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { rowFor, type BarKey } from '../../../terminal/barkeys.ts';
-  import { activeMods, applyModsToText, chord, consumeMods, type Outgoing } from '../../../terminal/keys.ts';
+  import { applyModsToText, chord, type Outgoing } from '../../../terminal/keys.ts';
+  import { activeMods, consumeMods } from '../../../terminal/mods.ts';
   import { Icon } from '../../../ui/icons/index.ts';
   import ArrowPad from './ArrowPad.svelte';
   import DeleteKey from './DeleteKey.svelte';

@@ -9,7 +9,8 @@
   import { isMac, theHost } from '../../host.ts';
   import { onMount, untrack } from 'svelte';
   import { record } from '../../diag.ts';
-  import { holdStream, navigate, openedFromAlert, type Surface } from '../../router.ts';
+  import { holdStream, navigate, openedFromAlert } from '../../router.ts';
+  import type { Surface } from '../../routes.ts';
   import { clockSkew, fullScreen, listHidden, markOpened, model, now, prefs, toast, visibleStreamId } from '../../store.ts';
   import { TerminalController } from '../../terminal/controller.ts';
   import { isLocalhostUrl, isWebUrl } from '../../terminal/links.ts';

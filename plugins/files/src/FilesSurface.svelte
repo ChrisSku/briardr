@@ -2,12 +2,14 @@
   Files: the stream's folder as a tree, and any text file in it, read-only with syntax highlighting.
   Folders load one level at a time when opened. Side by side on iPad and Mac (the divider drags);
   on iPhone the tree and the file take turns. Changed files (uncommitted, per git) carry a dot.
+  The search looks for files by name or, when asked, for lines by what they contain.
   Lines picked in files gather in a prompt (a bar along the bottom), sent to the terminal with a question.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
-  import { filesView, type DirList, type FileEntry, type FileSearch } from './files.ts';
+  import ContentMatches from './ContentMatches.svelte';
+  import { filesView, type ContentMatch, type ContentSearch, type DirList, type FileEntry, type FileSearch } from './files.ts';
   import FileRow from './FileRow.svelte';
   import FileView from './FileView.svelte';
   import { addFileReference, promptOf } from './prompt.ts';
@@ -26,7 +28,12 @@
   let revision = $state(0);
   let tree: HTMLElement | undefined = $state();
   let query = $state('');
+  /** What the search looks at: the files' names, or the lines in them. */
+  let searchIn = $state<'names' | 'contents'>('names');
   let search = $state.raw<FileSearch | null>(null);
+  let found = $state.raw<ContentSearch | null>(null);
+  /** The line a search result opened its file at; `n` counts the openings, so the same line can be gone to again. */
+  let goTo = $state.raw<{ path: string; line: number; n: number } | null>(null);
   let searchError = $state<string | null>(null);
   let searching = $state(false);
   let actionBusy = $state(false);
@@ -72,22 +79,27 @@
   $effect(() => {
     const q = searchQuery;
     const url = base;
+    const contents = searchIn === 'contents';
     void revision;
     if (!visible || !q) {
       search = null;
+      found = null;
       searchError = null;
       searching = false;
       return;
     }
     search = null;
+    found = null;
     searchError = null;
     searching = true;
     const ctrl = new AbortController();
     let active = true;
     const timer = setTimeout(async () => {
       try {
-        const result = await briardr.core<FileSearch>('GET', `${url}/search?q=${encodeURIComponent(q)}`, undefined, { signal: ctrl.signal, timeout: 20_000 });
-        if (active) search = result;
+        const result = await briardr.core<FileSearch & ContentSearch>('GET', `${url}/search?q=${encodeURIComponent(q)}${contents ? '&in=contents' : ''}`, undefined, { signal: ctrl.signal, timeout: 20_000 });
+        if (!active) return;
+        if (contents) found = result;
+        else search = result;
       } catch (e) {
         if (active) searchError = e instanceof ApiError ? e.message : 'Couldn’t search files.';
       } finally {
@@ -122,7 +134,7 @@
 
   type Row = { kind: 'entry'; entry: FileEntry; depth: number } | { kind: 'loading' | 'more'; key: string; depth: number; text?: string };
   const rows = $derived.by(() => {
-    if (searchQuery) return (search?.entries ?? []).map((entry): Row => ({ kind: 'entry', entry, depth: 0 }));
+    if (searchQuery) return searchIn === 'contents' ? [] : (search?.entries ?? []).map((entry): Row => ({ kind: 'entry', entry, depth: 0 }));
     const out: Row[] = [];
     const walk = (path: string, depth: number) => {
       const list = dirs[path];
@@ -144,6 +156,10 @@
   function open(e: FileEntry) {
     if (e.dir) toggle(e);
     else selected = e.path;
+  }
+  function openMatch(m: ContentMatch) {
+    selected = m.path;
+    goTo = { path: m.path, line: m.line, n: (goTo?.n ?? 0) + 1 };
   }
 
   function entryMenu(e: FileEntry, at: { x: number; y: number } | HTMLElement) {
@@ -264,19 +280,26 @@
             </div>
             <div class="search ft-search" role="search">
               <Icon name="search" size={17} />
-              <input bind:this={searchInput} bind:value={query} type="search" aria-label="Search files by filename" placeholder="Search filenames…" autocomplete="off" autocapitalize="off" spellcheck="false" onkeydown={(ev) => {
+              <input bind:this={searchInput} bind:value={query} type="search" aria-label={searchIn === 'contents' ? 'Search in files' : 'Search files by filename'} placeholder={searchIn === 'contents' ? 'Search in files…' : 'Search filenames…'} autocomplete="off" autocapitalize="off" spellcheck="false" onkeydown={(ev) => {
                 if (ev.key === 'Escape') { ev.preventDefault(); clearSearch(); }
                 else if (ev.key === 'ArrowDown') { ev.preventDefault(); tree?.querySelector<HTMLButtonElement>('.ft-row')?.focus(); }
               }} />
-              {#if query}<button class="icon-btn" aria-label="Clear filename search" title="Clear search" onclick={clearSearch}><Icon name="close" size={16} /></button>{/if}
+              {#if query}<button class="icon-btn" aria-label={searchIn === 'contents' ? 'Clear search in files' : 'Clear filename search'} title="Clear search" onclick={clearSearch}><Icon name="close" size={16} /></button>{/if}
             </div>
           </div>
           {#if searchQuery}
-            <p class="ft-search-status muted" role="status">
-              {#if searching}Searching…{:else if search}{search.entries.length} {search.entries.length === 1 ? 'file' : 'files'} found{/if}
-            </p>
+            <div class="ft-search-in">
+              <div class="segmented small" role="group" aria-label="Search in">
+                <button class={searchIn === 'names' ? 'is-on' : ''} aria-pressed={searchIn === 'names'} onclick={() => (searchIn = 'names')}>Names</button>
+                <button class={searchIn === 'contents' ? 'is-on' : ''} aria-pressed={searchIn === 'contents'} onclick={() => (searchIn = 'contents')}>Contents</button>
+              </div>
+              <p class="ft-search-status muted" role="status">
+                {#if searching}Searching…{:else if search}{search.entries.length} {search.entries.length === 1 ? 'file' : 'files'} found{:else if found}{found.matches.length} {found.matches.length === 1 ? 'line' : 'lines'} found{/if}
+              </p>
+            </div>
             {#if searchError}<p class="error" role="alert">{searchError}</p>{/if}
-            {#if search && !search.entries.length && !search.truncated}<Empty title="No matching files">Try a different filename.</Empty>{/if}
+            {#if search && !search.entries.length && !search.truncated}<Empty title="No matching files">Try a different filename, or search the contents.</Empty>{/if}
+            {#if found && !found.matches.length && !found.truncated}<Empty title="No matching lines">No text file here contains that.</Empty>{/if}
           {/if}
           {#if error}<p class="error" role="alert">{error}</p>{/if}
           {#if !searchQuery && root && !root.entries.length}<Empty title="Empty folder">There are no files in this stream’s folder.</Empty>{/if}
@@ -292,8 +315,10 @@
                 <li class="ft-note" style:--depth={r.depth}>{r.kind === 'loading' ? 'Loading…' : r.text}</li>
               {/if}
             {/each}
+            {#if searchQuery && found}<ContentMatches matches={found.matches} {selected} onOpen={openMatch} />{/if}
           </ul>
           {#if searchQuery && search?.truncated}<p class="ft-search-status muted">Search limited. Try a more specific filename.</p>{/if}
+          {#if searchQuery && found?.truncated}<p class="ft-search-status muted">{found.matches.length ? `Showing the first ${found.matches.length} lines.` : 'Search limited.'} Try something more specific.</p>{/if}
         </section>
         {#if !compact}
           <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -303,7 +328,7 @@
       {#if showFile}
         <section class="fv-pane" aria-label="File">
           {#if selected}
-            <FileView {stream} {briardr} path={selected} {compact} {revision} {treeOpen} onBack={() => (selected = null)} onToggleTree={() => (treeOpen = !treeOpen)} onAsk={() => (asking = true)} />
+            <FileView {stream} {briardr} path={selected} {compact} {revision} {treeOpen} goTo={goTo?.path === selected ? goTo : null} onBack={() => (selected = null)} onToggleTree={() => (treeOpen = !treeOpen)} onAsk={() => (asking = true)} />
           {:else}
             <div class="fv-empty">
               {#if !treeOpen}
@@ -332,3 +357,8 @@
     }} />
   {/if}
 {/if}
+
+<style>
+  .ft-search-in { display: flex; align-items: center; gap: 8px; margin: 8px 8px 2px; }
+  .ft-search-in .ft-search-status { margin: 0; }
+</style>

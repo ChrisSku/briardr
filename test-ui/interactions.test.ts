@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, holdTitle, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -763,6 +763,26 @@ describe('agents list, peek, banners and links', () => {
     assert.equal(herdr('pane', 'get', ws.pane).result.pane.scroll?.viewport_rows, rowsBefore);
     await a.page.getByRole('button', { name: 'Close' }).click();
     await a.ctx.close();
+  });
+
+  test('an agent’s row shows what its terminal title says it’s doing, and Jump finds it by that', async () => {
+    await settleShell();
+    holdTitle(ws.pane, 'Reviewing the parser');
+    herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
+    // The pane stays an agent's, as the tests after this one find it; only its title goes.
+    onTestFinished(async () => {
+      await settleShell();
+      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
+    });
+    const a = await device('iphone', 'phone-task');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    await row.locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+    // VoiceOver hears it with the rest of the row.
+    await row.getByRole('button', { name: /ui target.*Reviewing the parser/ }).waitFor();
+    await a.page.getByRole('button', { name: 'Jump to a stream' }).click();
+    await a.page.getByLabel('Search streams').fill('parser');
+    await a.page.locator('#jump-list .row-main', { hasText: 'ui target' }).locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
   });
 
   test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
