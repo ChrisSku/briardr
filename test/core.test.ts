@@ -7,8 +7,7 @@
 // - another machine (a second core joined as one): its terminals are shown, and its files never looked for here.
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import crypto from 'node:crypto';
-import { request, startCore, startServer, tmpDir, until, waitUntil, ws, type TestCore, type TestServer } from './helpers.ts';
+import { pushKeys, request, startCore, startServer, tmpDir, until, waitUntil, ws, type TestCore, type TestServer } from './helpers.ts';
 
 /** Reports each read from its terminal as a hex line, after turning on the modes its arguments name. */
 const ECHO = `
@@ -23,12 +22,6 @@ while True:
 `;
 /** An agent as far as the core can tell (OSC 7501): it works for a moment, then is done. */
 const AGENT = `printf '\\033]7501;state=working:app=claude-code\\033\\\\'; sleep 1; printf '\\033]7501;state=done:app=claude-code\\033\\\\'; exec sleep 600`;
-
-const keys = () => {
-  const ecdh = crypto.createECDH('prime256v1');
-  ecdh.generateKeys();
-  return { p256dh: ecdh.getPublicKey('base64url'), auth: Buffer.alloc(16, 7).toString('base64url') };
-};
 
 let core: TestCore;
 let s: TestServer;
@@ -116,7 +109,7 @@ describe('seen and alerts', () => {
   test('a finished agent alerts; seen and unread are shared through herdr.seen', async () => {
     const pushes: string[] = [];
     s.run.push.sendImpl = async (_sub, body) => (pushes.push(body), { statusCode: 201 });
-    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/core', keys: keys() } })).status, 200);
+    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/core', keys: pushKeys() } })).status, 200);
     const t = run('sh', '-c', AGENT);
     await waitUntil('done', async () => (await stream(t))?.state === 'done');
     await waitUntil('the alert', async () => {

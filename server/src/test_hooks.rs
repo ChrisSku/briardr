@@ -2,6 +2,7 @@
 // only with BRIARDR_TEST_HOOKS=1. They stand in for the in-process access the tests have (`s.run.*`):
 //   POST /__test/auth/pair {code, name, ip?}  → the `auth.pair` result ({ok, device, cookie} | {ok, error})
 //   POST /__test/auth/revoke {id}             → true | false
+//   POST /__test/auth/flush                   → {ok}, the devices saved as the minute's last-seen flush does
 //   POST /__test/herdr/refresh                → {ok}
 //   GET  /__test/routes                       → [{method, pattern, public}]
 //   GET  /__test/hub/sent                     → [{conn, method}] (only the length is meaningful)
@@ -97,6 +98,10 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
                 .ok()
                 .and_then(Result::ok)
                 .unwrap_or(false))
+        }
+        (Method::POST, "/auth/flush") => {
+            let auth = app.d.auth.clone();
+            json!({"ok": tokio::task::spawn_blocking(move || auth.flush_now()).await.is_ok()})
         }
         (Method::POST, "/herdr/refresh") => json!({"ok": app.d.herdr.refresh().await.is_ok()}),
         (Method::GET, "/routes") => json!(app.list_routes()),
