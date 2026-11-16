@@ -29,6 +29,18 @@ export interface FileSearch {
   entries: FileEntry[];
   truncated: boolean;
 }
+/** A line that contains what was searched for (`/files/search?in=contents`). */
+export interface ContentMatch {
+  path: string;
+  line: number;
+  /** The line, or the part of a long one around the match. */
+  text: string;
+  changed: boolean;
+}
+export interface ContentSearch {
+  matches: ContentMatch[];
+  truncated: boolean;
+}
 
 const BY_EXT: Record<string, string> = {
   sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash', command: 'bash',
