@@ -245,6 +245,8 @@ export async function freePort(): Promise<number> {
 
 export const SERVER_BIN = process.env.BRIARDR_SERVER_BIN || path.resolve(import.meta.dir, '..', 'server', 'target', 'debug', 'briardr');
 
+type ServerOptions = { pair?: boolean; config?: object; files?: Record<string, string>; platform?: string; env?: Record<string, string> };
+
 /** What tests reach through `s.run`: each member calls a test hook or the CLI. */
 export interface Running {
   auth: {
@@ -283,9 +285,9 @@ export function serverEnv(dataDir: string, port: number): NodeJS.ProcessEnv {
   };
 }
 
-/** `config`: written to config.json first (e.g. proxy mode). `platform`: run as that host (BRIARDR_PLATFORM).
- *  `env`: more environment for the server. */
-export function startServer(opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> } = {}): Promise<TestServer> {
+/** `config`: written to config.json first (e.g. proxy mode). `files`: more files written first, by path in
+ *  the data directory. `platform`: run as that host (BRIARDR_PLATFORM). `env`: more environment for the server. */
+export function startServer(opts: ServerOptions = {}): Promise<TestServer> {
   if (!fs.existsSync(SERVER_BIN)) throw new Error(`${SERVER_BIN} is missing: run \`mise run build:test-server\``);
   return startBinary(SERVER_BIN, opts);
 }
@@ -295,10 +297,14 @@ export function startServer(opts: { pair?: boolean; config?: object; platform?: 
  * `s.run.*` synchronously, so the shim below calls the `/__test/*` hooks with curl. A hook
  * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
  */
-async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> }): Promise<TestServer> {
+async function startBinary(bin: string, opts: ServerOptions): Promise<TestServer> {
   ensureSession();
   const dataDir = tmpDir('briardr-data-');
   if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
+  for (const [file, text] of Object.entries(opts.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(dataDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, file), text);
+  }
   const port = await freePort();
   const env = serverEnv(dataDir, port);
   if (opts.platform) env.BRIARDR_PLATFORM = opts.platform;

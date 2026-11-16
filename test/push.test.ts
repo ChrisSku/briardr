@@ -91,3 +91,13 @@ describe('low-battery alerts', () => {
     assert.deepEqual(titles, ['Mac battery at 15%'], 'one alert for 20%, none for the same level again or for plugging in');
   });
 });
+
+test('a devices file that can’t be read at startup forgets no device’s alerts', async () => {
+  const alerts = JSON.stringify({ phone: { ready: false } });
+  const s = await startServer({ pair: false, files: { 'secrets/devices.json': '[{"id":', 'state/device-alerts.json': alerts } });
+  try {
+    assert.equal(fs.readFileSync(path.join(s.dataDir, 'state', 'device-alerts.json'), 'utf8'), alerts);
+  } finally {
+    await s.close();
+  }
+});

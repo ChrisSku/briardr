@@ -47,7 +47,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use crate::app::{caps_json, js_number};
 use crate::auth::Auth;
 use crate::config::{
-    default_data_dir, load_config, parse_public_origin, save_config, validate_config,
+    default_data_dir, load_config, lock_for, parse_public_origin, save_config, validate_config,
     BriardrConfig, ConfigError, Paths,
 };
 use crate::deploy::{caddyfile, systemd_units, UnitOptions};
@@ -399,13 +399,18 @@ async fn configure(ctx: &Ctx, rest: &[String]) -> CliResult {
         println!("{CONFIGURE_HELP}");
         return Ok(if rest.is_empty() { 2 } else { 0 });
     }
+    let file = ctx.paths.config();
+    // Held to the save, so a settings change in the running Briardr's app and this one keep each other.
+    let _held = {
+        let file = file.clone();
+        blocking(move || lock_for(&file)).await??
+    };
     let before = load_config_only(ctx).await?;
     let (cfg, dry_run) = apply_configure(&before, rest)?;
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&cfg)?);
         return Ok(0);
     }
-    let file = ctx.paths.config();
     let backup = backup_path(&file);
     let exists = tokio::fs::try_exists(&file).await.unwrap_or(false);
     if exists && serde_json::to_string(&cfg)? == serde_json::to_string(&before)? {

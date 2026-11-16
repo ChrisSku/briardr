@@ -21,12 +21,16 @@ briardr status
 ```
 
 `configure` validates changes before saving and keeps the previous configuration in `config.json.bak`.
-Use `--dry-run` to inspect a proposed change. Restart the server after deployment changes. Managed
-Linux installations should use `scripts/setup-linux.sh` for access-mode changes so the services,
-firewall, and proxy agree with Briardr's configuration.
+Use `--dry-run` to inspect a proposed change. Restart the server after deployment changes: until then
+it runs with the configuration it started with. Managed Linux installations should use
+`scripts/setup-linux.sh` for access-mode changes so the services, firewall, and proxy agree with
+Briardr's configuration.
 
 Changes made through the app's Settings are saved one at a time, so simultaneous changes from different
-devices are kept. A failed save leaves the running configuration unchanged.
+devices are kept. Each changes only its own setting in `config.json` as the file is at that moment, so
+it keeps what `briardr configure` saved there while Briardr runs, and the restart applies both.
+They never save the running server's `BRIARDR_*` overrides (below), nor over a `config.json` Briardr
+can't read. A failed save leaves the running configuration unchanged.
 
 | Setting | Purpose |
 | --- | --- |

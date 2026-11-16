@@ -5,13 +5,12 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::config::{read_json, write_file_atomic, ConfigError, Paths};
+use crate::config::{read_json, write_file_atomic, ConfigError, Paths, Stamp};
 
 pub mod backend;
 pub mod cli;
@@ -167,38 +166,34 @@ impl PluginState {
 /// The plugin state as the server sees it: read again whenever the file changes on disk.
 pub struct StateCell {
     paths: Paths,
-    cached: Mutex<(Option<SystemTime>, PluginState)>,
+    cached: Mutex<(Option<Stamp>, PluginState)>,
 }
 
 impl StateCell {
     pub fn new(paths: Paths) -> StateCell {
         let state = PluginState::load(&paths);
-        let mtime = modified(&paths.plugin_state());
+        let stamp = Stamp::of(&paths.plugin_state());
         StateCell {
             paths,
-            cached: Mutex::new((mtime, state)),
+            cached: Mutex::new((stamp, state)),
         }
     }
 
     pub fn get(&self) -> PluginState {
-        let mtime = modified(&self.paths.plugin_state());
+        let stamp = Stamp::of(&self.paths.plugin_state());
         let mut c = self.cached.lock().unwrap_or_else(|e| e.into_inner());
-        if c.0 != mtime {
-            *c = (mtime, PluginState::load(&self.paths));
+        if c.0 != stamp {
+            *c = (stamp, PluginState::load(&self.paths));
         }
         c.1.clone()
     }
 
     pub fn set(&self, state: PluginState) -> Result<(), ConfigError> {
         let saved = state.save(&self.paths);
-        let mtime = modified(&self.paths.plugin_state());
-        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = (mtime, state);
+        let stamp = Stamp::of(&self.paths.plugin_state());
+        *self.cached.lock().unwrap_or_else(|e| e.into_inner()) = (stamp, state);
         saved
     }
-}
-
-fn modified(file: &Path) -> Option<SystemTime> {
-    fs::metadata(file).and_then(|m| m.modified()).ok()
 }
 
 /// What approving a backend approves: its command. A changed command needs approval again.
@@ -435,9 +430,9 @@ pub fn discover(paths: &Paths) -> Vec<Plugin> {
 }
 
 /// What changes when a plugin is installed, rebuilt, edited or turned on or off on the host: the
-/// modification times of the plugin state, each plugin's manifest and its build stamp.
-pub fn fingerprint(paths: &Paths) -> Vec<(PathBuf, Option<SystemTime>)> {
-    let mut out = vec![(paths.plugin_state(), modified(&paths.plugin_state()))];
+/// versions (`Stamp`) of the plugin state, each plugin's manifest and its build stamp.
+pub fn fingerprint(paths: &Paths) -> Vec<(PathBuf, Option<Stamp>)> {
+    let mut out = vec![(paths.plugin_state(), Stamp::of(&paths.plugin_state()))];
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths.plugins())
         .into_iter()
         .flatten()
@@ -447,7 +442,7 @@ pub fn fingerprint(paths: &Paths) -> Vec<(PathBuf, Option<SystemTime>)> {
     dirs.sort();
     for d in dirs {
         for f in [d.join(MANIFEST), d.join("dist/build.json")] {
-            let m = modified(&f);
+            let m = Stamp::of(&f);
             out.push((f, m));
         }
     }
@@ -539,16 +534,20 @@ mod tests {
         let paths = Paths::new(root.path());
         let cell = StateCell::new(paths.clone());
         assert_eq!(cell.get(), PluginState::default());
+        cell.set(PluginState::default()).unwrap();
+        let saved = fs::metadata(paths.plugin_state())
+            .unwrap()
+            .modified()
+            .unwrap();
         let mut other = PluginState::default();
         other.set_enabled("docs", false);
         other.save(&paths).unwrap();
-        // A changed modification time is what makes the cell read again.
-        let later = SystemTime::now() + std::time::Duration::from_secs(5);
+        // Saved within the same tick of a coarse clock (Linux): the same modification time, a new file.
         fs::File::options()
             .write(true)
             .open(paths.plugin_state())
             .unwrap()
-            .set_modified(later)
+            .set_modified(saved)
             .unwrap();
         assert!(!cell.get().is_enabled("docs"));
     }
