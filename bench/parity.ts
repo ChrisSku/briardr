@@ -24,8 +24,8 @@ type Step = { name: string; run: (page: Page, s: FixtureServer) => Promise<void>
 // Builds from before the redesign have a Usage tab; after it, Usage is in Settings and Settings is a gear.
 const nav = (label: string) => async (page: Page) => {
   const main = page.locator('nav[aria-label="Main"]');
-  // On iPhone the Agents tab's name starts with its badge ("6 need you Agents").
-  const button = main.getByRole('button', { name: new RegExp(`(^| )${label}$`) });
+  // The Agents tab's name has its badge too: "Agents 6 need you" in the sidebar, "6 need you Agents" on iPhone.
+  const button = main.getByRole('button', { name: new RegExp(`(^| )${label}( |$)`) });
   if (label === 'Usage' && !(await button.count())) return void (await main.getByRole('button', { name: 'Settings', exact: true }).click(), await page.locator('.usage-row').first().click());
   await button.click();
 };
