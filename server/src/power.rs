@@ -543,6 +543,40 @@ struct KeepAwakeBeforeSleep {
     others: Vec<String>,
 }
 
+/// `POST /api/power/sleep`'s answer: the Mac goes to sleep (`duplicate` when this request ID already
+/// put it to sleep, `at` then), or the request is refused with an `error`.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct SleepAnswer {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<&'static str>,
+}
+
+impl SleepAnswer {
+    fn refused(error: &'static str) -> Self {
+        SleepAnswer {
+            ok: false,
+            duplicate: None,
+            at: None,
+            error: Some(error),
+        }
+    }
+
+    /// `asked_at`: when this request ID asked before.
+    fn asleep(asked_at: Option<u64>) -> Self {
+        SleepAnswer {
+            ok: true,
+            duplicate: Some(asked_at.is_some()),
+            at: asked_at,
+            error: None,
+        }
+    }
+}
+
 pub struct Power {
     state_file: PathBuf,
     state: PowerState,
@@ -739,15 +773,15 @@ impl Power {
 
     /// Sleep the Mac once per request ID. The reply is returned before the command runs (see `tick`);
     /// a repeated request ID never re-runs the command.
-    pub fn request_sleep(&mut self, request_id: &str, now: u64) -> Value {
+    pub fn request_sleep(&mut self, request_id: &str, now: u64) -> SleepAnswer {
         if !self.caps.sleep {
-            return json!({ "ok": false, "error": "unsupported" });
+            return SleepAnswer::refused("unsupported");
         }
         if !valid_request_id(request_id) {
-            return json!({ "ok": false, "error": "invalid_request" });
+            return SleepAnswer::refused("invalid_request");
         }
-        if let Some(at) = self.state.sleep_requests.get(request_id) {
-            return json!({ "ok": true, "duplicate": true, "at": at });
+        if let Some(&at) = self.state.sleep_requests.get(request_id) {
+            return SleepAnswer::asleep(Some(at));
         }
         // Briardr can lift its own disablesleep, not another app's.
         let others_disabled_sleep = self
@@ -755,7 +789,7 @@ impl Power {
             .as_ref()
             .is_some_and(|s| s.keep_awake.sleep_disabled);
         if others_disabled_sleep && !self.state.disabled_sleep {
-            return json!({ "ok": false, "error": "sleep_disabled" });
+            return SleepAnswer::refused("sleep_disabled");
         }
         self.state
             .sleep_requests
@@ -774,7 +808,7 @@ impl Power {
         self.save();
         self.event("mac_sleep_requested", json!({}));
         self.pending_sleep_at = Some(now + SLEEP_LEAD_MS);
-        json!({ "ok": true, "duplicate": false })
+        SleepAnswer::asleep(None)
     }
 
     fn save(&self) {
@@ -1129,7 +1163,7 @@ mod tests {
         assert_eq!(report.summary.name, "host.local");
         p.set_keep_awake(true, 0);
         assert_eq!(
-            p.request_sleep("abcdefgh", 0),
+            json!(p.request_sleep("abcdefgh", 0)),
             json!({ "ok": false, "error": "unsupported" })
         );
         p.tick(120_000);
@@ -1203,15 +1237,15 @@ mod tests {
         let (_dir, mut p) = setup("sleep", HostPlatform::Macos, w.clone(), None);
         p.start(false, 0);
         assert_eq!(
-            p.request_sleep("bad id!", 0),
+            json!(p.request_sleep("bad id!", 0)),
             json!({ "ok": false, "error": "invalid_request" })
         );
         assert_eq!(
-            p.request_sleep("req-123456", 1_000),
+            json!(p.request_sleep("req-123456", 1_000)),
             json!({ "ok": true, "duplicate": false })
         );
         assert_eq!(
-            p.request_sleep("req-123456", 1_500),
+            json!(p.request_sleep("req-123456", 1_500)),
             json!({ "ok": true, "duplicate": true, "at": 1000 })
         );
         p.tick(1_600);
@@ -1226,7 +1260,7 @@ mod tests {
         let (_dir, mut p) = setup("refused", HostPlatform::Macos, w.clone(), None);
         p.start(false, 0);
         assert_eq!(
-            p.request_sleep("req-123456", 0),
+            json!(p.request_sleep("req-123456", 0)),
             json!({ "ok": false, "error": "sleep_disabled" })
         );
         assert_eq!(count(&w, "sleepnow"), 0);

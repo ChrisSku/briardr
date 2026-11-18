@@ -3,13 +3,16 @@ use std::sync::Arc;
 
 use axum::http::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::{
-    action_err, caps_json, json_body, json_body_as, ok, response, send, str_or_empty, ApiError,
-    App, Ctx, Routes, VERSION,
+    action_err, done, json_body_as, ok, refuse, refuse_code, response, send, ApiError, App, Ctx,
+    DeviceRef, Done, LiveMessage, RenameBody, Routes, VERSION,
 };
-use crate::auth::{device_name, PairError};
+use crate::auth::{device_name, Device, DeviceInfo, PairError};
+use crate::platform::{HostCapabilities, HostPlatform};
+use crate::plugins::PluginInfo;
+use crate::power::MacSummary;
 use crate::qr;
 use crate::terminal_hub::PROTOCOL;
 
@@ -22,16 +25,6 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|_| ApiError::Internal)
-}
-
-/// The error category the pairing API and diagnostics use (`PairResult.error`).
-fn pair_error_code(error: &PairError) -> &'static str {
-    match error {
-        PairError::NoCode => "no_code",
-        PairError::Expired => "expired",
-        PairError::Invalid => "invalid",
-        PairError::Locked => "locked",
-    }
 }
 
 /// What the pairing screen says for a refused code; `host` is "the Mac" or "the server".
@@ -51,9 +44,10 @@ fn device_gone() -> ApiError {
     action_err(404, "device_gone", "That device is no longer signed in.")
 }
 
-/// `POST /api/devices/:id/rename`; a missing or `null` name is refused like an empty one.
+/// `POST /api/pair`: the code shown on the host or another device, and the new device's name.
 #[derive(Deserialize)]
-struct RenameBody {
+struct PairBody {
+    code: Option<String>,
     name: Option<String>,
 }
 
@@ -69,16 +63,64 @@ struct PairingCode {
     qr: Option<Vec<String>>,
 }
 
-/// The same authenticated startup data for an existing session and a newly paired device.
-async fn session_info(app: &Arc<App>, device: &crate::auth::Device) -> Result<Value, ApiError> {
-    Ok(json!({
-        "device": {"id": device.id, "name": device.name},
-        "version": VERSION,
-        "protocol": PROTOCOL,
-        "instanceId": app.instance_id,
-        "host": caps_json(&app.d.caps),
-        "plugins": super::routes_plugins::plugin_list(app).await?,
-    }))
+/// `GET /api/session` and `POST /api/pair`: the same startup data for an existing session and a newly
+/// paired device.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Session<'a> {
+    device: DeviceRef<'a>,
+    version: &'static str,
+    protocol: u32,
+    /// Changes on every server start.
+    instance_id: &'a str,
+    host: &'a HostCapabilities,
+    plugins: Vec<PluginInfo>,
+}
+
+/// `GET /api/session` from a device that isn't signed in: enough for the pairing screen's words.
+#[derive(Serialize)]
+struct SignedOut {
+    error: &'static str,
+    paired: bool,
+    host: PairingHost,
+}
+
+#[derive(Serialize)]
+struct PairingHost {
+    noun: &'static str,
+    platform: HostPlatform,
+}
+
+/// `GET /api/devices`: every paired device, which of them this is, and which take alerts.
+#[derive(Serialize)]
+struct Devices {
+    devices: Vec<DeviceEntry>,
+}
+
+#[derive(Serialize)]
+struct DeviceEntry {
+    #[serde(flatten)]
+    device: DeviceInfo,
+    current: bool,
+    push: bool,
+}
+
+/// `GET /api/mac` and `POST /api/power/keep-awake`: the power state and what the host can do.
+#[derive(Serialize)]
+pub(super) struct MacState<'a> {
+    pub mac: MacSummary,
+    pub host: &'a HostCapabilities,
+}
+
+async fn session_info<'a>(app: &'a Arc<App>, device: &'a Device) -> Result<Session<'a>, ApiError> {
+    Ok(Session {
+        device: device.into(),
+        version: VERSION,
+        protocol: PROTOCOL,
+        instance_id: &app.instance_id,
+        host: &app.d.caps,
+        plugins: super::routes_plugins::plugin_list(app).await?,
+    })
 }
 
 pub(super) fn register(r: &mut Routes) {
@@ -90,18 +132,15 @@ pub(super) fn register(r: &mut Routes) {
         true,
         |app: Arc<App>, ctx: Ctx| async move {
             let Some(device) = &ctx.device else {
-                return Ok(send(
-                    401,
-                    &json!({
-                        "error": "unauthenticated",
-                        "paired": false,
-                        "host": {
-                            "noun": app.d.caps.noun,
-                            "platform": caps_json(&app.d.caps)["platform"],
-                        },
-                    }),
-                    &[],
-                ));
+                let body = SignedOut {
+                    error: "unauthenticated",
+                    paired: false,
+                    host: PairingHost {
+                        noun: app.d.caps.noun,
+                        platform: app.d.caps.platform,
+                    },
+                };
+                return Ok(send(401, &body, &[]));
             };
             ok(session_info(&app, device).await?)
         },
@@ -109,43 +148,34 @@ pub(super) fn register(r: &mut Routes) {
 
     r.add(Method::POST, "/api/pair", true, |app: Arc<App>, mut ctx: Ctx| async move {
         if !app.origin_allowed(&ctx.headers) {
-            return Ok(send(403, &json!({"error": "bad_origin"}), &[]));
+            return Ok(refuse_code(403, "bad_origin"));
         }
         let client = ctx.client.clone();
         if !app.pair_allowed(&client) {
-            return Ok(send(
-                429,
-                &json!({"error": "rate_limited", "message": "Too many attempts. Wait a few minutes."}),
-                &[],
-            ));
+            return Ok(refuse(429, "rate_limited", "Too many attempts. Wait a few minutes."));
         }
-        let b = json_body(&mut ctx, 4096).await?;
-        let code = str_or_empty(b.get("code"));
-        let name = str_or_empty(b.get("name"));
+        let b: PairBody = json_body_as(&mut ctx, 4096).await?;
+        let (code, name) = (b.code.unwrap_or_default(), b.name.unwrap_or_default());
         let auth = app.d.auth.clone();
         let result = blocking(move || auth.pair(&code, &name, &client)).await?;
         app.event(
             "pair_attempt",
             json!({
                 "ok": result.is_ok(),
-                "error": result.as_ref().err().map(pair_error_code),
+                "error": result.as_ref().err().map(PairError::code),
             }),
         );
         match result {
             Err(error) => {
                 // On the internet, don't tell strangers whether a code is active right now.
                 if app.in_proxy_mode() {
-                    return Ok(send(
+                    return Ok(refuse(
                         400,
-                        &json!({"error": "invalid", "message": "That code isn’t right, or it’s no longer valid. Check it, or create a new one."}),
-                        &[],
+                        "invalid",
+                        "That code isn’t right, or it’s no longer valid. Check it, or create a new one.",
                     ));
                 }
-                Ok(send(
-                    400,
-                    &json!({"error": pair_error_code(&error), "message": pair_message(&error, &app.host())}),
-                    &[],
-                ))
+                Ok(refuse(400, error.code(), &pair_message(&error, &app.host())))
             }
             Ok((device, cookie)) => Ok(send(
                 200,
@@ -169,7 +199,7 @@ pub(super) fn register(r: &mut Routes) {
             }
             Ok(send(
                 200,
-                &json!({"ok": true}),
+                &Done { ok: true },
                 &[("set-cookie", app.d.auth.clear_cookie_header())],
             ))
         },
@@ -181,22 +211,19 @@ pub(super) fn register(r: &mut Routes) {
         "/api/devices",
         false,
         |app: Arc<App>, ctx: Ctx| async move {
-            let me = ctx.device()?.id.clone();
-            let devices: Vec<Value> = app
+            let me = &ctx.device()?.id;
+            let devices = app
                 .d
                 .auth
                 .list()
-                .iter()
-                .map(|x| {
-                    let mut v = serde_json::to_value(x).unwrap_or(Value::Null);
-                    if let Value::Object(map) = &mut v {
-                        map.insert("current".into(), json!(x.id == me));
-                        map.insert("push".into(), json!(app.d.push.has_device(&x.id)));
-                    }
-                    v
+                .into_iter()
+                .map(|device| DeviceEntry {
+                    current: &device.id == me,
+                    push: app.d.push.has_device(&device.id),
+                    device,
                 })
                 .collect();
-            ok(json!({"devices": devices}))
+            ok(Devices { devices })
         },
     );
 
@@ -213,7 +240,7 @@ pub(super) fn register(r: &mut Routes) {
             if !removed {
                 return Err(device_gone());
             }
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -222,6 +249,7 @@ pub(super) fn register(r: &mut Routes) {
         "/api/devices/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
+            // A missing or `null` name is refused like an empty one.
             let body: RenameBody = json_body_as(&mut ctx, 4096).await?;
             let Some(name) = body.name.as_deref().and_then(device_name) else {
                 return Err(action_err(400, "invalid_name", "Enter a name."));
@@ -234,7 +262,7 @@ pub(super) fn register(r: &mut Routes) {
             if !renamed {
                 return Err(device_gone());
             }
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -252,7 +280,7 @@ pub(super) fn register(r: &mut Routes) {
                 code,
                 expires_at,
             };
-            ok(serde_json::to_value(body).map_err(|_| ApiError::Internal)?)
+            ok(body)
         },
     );
 
@@ -261,7 +289,7 @@ pub(super) fn register(r: &mut Routes) {
         Method::GET,
         "/api/state",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move { ok(app.model_message()) },
+        |app: Arc<App>, _ctx: Ctx| async move { ok(LiveMessage::Model(app.model_state())) },
     );
 
     r.add(
@@ -270,7 +298,10 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, _ctx: Ctx| async move {
             let mac = app.poll_power().await?;
-            ok(json!({"mac": mac, "host": caps_json(&app.d.caps)}))
+            ok(MacState {
+                mac,
+                host: &app.d.caps,
+            })
         },
     );
 
@@ -281,7 +312,7 @@ pub(super) fn register(r: &mut Routes) {
         true,
         |app: Arc<App>, _ctx: Ctx| async move {
             let Some(profile) = app.d.ca_profile.clone() else {
-                return Ok(send(404, &json!({"error": "not_available"}), &[]));
+                return Ok(refuse_code(404, "not_available"));
             };
             Ok(response(
                 200,
@@ -306,11 +337,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pair_errors_map_to_ts_codes_and_messages() {
-        assert_eq!(pair_error_code(&PairError::NoCode), "no_code");
-        assert_eq!(pair_error_code(&PairError::Expired), "expired");
-        assert_eq!(pair_error_code(&PairError::Invalid), "invalid");
-        assert_eq!(pair_error_code(&PairError::Locked), "locked");
+    fn pair_errors_have_the_codes_and_messages_the_client_shows() {
+        assert_eq!(PairError::NoCode.code(), "no_code");
+        assert_eq!(PairError::Expired.code(), "expired");
+        assert_eq!(PairError::Invalid.code(), "invalid");
+        assert_eq!(PairError::Locked.code(), "locked");
         assert_eq!(
             pair_message(&PairError::NoCode, "the Mac"),
             "There’s no active pairing code. Create one on the Mac or from a signed-in device."
