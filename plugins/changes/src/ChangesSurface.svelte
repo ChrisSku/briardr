@@ -1,13 +1,14 @@
 <!--
-  Changes: read-only review of uncommitted work against HEAD. Refreshes when opened, when the agent's
-  state changes, and on pull-to-refresh; never polls in the background. Requests like "revert this
+  Changes: read-only review of uncommitted work against HEAD or, when the branch has commits of its
+  own, of everything since the branch it started from. Refreshes when opened, when the agent's state
+  changes, and on pull-to-refresh; never polls in the background. Requests like "revert this
   file" belong to the agent, through the terminal: lines picked in a diff take a comment each, and the
   comments go to the terminal together, as one paste.
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
-  import { LETTER, reviewed, type ChangedFile, type Report } from './changes.ts';
+  import { LETTER, markKey, reviewed, type ChangedFile, type Report, type Since } from './changes.ts';
   import Diff from './Diff.svelte';
   import { reviewOf } from './review.ts';
   import ReviewSheet from './ReviewSheet.svelte';
@@ -18,12 +19,16 @@
   let error = $state<string | null>(null);
   let loading = $state(false);
   let open = $state.raw<Record<string, boolean>>({});
+  /** What the files are compared with; back to uncommitted work when the branch has no commits of its own. */
+  let since = $state<Since>('head');
 
   async function load() {
     loading = true;
     error = null;
     try {
-      report = await briardr.core<Report>('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes`, undefined, { timeout: 20_000 });
+      const r = await briardr.core<Report>('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes${since === 'base' ? '?since=base' : ''}`, undefined, { timeout: 20_000 });
+      if (!r.base) since = 'head';
+      report = r;
     } catch (e) {
       error = e instanceof ApiError ? e.message : 'Couldn’t load changes.';
     } finally {
@@ -35,9 +40,12 @@
   const id = $derived(stream.id);
   const agentState = $derived(stream.state);
   $effect(() => {
-    void [id, agentState];
+    void [id, agentState, since];
     if (visible) untrack(load);
   });
+  const base = $derived(report?.base ?? null);
+  /** What the report on screen is of (the other view shows until the one asked for arrives). */
+  const shown = $derived(report?.since ?? 'head');
 
   const ptr = new PullToRefresh(load);
   const totals = $derived.by(() => {
@@ -47,8 +55,8 @@
   const marks = $derived(reviewed.value[stream.id] || {});
   function setMark(f: ChangedFile, on: boolean) {
     const cur = { ...(reviewed.value[stream.id] || {}) };
-    if (on) cur[f.path] = f.signature;
-    else delete cur[f.path];
+    if (on) cur[markKey(f.path, shown)] = f.signature;
+    else delete cur[markKey(f.path, shown)];
     reviewed.value = { ...reviewed.value, [stream.id]: cur };
   }
 
@@ -79,20 +87,32 @@
         {/if}
         <AsOf at={report?.asOf} />
       </div>
+      {#if base}
+        <div class="segmented small changes-since" role="group" aria-label="Compare with">
+          <button class={since === 'head' ? 'is-on' : ''} aria-pressed={since === 'head'} onclick={() => (since = 'head')}>Uncommitted</button>
+          <button class={since === 'base' ? 'is-on' : ''} aria-pressed={since === 'base'} onclick={() => (since = 'base')} title="{base.ahead} {base.ahead === 1 ? 'commit' : 'commits'} since {base.name} ({base.short}), and the uncommitted work">Since {base.name}</button>
+        </div>
+      {/if}
     </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     {#if !report && !error}<p class="hint padded">Loading…</p>{/if}
     {#if report?.state === 'not_repo'}<Empty title="Not a Git repository">This stream’s folder isn’t inside a Git repository.</Empty>{/if}
     {#if report?.state === 'git_missing'}<Empty title="Git isn’t installed on {host.the}">Install Git ({host.platform === 'macos' ? 'for example with Xcode Command Line Tools' : 'for example with sudo apt install git'}) to review changes.</Empty>{/if}
     {#if report?.state === 'error'}<Empty title="Git reported an error">{report.message}</Empty>{/if}
-    {#if report?.state === 'clean'}<Empty title="No uncommitted changes">The working tree matches {report.noCommits ? 'an empty repository' : 'HEAD'}.</Empty>{/if}
+    {#if report?.state === 'clean'}
+      {#if shown === 'base' && base}
+        <Empty title="No changes since {base.name}">The working tree matches {base.name} at {base.short}.</Empty>
+      {:else}
+        <Empty title="No uncommitted changes">The working tree matches {report.noCommits ? 'an empty repository' : 'HEAD'}.{#if base} {base.ahead} {base.ahead === 1 ? 'commit is' : 'commits are'} ahead of {base.name}.{/if}</Empty>
+      {/if}
+    {/if}
     {#if report?.state === 'ok'}
       {#if report.truncated}<p class="note">Showing the first {report.files.length} of {report.totalFiles} files.</p>{/if}
       <p class="changes-hint"><Icon name="info" size={14} />Read-only. To have something changed, tap line numbers in a diff and comment for the agent.</p>
       <ul class="files card">
         {#each report.files as f}
           {@const isOpen = !!open[f.path]}
-          {@const done = marks[f.path] === f.signature}
+          {@const done = marks[markKey(f.path, shown)] === f.signature}
           {@const slash = f.path.lastIndexOf('/') + 1}
           <li class={['file', done && 'is-reviewed']}>
             <div class="file-row">
@@ -113,7 +133,7 @@
                 <Icon name="check" size={16} />
               </label>
             </div>
-            {#if isOpen}<Diff {stream} {briardr} file={f} />{/if}
+            {#if isOpen}<Diff {stream} {briardr} file={f} since={shown} />{/if}
           </li>
         {/each}
       </ul>

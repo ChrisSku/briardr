@@ -797,6 +797,7 @@ input[type='checkbox'][role='switch']:checked::after { transform: translateX(18p
 .branch-name { font: var(--type-mono-strong); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .branch-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font: var(--type-footnote); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .branch-meta .sep, .branch-meta .asof { color: var(--text-tertiary); }
+.changes-since { margin-top: 4px; }
 .changes-hint { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 4px; font: var(--type-footnote); color: var(--text-tertiary); }
 .files { list-style: none; margin: 0; padding: 0; }
 .file + .file { border-top: 1px solid var(--line-subtle); }
