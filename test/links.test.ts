@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 import type { ILink, ILinkProvider, Terminal } from '@xterm/xterm';
-import { continues, isLocalhostUrl, isWebUrl, linkAt, linksInLogicalLine, logicalLineAt, registerLinkProvider, wordAround } from '../web/src/terminal/links.ts';
+import { continues, isLocalhostUrl, isWebUrl, linkAt, linksInLogicalLine, logicalLineAt, registerLinkProvider, screenSelection, wordAround } from '../web/src/terminal/links.ts';
 
 /** A terminal `cols` wide showing `rows`; the rows in `wrapped` have xterm's wrap flag. */
 function screen(cols: number, rows: string[], wrapped: number[] = []) {
@@ -118,4 +118,22 @@ test('the word around a character: a whole URL, or text between spaces, quotes a
   assert.equal(pick('git commit -m "fix it"', 16), 'fix');
   assert.equal(pick('open(src/main.ts:12)', 9), 'src/main.ts:12');
   assert.equal(pick('a  b', 2), '', 'between two spaces');
+});
+
+test('Select Text copies the visible rows, without trailing spaces, and selects the word at the cell touched', () => {
+  // Scrolled back by one row: the history's first row isn't on the screen.
+  const history = ['old', '$ echo alpha bravo   ', 'alpha bravo', '$ open https://example.com/x   '];
+  const term = {
+    rows: 3,
+    buffer: { active: { viewportY: 1, getLine: (r: number) => history[r] !== undefined && { translateToString: (trimRight: boolean) => (trimRight ? history[r].trimEnd() : history[r]) } } },
+  } as unknown as Terminal;
+  const pick = (row: number, col: number) => {
+    const { text, start, end } = screenSelection(term, row, col);
+    assert.equal(text, '$ echo alpha bravo\nalpha bravo\n$ open https://example.com/x');
+    return text.slice(start, end);
+  };
+  assert.equal(pick(0, 8), 'alpha', 'on the first row');
+  assert.equal(pick(1, 7), 'bravo', 'on a later row');
+  assert.equal(pick(2, 12), 'https://example.com/x', 'a link whole');
+  assert.equal(pick(1, 30), 'bravo', 'past the end of a row, its last word');
 });
