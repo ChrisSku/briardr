@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.1; Bun and Rust at the versions pinned in mise.toml
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8; Bun and Rust at the versions pinned in mise.toml
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2; the server's dependencies, built and saved on main
         with:
@@ -87,73 +87,40 @@ jobs:
           . deploy/versions.env # the Caddy version servers fall back to
           docker run --rm -v "$out:/etc/caddy:ro" "caddy:$CADDY_VERSION" caddy validate --config /etc/caddy/briardr.caddy --adapter caddyfile
 
-      # WebKit and the system packages it needs, about 225 MB from Playwright's CDN and the runner's Ubuntu
-      # mirror, are cached for the runner image and the Playwright version, and saved on main. The mirror can
-      # crawl: on 2026-11-18 it sent the packages at 100 kB/s for 22 minutes, and the job ran out of time in
-      # the last browser check. With the cache a run downloads only the packages Ubuntu has updated since,
-      # and a cache saved for an earlier image or Playwright still holds most of them.
-      - name: WebKit's cache key (the runner image and the Playwright version)
-        id: webkit-key
-        run: |
-          echo "prefix=webkit-$ImageOS-" >> "$GITHUB_OUTPUT"
-          echo "key=webkit-$ImageOS-$ImageVersion-$(bun --bun playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
-      - name: Restore WebKit and its system libraries
-        id: webkit-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/ms-playwright
-            ~/.cache/webkit-packages
-          key: ${{ steps.webkit-key.outputs.key }}
-          restore-keys: ${{ steps.webkit-key.outputs.prefix }}
       - name: WebKit and its system libraries
-        timeout-minutes: 10 # a slow download fails here, by name, instead of using up the job's time
+        timeout-minutes: 10 # under a minute; a slow download fails here, by name, instead of using up the job's time
         run: |
-          # apt-get installs a package from its archive folder when the file there is the version it
-          # wants, and downloads the others. The folder, less what Ubuntu no longer serves, is then cached.
-          packages=~/.cache/webkit-packages
-          mkdir -p "$packages"
-          find "$packages" -name '*.deb' -exec sudo cp -t /var/cache/apt/archives {} +
+          # On AWS runners the image's mirror list starts with us-east-2.ec2.archive.ubuntu.com, which sends
+          # some downloads at 0.1 MB/s: WebKit's 125 MB of packages took 15 to 26 minutes there (2026-11-18),
+          # and the job ran out of time in the browser checks. Azure's mirror, first on Azure runners, was
+          # fast from both clouds.
+          sudo sed -i 's|^http://[^/]*\.ec2\.archive\.ubuntu\.com/|http://azure.archive.ubuntu.com/|' /etc/apt/apt-mirrors.txt
           bun --bun playwright install --with-deps webkit
-          sudo apt-get autoclean -qq
-          rm -f "$packages"/*.deb
-          find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp -t "$packages" {} +
-      - name: Save WebKit and its system libraries
-        if: steps.webkit-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/ms-playwright
-            ~/.cache/webkit-packages
-          key: ${{ steps.webkit-key.outputs.key }}
 
       - name: Browser checks (WebKit)
         timeout-minutes: 15 # about 6 minutes
         run: mise run test:ui
 
-  mirror-probe:
+  webkit-install-probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          install_args: bun
+      - run: bun install --frozen-lockfile
       - run: |
           cat /etc/apt/apt-mirrors.txt
-          deb=pool/universe/f/ffmpeg/libavcodec60_6.1.1-3ubuntu5_amd64.deb
-          for h in $(grep -o 'https\?://[^/ ]*' /etc/apt/apt-mirrors.txt) http://us-west-2.ec2.archive.ubuntu.com http://us-east-2.ec2.archive.ubuntu.com http://archive.ubuntu.com http://azure.archive.ubuntu.com http://security.ubuntu.com; do
-            echo "$h $(curl -s -o /dev/null -m 20 -w '%{http_code} %{size_download}B %{speed_download}B/s' "$h/ubuntu/$deb")"
-          done
-          h=$(grep -o 'https\?://[^/ ]*' /etc/apt/apt-mirrors.txt | head -1)
-          echo "4 parallel from $h:"
-          for f in pool/universe/f/ffmpeg/libavcodec60_6.1.1-3ubuntu5_amd64.deb pool/universe/f/fonts-ipafont/fonts-ipafont-gothic_00303-21ubuntu1_all.deb pool/main/f/fonts-freefont/fonts-freefont-ttf_20211204+svn4273-2_all.deb pool/universe/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3-5_all.deb; do
-            curl -s -o /dev/null -m 20 -w "  %{size_download}B %{speed_download}B/s\n" "$h/ubuntu/$f" &
-          done
-          wait
-          sudo apt-get install -y -qq --no-install-recommends fonts-ipafont-gothic > /dev/null
-          find /var/cache/apt/archives -maxdepth 1 -name '*.deb'
-          apt-config dump | grep -i 'keep\|clean\|Post-Invoke' || true
+          sudo sed -i 's|^http://[^/]*\.ec2\.archive\.ubuntu\.com/|http://azure.archive.ubuntu.com/|' /etc/apt/apt-mirrors.txt
+          cat /etc/apt/apt-mirrors.txt
+          start=$(date +%s)
+          bun --bun playwright install --with-deps webkit
+          echo "INSTALL TOOK $(( $(date +%s) - start ))s"
 
   package:
     if: github.actor != 'briardr-release[bot]'
