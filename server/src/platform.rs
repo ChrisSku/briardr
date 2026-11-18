@@ -61,6 +61,18 @@ mod tests {
     }
 
     #[test]
+    fn the_client_sees_the_capabilities_in_camel_case() {
+        assert_eq!(
+            serde_json::to_value(capabilities(HostPlatform::Linux)).unwrap(),
+            serde_json::json!({
+                "platform": "linux", "noun": "server", "battery": false, "keepAwake": false,
+                "sleep": false, "dictation": false, "claudeKeychain": false,
+            })
+        );
+        assert_eq!(serde_json::to_value(HostPlatform::Macos).unwrap(), "macos");
+    }
+
+    #[test]
     fn mac_integrations_only_on_macos() {
         let mac = capabilities(HostPlatform::Macos);
         assert_eq!(mac.noun, "Mac");

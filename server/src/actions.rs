@@ -340,6 +340,18 @@ struct Rect {
     height: f64,
 }
 
+/// The largest pane by area, and its size; a tie keeps the earlier pane.
+fn largest(panes: &[PaneRect]) -> Option<(&PaneRect, &Rect)> {
+    let area = |r: &Rect| r.width * r.height;
+    panes
+        .iter()
+        .filter_map(|p| Some((p, p.rect.as_ref()?)))
+        .fold(None, |best, (p, r)| match best {
+            Some((_, kept)) if area(kept) >= area(r) => best,
+            _ => Some((p, r)),
+        })
+}
+
 /// What `pane.read` returns.
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -730,15 +742,7 @@ impl Actions {
             .unwrap_or_default()
             .layout
             .panes;
-        // The largest pane by area; a tie keeps the earlier pane.
-        let area = |r: &Rect| r.width * r.height;
-        let biggest = panes
-            .iter()
-            .filter_map(|p| Some((p, p.rect.as_ref()?)))
-            .fold(None, |best, (p, r)| match best {
-                Some((_, kept)) if area(kept) >= area(r) => best,
-                _ => Some((p, r)),
-            });
+        let biggest = largest(&panes);
         let target = biggest
             .and_then(|(p, _)| p.pane_id.clone())
             .filter(|s| !s.is_empty())
@@ -1084,6 +1088,58 @@ mod tests {
         assert_eq!((p.workspace_id, p.name), (None, None));
         assert!(serde_json::from_value::<NewWorkspace>(json!({"folder": 42})).is_err());
         assert!(serde_json::from_value::<NewProject>(json!({"workspaceId": 1})).is_err());
+    }
+
+    #[test]
+    fn a_new_stream_splits_the_largest_pane() {
+        let layout: PaneLayout = serde_json::from_value(json!({"layout": {"panes": [
+            {"pane_id": "a", "rect": {"x": 0, "y": 0, "width": 80, "height": 24}},
+            {"pane_id": "b", "rect": {"x": 80, "y": 0, "width": 120, "height": 40}},
+            {"pane_id": "c", "rect": {"x": 0, "y": 24, "width": 160, "height": 30}},
+            {"pane_id": "d"},
+        ]}}))
+        .unwrap();
+        let (pane, rect) = largest(&layout.layout.panes).unwrap();
+        assert_eq!(
+            (pane.pane_id.as_deref(), rect.width, rect.height),
+            (Some("b"), 120.0, 40.0),
+            "a tie (b and c) keeps the earlier pane"
+        );
+        assert!(largest(&[]).is_none());
+    }
+
+    #[test]
+    fn answers_keep_the_fields_the_client_reads() {
+        let created = CreatedWorkspace {
+            workspace_id: Some("w1".into()),
+            project_id: Some("w1:t1".into()),
+            stream_id: None,
+            focus_unchanged: true,
+        };
+        assert_eq!(
+            json!(created),
+            json!({"workspaceId": "w1", "projectId": "w1:t1", "focusUnchanged": true})
+        );
+        let herdr: HerdrAgent = serde_json::from_value(json!({
+            "name": "fix-login", "agent": "claude", "agent_status": "working", "state_change_seq": 4,
+            "agent_session": {"value": "c0ffee"}, "pane_id": "w1:p1",
+        }))
+        .unwrap();
+        assert_eq!(
+            json!(AgentInfo::from(herdr)),
+            json!({"name": "fix-login", "agent": "claude", "status": "working", "stateChangeSeq": 4, "session": "present"})
+        );
+        let bare: HerdrAgent = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(
+            json!(AgentInfo::from(bare)),
+            json!({"name": null, "stateChangeSeq": null, "session": null})
+        );
+        let read: PaneRead =
+            serde_json::from_value(json!({"read": {"text": "$ ls", "truncated": true}})).unwrap();
+        assert_eq!(
+            (read.read.text.as_deref(), read.read.truncated),
+            (Some("$ ls"), true)
+        );
     }
 
     #[test]
