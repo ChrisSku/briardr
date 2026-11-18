@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ApiError, Sheet, type PluginContext } from '@briardr/sdk';
+  import { errorMessage, Sheet, type PluginContext } from '@briardr/sdk';
   import type { Usage } from './usage.ts';
 
   let { briardr, name, available, onClose, onUsed }: { briardr: PluginContext; name: string; available: number; onClose: () => void; onUsed: (u: Usage) => void } = $props();
@@ -23,7 +23,7 @@
       briardr.toast(OUTCOME[r.outcome] || 'Done.');
       onClose();
     } catch (e) {
-      error = e instanceof ApiError ? e.message : `Couldn’t reach ${briardr.host().the}.`;
+      error = errorMessage(e, `Couldn’t reach ${briardr.host().the}.`);
       busy = false;
     }
   }

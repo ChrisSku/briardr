@@ -1,5 +1,6 @@
 // Installing Briardr as an app: the browser's own install prompt where there is one (Chromium), otherwise
 // the steps for this browser. Imported first thing by main.ts, because the prompt's event fires early.
+import { isIOS, platform, type Platform } from './device.ts';
 import { record } from './diag.ts';
 import { persisted, state } from './reactive.svelte.ts';
 
@@ -10,6 +11,8 @@ interface BeforeInstallPromptEvent extends Event {
 
 /** Open as an installed app (Home Screen, Dock, app window), not in a browser tab. */
 export const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+/** In an iPhone's or iPad's browser, not its Home Screen app, which alerts need and which signs in on its own. */
+export const iosBrowserTab = isIOS() && !standalone;
 /** The browser's install prompt, while it offers one. */
 export const installPrompt = state<BeforeInstallPromptEvent | null>(null);
 /** Installed from this tab just now (the app opens separately). */
@@ -40,18 +43,6 @@ export async function promptInstall(): Promise<void> {
   await e.prompt();
   const { outcome } = await e.userChoice;
   record('install_prompt', { reason: outcome });
-}
-
-export type Platform = 'iphone' | 'ipad' | 'mac-safari' | 'android' | 'firefox' | 'desktop';
-
-export function platform(): Platform {
-  const ua = navigator.userAgent;
-  if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ipad';
-  if (/iPhone|iPod/.test(ua)) return 'iphone';
-  if (/Android/.test(ua)) return 'android';
-  if (/Firefox\//.test(ua)) return 'firefox';
-  if (/Macintosh/.test(ua) && /Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua)) return 'mac-safari';
-  return 'desktop';
 }
 
 /** How to install in this browser, for when it has no install prompt to offer. */

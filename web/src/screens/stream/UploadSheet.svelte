@@ -6,7 +6,7 @@
 <script lang="ts">
   import { theHost } from '../../host.ts';
   import { onMount } from 'svelte';
-  import { ApiError, upload } from '../../api.ts';
+  import { ApiError, errorMessage, upload } from '../../api.ts';
   import { record } from '../../diag.ts';
   import { prepareImage, type PreparedImage } from '../../media.ts';
   import { toast } from '../../store.ts';
@@ -96,7 +96,7 @@
       onClose();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'cancelled') return (phase = { k: 'review' });
-      phase = { k: 'error', message: e instanceof ApiError ? e.message : 'Upload failed.' };
+      phase = { k: 'error', message: errorMessage(e, 'Upload failed.') };
     }
   }
 

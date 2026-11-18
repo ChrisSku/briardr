@@ -24,7 +24,7 @@
 <script lang="ts">
   import { theHost } from '../../host.ts';
   import { onMount } from 'svelte';
-  import { api, ApiError } from '../../api.ts';
+  import { api, errorMessage } from '../../api.ts';
   import { Recorder } from '../../media.ts';
   import { hardwareKeyboard, prefs, toast, topOverlay } from '../../store.ts';
   import { appOf } from '../../terminal/barkeys.ts';
@@ -398,7 +398,7 @@
       // One paste into the input line, never submitted, and only on the same connection.
       if (ctl.paste(res.text, true, dictGen)) toast('Dictation inserted. Edit, then press Enter.');
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Dictation failed.', 5000);
+      toast(errorMessage(e, 'Dictation failed.'), 5000);
     }
   }
 

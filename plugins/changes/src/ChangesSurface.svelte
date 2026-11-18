@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
+  import { AsOf, Empty, errorMessage, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
   import { LETTER, reviewed, type ChangedFile, type Report } from './changes.ts';
   import Diff from './Diff.svelte';
   import { reviewOf } from './review.ts';
@@ -25,7 +25,7 @@
     try {
       report = await briardr.core<Report>('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes`, undefined, { timeout: 20_000 });
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Couldn’t load changes.';
+      error = errorMessage(e, 'Couldn’t load changes.');
     } finally {
       loading = false;
     }

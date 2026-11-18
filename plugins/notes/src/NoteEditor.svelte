@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { ApiError, AsOf, Icon, keyboardInset, prepareImage, type Stream, type StreamContext } from '@briardr/sdk';
+  import { ApiError, AsOf, errorMessage, Icon, keyboardInset, prepareImage, type Stream, type StreamContext } from '@briardr/sdk';
   import { renderDiagrams, renderMarkdown } from '@briardr/sdk/markdown';
   import { cacheNote, copy, draftKey, enc, inflight, listKey, load, MAX_BYTES, notesPath, sendToTerminal, store, type Draft, type Note } from './notes.ts';
 
@@ -246,7 +246,7 @@
         requestAnimationFrame(() => document.activeElement === area && area?.setSelectionRange(caret, caret));
         if (!preview) toast('Image added. Preview shows it.');
       } catch (e) {
-        toast(e instanceof ApiError ? e.message : 'Couldn’t add that image.');
+        toast(errorMessage(e, 'Couldn’t add that image.'));
       } finally {
         adding--;
       }

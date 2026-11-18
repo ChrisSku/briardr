@@ -1,6 +1,6 @@
 // Helpers shared by several screens: battery text, Herdr problems, stream context, seen markers,
 // opening a stream, renaming and closing, and a stream's actions menu.
-import { api, ApiError } from '../api.ts';
+import { api, errorMessage } from '../api.ts';
 import { navigate } from '../router.ts';
 import { herdr, listPane, live, mac, model, seen, seenKey, toast, visibleStreamId } from '../store.ts';
 import type { Project, Stream, Workspace } from '../types.ts';
@@ -83,7 +83,7 @@ async function close(what: string, name: string, body: string, path: string, str
     toast('Closed');
     if (streams.some((s) => s.id === visibleStreamId.value)) navigate({ name: listPane.value }, { replace: true });
   } catch (e) {
-    toast(e instanceof ApiError ? e.message : 'Couldn’t close it.', 5000);
+    toast(errorMessage(e, 'Couldn’t close it.'), 5000);
   }
 }
 

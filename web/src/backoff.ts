@@ -26,7 +26,7 @@ export function onNetworkChange(fn: (kind: string) => void): () => void {
   const online = () => fn('online');
   const change = () => fn('change');
   window.addEventListener('online', online);
-  const c = (navigator as any).connection;
+  const c = (navigator as { connection?: EventTarget }).connection;
   c?.addEventListener?.('change', change);
   return () => {
     window.removeEventListener('online', online);

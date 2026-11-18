@@ -20,12 +20,21 @@ export class ApiError extends Error {
   }
 }
 
+/** What to show for a failed request: an ApiError's message, written to be shown, or `fallback` for
+ *  anything else thrown (a bug, say). */
+export function errorMessage(e: unknown, fallback: string): string {
+  return e instanceof ApiError ? e.message : fallback;
+}
+
 const DEFAULT_TIMEOUT = 15_000;
 
 export async function api<T = any>(method: string, path: string, body?: unknown, opts: { timeout?: number; signal?: AbortSignal; raw?: BodyInit; headers?: Record<string, string> } = {}): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort('timeout'), opts.timeout ?? DEFAULT_TIMEOUT);
-  opts.signal?.addEventListener('abort', () => ctrl.abort('cancelled'));
+  const cancel = () => ctrl.abort('cancelled');
+  // An aborted signal doesn't fire again: one aborted already cancels at once.
+  if (opts.signal?.aborted) cancel();
+  else opts.signal?.addEventListener('abort', cancel);
   let res: Response;
   try {
     res = await fetch(path, {
@@ -36,13 +45,16 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
       signal: ctrl.signal,
       cache: 'no-store',
     });
-  } catch (e) {
-    clearTimeout(timer);
+  } catch {
     if (ctrl.signal.reason === 'timeout') throw new ApiError(0, 'timeout', `${TheHost()} didn’t answer in time.`, 'timeout');
     if (ctrl.signal.reason === 'cancelled') throw new ApiError(0, 'cancelled', 'Cancelled.', 'client');
     throw new ApiError(0, 'network', `Can’t reach ${theHost()}.`, 'network');
+  } finally {
+    // Both end once the host answers: a signal that outlives the request (one per screen, say) mustn't
+    // keep a listener for every request it was given.
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', cancel);
   }
-  clearTimeout(timer);
   const type = res.headers.get('content-type') || '';
   const data: any = type.includes('json') ? await res.json().catch(() => ({})) : await res.text();
   if (!res.ok) {
@@ -57,8 +69,11 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
 /** Upload with progress and cancellation (fetch has no upload progress). An update waits for it. */
 export function upload(path: string, blob: Blob, onProgress: (sent: number, total: number) => void, signal: AbortSignal): Promise<any> {
   const release = holdUpdates('the upload finishes');
+  const xhr = new XMLHttpRequest();
+  const cancel = () => xhr.abort();
   return new Promise<any>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+    const cancelled = () => reject(new ApiError(0, 'cancelled', 'Upload cancelled.', 'client'));
+    if (signal.aborted) return cancelled();
     xhr.open('POST', path);
     xhr.withCredentials = true;
     xhr.upload.onprogress = (e) => onProgress(e.loaded, e.total || blob.size);
@@ -71,10 +86,13 @@ export function upload(path: string, blob: Blob, onProgress: (sent: number, tota
       else reject(new ApiError(xhr.status, data.error || 'upload_failed', data.message || `Upload failed (${xhr.status}).`, xhr.status === 401 ? 'auth' : 'server'));
     };
     xhr.onerror = () => reject(new ApiError(0, 'network', `The upload lost its connection to ${theHost()}.`, 'network'));
-    xhr.onabort = () => reject(new ApiError(0, 'cancelled', 'Upload cancelled.', 'client'));
-    signal.addEventListener('abort', () => xhr.abort());
+    xhr.onabort = cancelled;
+    signal.addEventListener('abort', cancel);
     xhr.send(blob);
-  }).finally(release);
+  }).finally(() => {
+    signal.removeEventListener('abort', cancel);
+    release();
+  });
 }
 
 export function wsUrl(path: string): string {
