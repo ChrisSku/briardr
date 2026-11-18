@@ -11,6 +11,14 @@ updates:
     directory: /server
     schedule:
       interval: monthly
+    # tokio-tungstenite and sha1 stay on the versions axum's `ws` feature uses (server/Cargo.toml), so the
+    # server builds one WebSocket library and one SHA-1: a new minor version of either (a breaking one,
+    # before 1.0) would add a second copy beside axum's. Move them by hand when axum moves to new ones.
+    ignore:
+      - dependency-name: tokio-tungstenite
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      - dependency-name: sha1
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
     groups:
       crates:
         patterns: ["*"]
