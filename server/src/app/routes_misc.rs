@@ -5,19 +5,23 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axum::http::Method;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::routes_session::MacState;
 use super::{
-    action_err, caps_json, json_body_as, lock, now_ms, ok, response, send, ApiError, App, Ctx,
-    Routes, JSON_LIMIT, VERSION,
+    action_err, done, json_body_as, lock, now_ms, ok, refuse, response, send, ApiError, App, Ctx,
+    Done, Routes, JSON_LIMIT, VERSION,
 };
-use crate::config::BriardrConfig;
+use crate::config::{BriardrConfig, NotificationsConfig, PowerConfig};
 use crate::herdr::backend::Target;
 use crate::herdr::core::state::CoreTarget;
 use crate::herdr::rpc::{herdr_status, HerdrTarget};
+use crate::platform::HostCapabilities;
 use crate::preview::{OpenError, PreviewInfo};
 use crate::push::PrefsChange;
+use crate::push::{DeliveryRecord, DevicePrefs};
+use crate::usage::claude::{Restored, TapPreview};
 
 /// Runs blocking work (file writes, shelling out, locks) off the async runtime.
 async fn blocking<T, F>(f: F) -> Result<T, ApiError>
@@ -167,23 +171,120 @@ impl SettingsChange {
     }
 }
 
-fn preview_json(p: &PreviewInfo) -> Value {
-    let mut v = json!({
-        "id": p.id,
-        "deviceId": p.device_id,
-        "targetPort": p.target_port,
-        "listenPort": p.listen_port,
-        "createdAt": p.created_at,
-    });
-    if let Value::Object(map) = &mut v {
-        if let Some(origin) = &p.origin {
-            map.insert("origin".into(), json!(origin));
-        }
-        if let Some(launch) = &p.launch {
-            map.insert("launch".into(), json!(launch));
-        }
-    }
-    v
+/// `POST /api/previews`: the open preview.
+#[derive(Serialize)]
+struct PreviewOpened {
+    preview: PreviewInfo,
+}
+
+/// `GET /api/usage`: what the usage sources last said, and the host's time for their ages.
+#[derive(Serialize)]
+struct UsageBody {
+    usage: Value,
+    now: u64,
+}
+
+/// `POST /api/usage/codex/reset-credit`: what the reset did, and the usage after it.
+#[derive(Serialize)]
+struct ResetCreditUsed {
+    outcome: &'static str,
+    usage: Value,
+}
+
+/// `GET /api/usage/statusline`: whether Briardr's status line is in Claude Code's settings, and the
+/// change installing it would make (None when it can't be worked out).
+#[derive(Serialize)]
+struct StatuslineState {
+    installed: bool,
+    preview: Option<TapPreview>,
+}
+
+/// `POST /api/usage/statusline` with `remove`: how the status line from before Briardr's came back.
+#[derive(Serialize)]
+struct StatuslineRemoved {
+    ok: bool,
+    restored: Restored,
+}
+
+/// `GET /api/notifications`: this device's subscription and alert choices, and the host's settings.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NotificationsState {
+    public_key: String,
+    subscribed: bool,
+    endpoint: Option<String>,
+    settings: NotificationsConfig,
+    prefs: DevicePrefs,
+}
+
+/// `PUT /api/notifications/device`: the device's alert choices after the change.
+#[derive(Serialize)]
+struct PrefsBody {
+    prefs: DevicePrefs,
+}
+
+/// `POST /api/notifications/test`: the test alert's delivery, when there was a subscription to send to.
+#[derive(Serialize)]
+struct TestSent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<DeliveryRecord>,
+}
+
+/// `GET /api/notifications/deliveries/:id`: the delivery, None when it isn't known.
+#[derive(Serialize)]
+struct DeliveryBody {
+    delivery: Option<DeliveryRecord>,
+}
+
+/// `GET /api/settings`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Settings<'a> {
+    herdr_backend: String,
+    herdr_path: String,
+    herdr_session: String,
+    herdr_core_socket: String,
+    herdr: HerdrState,
+    notifications: NotificationsConfig,
+    usage: UsageSettings,
+    power: PowerConfig,
+    tls: TlsModes,
+    ca_profile_available: bool,
+    previews: bool,
+    dictation: bool,
+    host: &'a HostCapabilities,
+    public_origin: Option<String>,
+    version: &'static str,
+}
+
+/// Whether the configured Herdr runs, its version, and what's wrong with it (`HerdrStatus::problem`).
+#[derive(Serialize)]
+struct HerdrState {
+    running: bool,
+    version: Option<String>,
+    problem: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageSettings {
+    claude_keychain_opt_in: bool,
+    codex_enabled: bool,
+}
+
+/// The TLS mode asked for, and the one in effect.
+#[derive(Serialize)]
+struct TlsModes {
+    wanted: String,
+    effective: String,
+}
+
+/// `POST /api/update/install`: the version installed, and whether Briardr restarts on it by itself.
+#[derive(Serialize)]
+struct Installed {
+    ok: bool,
+    version: String,
+    restarts: bool,
 }
 
 pub(super) fn register(r: &mut Routes) {
@@ -200,13 +301,10 @@ pub(super) fn register(r: &mut Routes) {
             }
             let port = b.port.unwrap_or(f64::NAN);
             let invalid_port = || {
-                Ok(send(
+                Ok(refuse(
                     400,
-                    &json!({
-                        "error": "invalid_port",
-                        "message": "That isn’t a port Briardr can preview.",
-                    }),
-                    &[],
+                    "invalid_port",
+                    "That isn’t a port Briardr can preview.",
                 ))
             };
             // Only whole ports from 1 to 65535 reach the previews; anything else is refused here.
@@ -215,26 +313,20 @@ pub(super) fn register(r: &mut Routes) {
             }
             let target = port as u16;
             match app.d.previews.open(&device, target).await {
-                Ok(preview) => ok(json!({"preview": preview_json(&preview)})),
+                Ok(preview) => ok(PreviewOpened { preview }),
                 Err(OpenError::Unavailable) => {
                     Err(app.unsupported("Preview (no preview origins are configured)"))
                 }
-                Err(OpenError::NothingListening) => Ok(send(
+                Err(OpenError::NothingListening) => Ok(refuse(
                     404,
-                    &json!({
-                        "error": "nothing_listening",
-                        "message": format!("Nothing is listening on port {target}."),
-                    }),
-                    &[],
+                    "nothing_listening",
+                    &format!("Nothing is listening on port {target}."),
                 )),
                 Err(OpenError::InvalidPort) => invalid_port(),
-                Err(OpenError::NoFreePort) => Ok(send(
+                Err(OpenError::NoFreePort) => Ok(refuse(
                     400,
-                    &json!({
-                        "error": "no_free_port",
-                        "message": "Too many previews are open. Close one first.",
-                    }),
-                    &[],
+                    "no_free_port",
+                    "Too many previews are open. Close one first.",
                 )),
             }
         },
@@ -249,7 +341,7 @@ pub(super) fn register(r: &mut Routes) {
             let device = ctx.device()?.id.clone();
             let previews = app.d.previews.clone();
             let closed = blocking(move || previews.close(&id, &device)).await?;
-            ok(json!({"ok": closed}))
+            ok(Done { ok: closed })
         },
     );
 
@@ -261,7 +353,10 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let force = ctx.query.get("force") == Some("1");
             let usage = app.d.usage.refresh(force).await;
-            ok(json!({"usage": usage, "now": now_ms()}))
+            ok(UsageBody {
+                usage,
+                now: now_ms(),
+            })
         },
     );
 
@@ -279,10 +374,10 @@ pub(super) fn register(r: &mut Routes) {
                 ));
             }
             match app.d.usage.use_codex_reset_credit().await {
-                Ok(outcome) => ok(json!({
-                    "outcome": outcome.as_str(),
-                    "usage": app.d.usage.snapshot(),
-                })),
+                Ok(outcome) => ok(ResetCreditUsed {
+                    outcome: outcome.as_str(),
+                    usage: app.d.usage.snapshot(),
+                }),
                 Err(e) => {
                     let status = match e.category.as_str() {
                         "not_enabled" => 409,
@@ -301,19 +396,15 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, _ctx: Ctx| async move {
             let usage = app.d.usage.clone();
-            let (installed, preview) = blocking(move || {
-                let installed = usage.tap.installed();
-                // A preview that can't be built is reported as null, not as an error.
-                let preview = usage
-                    .tap
-                    .preview()
-                    .ok()
-                    .and_then(|p| serde_json::to_value(p).ok())
-                    .unwrap_or(Value::Null);
-                (installed, preview)
+            let state = blocking(move || {
+                StatuslineState {
+                    installed: usage.tap.installed(),
+                    // A preview that can't be built is reported as null, not as an error.
+                    preview: usage.tap.preview().ok(),
+                }
             })
             .await?;
-            ok(json!({"installed": installed, "preview": preview}))
+            ok(state)
         },
     );
 
@@ -333,13 +424,13 @@ pub(super) fn register(r: &mut Routes) {
                     blocking(move || usage.tap.install(&fingerprint))
                         .await?
                         .map_err(failed)?;
-                    ok(json!({"ok": true}))
+                    done()
                 }
                 StatuslineChange::Remove => {
                     let restored = blocking(move || usage.tap.remove())
                         .await?
                         .map_err(failed)?;
-                    ok(json!({"ok": true, "restored": restored}))
+                    ok(StatuslineRemoved { ok: true, restored })
                 }
             }
         },
@@ -352,13 +443,13 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, ctx: Ctx| async move {
             let device = ctx.device()?.id.clone();
-            ok(json!({
-                "publicKey": app.d.push.public_key(),
-                "subscribed": app.d.push.has_device(&device),
-                "endpoint": app.d.push.device_endpoint(&device),
-                "settings": app.cfg().notifications,
-                "prefs": app.d.push.prefs(&device),
-            }))
+            ok(NotificationsState {
+                public_key: app.d.push.public_key(),
+                subscribed: app.d.push.has_device(&device),
+                endpoint: app.d.push.device_endpoint(&device),
+                settings: app.cfg().notifications,
+                prefs: app.d.push.prefs(&device),
+            })
         },
     );
 
@@ -383,7 +474,7 @@ pub(super) fn register(r: &mut Routes) {
             let prefs = blocking(move || push.change_prefs(&device, change))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
-            ok(json!({ "prefs": prefs }))
+            ok(PrefsBody { prefs })
         },
     );
 
@@ -411,7 +502,7 @@ pub(super) fn register(r: &mut Routes) {
                         "The browser returned an invalid subscription.",
                     )
                 })?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -425,7 +516,7 @@ pub(super) fn register(r: &mut Routes) {
             blocking(move || push.unsubscribe_device(&device))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -456,12 +547,9 @@ pub(super) fn register(r: &mut Routes) {
                     300,
                 )
                 .await;
-            let mut out = json!({});
-            if let (Some(rec), Some(map)) = (records.first(), out.as_object_mut()) {
-                let value = serde_json::to_value(rec).map_err(|_| ApiError::Internal)?;
-                map.insert("delivery".into(), value);
-            }
-            ok(out)
+            ok(TestSent {
+                delivery: records.into_iter().next(),
+            })
         },
     );
 
@@ -473,8 +561,8 @@ pub(super) fn register(r: &mut Routes) {
             let id = ctx.param("id").to_string();
             let push = app.d.push.clone();
             // `delivery(id)` is null when unknown, so the key is always there.
-            let record = blocking(move || push.delivery(&id)).await?;
-            ok(json!({ "delivery": record }))
+            let delivery = blocking(move || push.delivery(&id)).await?;
+            ok(DeliveryBody { delivery })
         },
     );
 
@@ -488,7 +576,7 @@ pub(super) fn register(r: &mut Routes) {
             let id = b.id.unwrap_or_default();
             let push = app.d.push.clone();
             let acked = blocking(move || push.ack(&id, &device)).await?;
-            ok(json!({"ok": acked}))
+            ok(Done { ok: acked })
         },
     );
 
@@ -505,9 +593,8 @@ pub(super) fn register(r: &mut Routes) {
             let request_id = b.request_id.unwrap_or_default();
             let power = app.d.power.clone();
             let now = now_ms();
-            let body = blocking(move || lock(&power).request_sleep(&request_id, now)).await?;
-            let done = body.get("ok").and_then(Value::as_bool) == Some(true);
-            Ok(send(if done { 202 } else { 409 }, &body, &[]))
+            let answer = blocking(move || lock(&power).request_sleep(&request_id, now)).await?;
+            Ok(send(if answer.ok { 202 } else { 409 }, &answer, &[]))
         },
     );
 
@@ -528,7 +615,10 @@ pub(super) fn register(r: &mut Routes) {
             let now = now_ms();
             blocking(move || lock(&power).set_keep_awake(on, now)).await?;
             let mac = app.poll_power().await?;
-            ok(json!({"mac": mac, "host": caps_json(&app.d.caps)}))
+            ok(MacState {
+                mac,
+                host: &app.d.caps,
+            })
         },
     );
 
@@ -552,26 +642,31 @@ pub(super) fn register(r: &mut Routes) {
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .is_some();
-            ok(json!({
-                "herdrBackend": cfg.herdr_backend,
-                "herdrPath": cfg.herdr_path,
-                "herdrSession": cfg.herdr_session,
-                "herdrCoreSocket": CoreTarget::of(&cfg).socket.display().to_string(),
-                "herdr": {"running": st.running, "version": st.version, "problem": st.problem},
-                "notifications": cfg.notifications,
-                "usage": {
-                    "claudeKeychainOptIn": app.d.caps.claude_keychain && cfg.usage.claude_keychain_opt_in,
-                    "codexEnabled": cfg.usage.codex_enabled,
+            ok(Settings {
+                herdr_core_socket: CoreTarget::of(&cfg).socket.display().to_string(),
+                herdr: HerdrState {
+                    running: st.running,
+                    version: st.version,
+                    problem: st.problem,
                 },
-                "power": cfg.power,
-                "tls": {"wanted": wanted, "effective": effective},
-                "caProfileAvailable": app.d.ca_profile.is_some(),
-                "previews": app.d.previews.available(),
-                "dictation": dictation,
-                "host": caps_json(&app.d.caps),
-                "publicOrigin": cfg.public_origin.filter(|s| !s.is_empty()),
-                "version": VERSION,
-            }))
+                usage: UsageSettings {
+                    claude_keychain_opt_in: app.d.caps.claude_keychain
+                        && cfg.usage.claude_keychain_opt_in,
+                    codex_enabled: cfg.usage.codex_enabled,
+                },
+                tls: TlsModes { wanted, effective },
+                ca_profile_available: app.d.ca_profile.is_some(),
+                previews: app.d.previews.available(),
+                dictation,
+                host: &app.d.caps,
+                public_origin: cfg.public_origin.filter(|s| !s.is_empty()),
+                version: VERSION,
+                herdr_backend: cfg.herdr_backend,
+                herdr_path: cfg.herdr_path,
+                herdr_session: cfg.herdr_session,
+                notifications: cfg.notifications,
+                power: cfg.power,
+            })
         },
     );
 
@@ -629,7 +724,7 @@ pub(super) fn register(r: &mut Routes) {
                 // Open streams are the other Herdr's: their screens are told they're gone.
                 app.d.hub.close_all();
             }
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -668,7 +763,11 @@ pub(super) fn register(r: &mut Routes) {
             match app.d.updates.install(&version).await {
                 Ok(restarts) => {
                     app.event("update_installed", json!({"restarts": restarts}));
-                    ok(json!({"ok": true, "version": version, "restarts": restarts}))
+                    ok(Installed {
+                        ok: true,
+                        version,
+                        restarts,
+                    })
                 }
                 Err(message) => {
                     app.event("update_failed", json!({}));
@@ -695,7 +794,7 @@ pub(super) fn register(r: &mut Routes) {
                 }
             })
             .await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 

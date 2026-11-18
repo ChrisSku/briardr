@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use serde::Serialize;
 use thiserror::Error;
 
 pub const MAX_DOCS: usize = 200;
@@ -72,7 +73,7 @@ impl DocsError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocEntry {
     pub path: String,
     pub name: String,
@@ -88,7 +89,7 @@ pub struct DocList {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocText {
     pub path: String,
     pub text: String,

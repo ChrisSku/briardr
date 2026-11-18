@@ -31,7 +31,7 @@ const CONTENT_SEARCH_BUDGET: Duration = Duration::from_millis(1500);
 const MAX_SEARCH_VISITED: usize = 50_000;
 const MAX_SEARCH_DEPTH: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileEntry {
     pub name: String,
     pub path: String,
@@ -57,7 +57,7 @@ pub struct FileText {
     pub size: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileSearch {
     pub entries: Vec<FileEntry>,
     /// Results or traversal were capped; more matches may exist.

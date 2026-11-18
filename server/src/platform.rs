@@ -1,12 +1,17 @@
 // What the host can do: Mac-only integrations are off elsewhere.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HostPlatform {
     Macos,
     Linux,
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the client sees as `host` (in /api/session, /api/mac, settings and the live `mac` message).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostCapabilities {
     pub platform: HostPlatform,
     /// "Mac" or "server".
