@@ -103,6 +103,19 @@ describe('dictation when the key or the terminal goes away', () => {
     assert.deepEqual(sent, []);
   });
 
+  test('letting go of Enter before the microphone is on records nothing and lets go of it when it comes', async () => {
+    const { page, sent } = await onStream('iPhone 15 Pro', 'phone-dictation-early', { late: true });
+    await holdEnter(page);
+    await page.waitForFunction(() => (window as any).micAsked);
+    await page.mouse.up();
+    await page.evaluate(() => (window as any).giveMic());
+    await page.waitForFunction(() => (window as any).mics.length === 1);
+    assert.deepEqual(await micsOff(page), [true]);
+    await sleep(500);
+    assert.equal(await page.locator('.key-enter.is-dictating').count(), 0, 'Enter doesn’t show a microphone');
+    assert.deepEqual(sent, []);
+  });
+
   test('the key bar going away while Enter is held drops the recording too', async () => {
     // On an iPad, a key typed on a hardware keyboard hides the key bar.
     const { page, sent } = await onStream('iPad Pro 11', 'ipad-dictation-keyboard');
