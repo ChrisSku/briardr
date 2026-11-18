@@ -36,7 +36,7 @@ keeps its Cargo build outside the checkout and configures the service with the r
 
 | Rule | Implementation | Verification |
 | --- | --- | --- |
-| Never queue/replay terminal input while connecting or disconnected. | `server/src/terminal_hub.rs`, `web/src/terminal/controller.ts` | `test/terminal.test.ts`, `test-ui/interactions.test.ts` |
+| Never queue/replay terminal input while connecting or disconnected. | `server/src/terminal_hub.rs`, `web/src/terminal/controller.ts`, `web/src/socket.ts` | `test/terminal.test.ts`, `test/socket.test.ts`, `test-ui/interactions.test.ts` |
 | Never start a herdr-core (it would hand Briardr's environment to every terminal); change the Herdr app's layout only as the app does, over the version read. | `server/src/herdr/core/` | `test/core.test.ts`, Rust core tests |
 | A terminal on another machine never has its files looked for on this host. | `App::stream_with_folder`, `App::stream_here`, plugin tabs marked `local` | `test/core.test.ts` |
 | No silent takeover; Peek never resizes; leaving/backgrounding releases control. | Terminal hub, `server/src/herdr/stream.rs`, `StreamScreen.svelte` | Terminal and interaction suites |
