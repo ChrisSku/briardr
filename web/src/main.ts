@@ -1,4 +1,4 @@
-import './install.ts'; // first: the browser's install prompt fires early
+import { standalone } from './install.ts'; // first: the browser's install prompt fires early
 import '@xterm/xterm/css/xterm.css';
 import './styles.css';
 import { mount } from 'svelte';
@@ -17,7 +17,7 @@ import { shellActivated } from './updates.ts';
 if (route.value.name === 'stream') void streamScreen.load();
 
 async function boot() {
-  record('app_start', { standalone: matchMedia('(display-mode: standalone)').matches });
+  record('app_start', { standalone });
   // A device that was signed in opens on its cached state (labeled stale) without waiting for the host,
   // which may be slow or unreachable; the check below still signs it out if it was revoked meanwhile.
   if (wasSignedIn) session.value = { status: 'signed_in', device: { id: '', name: '' } };

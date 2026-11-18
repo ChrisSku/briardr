@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, Icon, type PluginContext, type Stream } from '@briardr/sdk';
+  import { errorMessage, Icon, type PluginContext, type Stream } from '@briardr/sdk';
   import { renderDiagrams, renderMarkdown } from '@briardr/sdk/markdown';
 
   let { stream, briardr, path, onBack, onOpen, canBack }: { stream: Stream; briardr: PluginContext; path: string; onBack: () => void; onOpen: (p: string) => void; canBack: boolean } = $props();
@@ -17,7 +17,7 @@
     error = null;
     untrack(() => briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/docs/file?path=${encodeURIComponent(p)}`)).then(
       (r) => (doc = r),
-      (e) => (error = e instanceof ApiError ? e.message : 'Couldn’t open this file.'),
+      (e) => (error = errorMessage(e, 'Couldn’t open this file.')),
     );
   });
 

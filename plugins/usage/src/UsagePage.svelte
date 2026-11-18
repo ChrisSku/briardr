@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ago, ApiError, Icon, Sheet, type SettingsProps } from '@briardr/sdk';
+  import { ago, errorMessage, Icon, Sheet, type SettingsProps } from '@briardr/sdk';
   import Provider from './Provider.svelte';
   import Sources from './Sources.svelte';
   import { cached, REFRESH_MS, type Usage } from './usage.ts';
@@ -31,7 +31,7 @@
       const r = await briardr.core<{ usage: Usage }>('GET', `/api/usage${force ? '?force=1' : ''}`, undefined, { timeout: 45_000 });
       cached.value = r.usage;
     } catch (e) {
-      error = e instanceof ApiError ? e.message : `Couldn’t reach ${briardr.host().the}.`;
+      error = errorMessage(e, `Couldn’t reach ${briardr.host().the}.`);
     } finally {
       busy = false;
     }

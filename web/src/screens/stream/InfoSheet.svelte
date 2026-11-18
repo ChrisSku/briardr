@@ -8,9 +8,9 @@
   import { AsOf, Sheet } from '../../ui/kit.ts';
 
   let { stream, ctl, onClose }: { stream: Stream; ctl: TerminalController; onClose: () => void } = $props();
-  let info = $state.raw<any>(null);
+  let agentName = $state<string | null>(null);
   onMount(() => {
-    api('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (info = r), () => (info = { error: true }));
+    api<{ agent: { name: string | null } | null }>('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (agentName = r.agent?.name ?? null), () => {});
   });
 
   const st = $derived(ctl.status.value);
@@ -25,7 +25,7 @@
         ['Machine', stream.machine],
         ['Program', `${stream.tool} (${stream.kind})`],
         ['State', stream.state ? `${stream.state}${stream.stateChangeSeq !== null ? ` · change #${stream.stateChangeSeq}` : ''}` : 'No agent'],
-        ['Agent name', info?.agent?.name],
+        ['Agent name', agentName],
         [`${HostLabel()} terminal size`, st.width ? `${st.width} × ${st.height}` : null],
         ['This view', st.ownership],
       ] as [string, string | null | undefined][]

@@ -2,7 +2,7 @@
 // - Each save says which revision of the note it was based on; if another device saved (or deleted the
 //   note) in between, nothing is overwritten and the user chooses which version to keep.
 // - While the Mac is unreachable, edits are kept as drafts on this device and saved when it's back.
-import { ApiError, state, type PluginContext, type StreamContext } from '@briardr/sdk';
+import { errorMessage, state, type PluginContext, type StreamContext } from '@briardr/sdk';
 
 export interface Note {
   id: string;
@@ -109,7 +109,7 @@ export async function sendToTerminal(briardr: StreamContext, sid: string, text: 
     try {
       ({ text, missing } = await briardr.core<{ text: string; missing: number }>('POST', `${notesPath(sid)}/paste`, { text }));
     } catch (e) {
-      return toast(e instanceof ApiError ? e.message : 'Couldn’t prepare the note’s images.');
+      return toast(errorMessage(e, 'Couldn’t prepare the note’s images.'));
     }
   }
   if (!briardr.terminal.send(text, { generation: gen })) return;

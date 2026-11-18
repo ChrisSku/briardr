@@ -15,7 +15,7 @@ use std::fs;
 use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,6 +24,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha1::{Digest, Sha1};
 use thiserror::Error;
+
+use crate::docs::normalize_lexically;
 
 pub const READ_ONLY_SUBCOMMANDS: &[&str] = &[
     "rev-parse",
@@ -133,8 +135,7 @@ pub fn run_git(
         })?;
 
     // Both pipes are drained on their own threads so a chatty child can't block on a full pipe.
-    // Output past MAX_OUTPUT sets `overflow`, and the wait loop kills the child, as Node's
-    // maxBuffer does.
+    // Output past MAX_OUTPUT sets `overflow`, and the wait loop kills the child.
     let overflow = Arc::new(AtomicBool::new(false));
     let out_reader = thread::spawn({
         let pipe = child.stdout.take();
@@ -173,8 +174,8 @@ pub fn run_git(
     let stdout = out_reader.join().unwrap_or_default();
     let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
 
-    // A run that hit the output cap resolves as code 0 with the partial stdout, as Node does
-    // when its maxBuffer kills the child (the error carries no numeric exit code).
+    // A run that hit the output cap counts as code 0 with the partial stdout (the kill leaves no exit
+    // code).
     let code = if overflow.load(Ordering::SeqCst) {
         0
     } else {
@@ -305,7 +306,8 @@ pub struct Base {
     pub ahead: u64,
 }
 
-/// `lstat` summary of a file: size, mtime in ms (as JS computes `mtimeMs`) and mode.
+/// `lstat` summary of a file: size, mtime in milliseconds with its fraction, and mode. Devices keep
+/// signatures made from it, so its form never changes.
 fn stat_sig(abs: &Path) -> String {
     match fs::symlink_metadata(abs) {
         Ok(md) => {
@@ -843,21 +845,6 @@ pub struct FileRef {
     pub untracked: bool,
 }
 
-/// Lexical path normalization, like Node's `path.resolve` (no symlink resolution).
-fn normalize(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
-}
-
 fn is_binary_line(line: &str) -> bool {
     // Matches /^Binary files .* differ$/ on one line.
     line.strip_prefix("Binary files ")
@@ -873,11 +860,11 @@ pub fn file_diff(
     against: &str,
     git_path: &str,
 ) -> Result<FileDiff, GitError> {
-    let root_abs = normalize(root);
+    let root_abs = normalize_lexically(root);
     let abs = if Path::new(&file.path).is_absolute() {
-        normalize(Path::new(&file.path))
+        normalize_lexically(Path::new(&file.path))
     } else {
-        normalize(&root.join(&file.path))
+        normalize_lexically(&root.join(&file.path))
     };
     if abs == root_abs || !abs.starts_with(&root_abs) {
         return Err(GitError::Forbidden("Path outside repository".into()));

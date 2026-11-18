@@ -1,10 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ApiError, type SettingsProps } from '@briardr/sdk';
+  import { errorMessage, type SettingsProps } from '@briardr/sdk';
 
   let { briardr, s, save }: SettingsProps = $props();
   const toast = (text: string) => briardr.toast(text);
-  let tap = $state.raw<{ installed: boolean; preview: any } | null>(null);
+  /** What installing the tap would change in Claude's settings (null when that can't be worked out). */
+  interface TapPreview {
+    settingsPath: string;
+    before: unknown;
+    after: unknown;
+    fingerprint: string;
+    /** The status line's command, which the tap runs on; null when there's none. */
+    chained: unknown;
+  }
+  let tap = $state.raw<{ installed: boolean; preview: TapPreview | null } | null>(null);
   let review = $state(false);
   const load = () => briardr.core('GET', '/api/usage/statusline').then((r) => (tap = r), () => {});
   onMount(load);
@@ -17,12 +26,12 @@
 
   async function install() {
     try {
-      await briardr.core('POST', '/api/usage/statusline', { action: 'install', fingerprint: tap!.preview.fingerprint });
+      await briardr.core('POST', '/api/usage/statusline', { action: 'install', fingerprint: tap!.preview!.fingerprint });
       toast('Status-line tap installed');
       review = false;
       load();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Couldn’t install the tap.');
+      toast(errorMessage(e, 'Couldn’t install the tap.'));
       load();
     }
   }

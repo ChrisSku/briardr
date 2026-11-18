@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, Icon, Sheet, type PluginContext, type Stream } from '@briardr/sdk';
+  import { errorMessage, Icon, Sheet, type PluginContext, type Stream } from '@briardr/sdk';
   import type { ChangedFile, Since } from './changes.ts';
   import { lineId, parseDiff, whereOf } from './diff.ts';
   import { addComment, reviewOf, type Comment } from './review.ts';
@@ -26,7 +26,7 @@
       const signature = file.signature;
       briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/changes/diff?path=${encodeURIComponent(file.path)}${since === 'base' ? '&since=base' : ''}`, undefined, { timeout: 20_000 }).then(
         (r) => (d = { ...r, signature }),
-        (e) => (err = e instanceof ApiError ? e.message : 'Couldn’t load the diff.'),
+        (e) => (err = errorMessage(e, 'Couldn’t load the diff.')),
       );
     });
   });

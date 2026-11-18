@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
+  import { AsOf, Empty, errorMessage, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
   import ContentMatches from './ContentMatches.svelte';
   import { filesView, type ContentMatch, type ContentSearch, type DirList, type FileEntry, type FileSearch } from './files.ts';
   import FileRow from './FileRow.svelte';
@@ -49,7 +49,7 @@
       dirs = { ...dirs, [path]: list };
       if (!path) error = null;
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : 'Couldn’t list this folder.';
+      const msg = errorMessage(e, 'Couldn’t list this folder.');
       if (path) {
         // A folder that vanished closes; the rest of the tree stays.
         const next = new Set(expanded);
@@ -101,7 +101,7 @@
         if (contents) found = result;
         else search = result;
       } catch (e) {
-        if (active) searchError = e instanceof ApiError ? e.message : 'Couldn’t search files.';
+        if (active) searchError = errorMessage(e, 'Couldn’t search files.');
       } finally {
         if (active) searching = false;
       }
@@ -189,7 +189,7 @@
       refresh();
       toast(`Deleted ${e.name}`);
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : 'Couldn’t delete this entry.');
+      toast(errorMessage(err, 'Couldn’t delete this entry.'));
     } finally { actionBusy = false; }
   }
 

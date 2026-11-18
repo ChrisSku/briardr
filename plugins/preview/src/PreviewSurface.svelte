@@ -17,7 +17,7 @@
 
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, Icon, type StreamTabProps } from '@briardr/sdk';
+  import { errorMessage, Icon, type StreamTabProps } from '@briardr/sdk';
   import { consumePreviewRequest, previewRequests } from './requests.ts';
 
   interface PreviewInfo {
@@ -61,7 +61,7 @@
       src = r.preview.launch ? `${r.preview.launch}&path=${encodeURIComponent(rel)}` : `https://${location.hostname}:${r.preview.listenPort}${rel}`;
       nonce++;
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Couldn’t open the preview.';
+      error = errorMessage(e, 'Couldn’t open the preview.');
     } finally {
       busy = false;
     }

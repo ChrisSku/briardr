@@ -31,7 +31,7 @@
     sleepState = 'sending';
     // Sent exactly once; never retried. If the response is lost, the Mac may already be asleep.
     try {
-      const r = await api<any>('POST', '/api/power/sleep', { requestId: randomId(16) }, { timeout: 10_000 });
+      const r = await api<{ ok: true } | { ok: false; error: string }>('POST', '/api/power/sleep', { requestId: randomId(16) }, { timeout: 10_000 });
       sleepState = r.ok ? 'asleep' : { error: r.error };
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) sleepState = { error: e.code === 'sleep_disabled' ? 'Another app has disabled sleep on this Mac (pmset disablesleep). Briardr can’t override it.' : e.message };

@@ -1,5 +1,5 @@
 // Shared outbound HTTP clients (usage endpoint, Web Push, `briardr setup`'s download). rustls with the ring provider; the OS trust
-// store verifies certificates, like Bun's fetch on the same host.
+// store verifies certificates.
 use std::time::Duration;
 
 /// A client with the given overall request timeout. No redirects are followed, no proxy is used.

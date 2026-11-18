@@ -1,4 +1,4 @@
-// HTTP(S) listeners for the main server and the preview ports (Bun.serve's role in the server).
+// HTTP(S) listeners for the main server and the preview ports.
 // HTTP/1.1 with WebSocket upgrades; TLS through rustls with a certificate that can be swapped in place,
 // so renewed or upgraded certificates apply to new connections without restarting the listener.
 use std::fmt;
@@ -26,7 +26,7 @@ use crate::tls::TlsMaterial;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub type HandlerFuture = Pin<Box<dyn Future<Output = Response<Body>> + Send>>;
-/// The request handler: the request and the peer's IP address as Bun's `requestIP` reports it.
+/// The request handler: the request and the peer's IP address.
 pub type Handler = Arc<dyn Fn(Request<Body>, Option<String>) -> HandlerFuture + Send + Sync>;
 
 /// The server certificate, replaceable while listeners run.
@@ -85,7 +85,7 @@ fn certified_key(m: &TlsMaterial) -> Result<Arc<CertifiedKey>, String> {
 }
 
 /// Serves `listener` until `shutdown` turns true; then stops accepting and drops every open
-/// connection (Bun's `server.stop(true)`).
+/// connection.
 pub async fn serve(
     listener: TcpListener,
     tls: Option<TlsAcceptor>,

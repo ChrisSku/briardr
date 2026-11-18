@@ -14,7 +14,7 @@ use super::{
 };
 use crate::actions::{NewProject, NewStream, NewWorkspace};
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
-use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
+use crate::docs::{list_docs, normalize_lexically, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
 use crate::git::{
     base_of, changes, changes_since_base, file_diff, head_tree, ChangeKind, ChangedFile,
@@ -39,22 +39,7 @@ struct SeenBody {
     seen: Option<bool>,
 }
 
-/// Node's `path.normalize` on an absolute or relative path, without touching the disk.
-fn normalize(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
-        match c {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// `path.relative(from, to)` for two absolute paths, with `/` separators.
+/// The way from one absolute path to another, with `/` separators (`../x/y.md`).
 fn relative(from: &Path, to: &Path) -> String {
     let from: Vec<Component> = from.components().collect();
     let to: Vec<Component> = to.components().collect();
@@ -84,7 +69,10 @@ fn changed_docs(cwd: &Path) -> Result<HashSet<String>, std::io::Error> {
     let cwd_real = std::fs::canonicalize(cwd)?;
     let root_real = std::fs::canonicalize(&root)?;
     for f in &report.files {
-        changed.insert(relative(&cwd_real, &normalize(&root_real.join(&f.path))));
+        changed.insert(relative(
+            &cwd_real,
+            &normalize_lexically(&root_real.join(&f.path)),
+        ));
     }
     Ok(changed)
 }
@@ -821,7 +809,7 @@ mod tests {
     use serde_json::Value;
 
     #[test]
-    fn relative_paths_match_node() {
+    fn relative_paths_climb_out_with_dot_dot() {
         let from = Path::new("/a/b/c");
         assert_eq!(relative(from, Path::new("/a/b/c/d/e.md")), "d/e.md");
         assert_eq!(relative(from, Path::new("/a/x/y.md")), "../../x/y.md");
@@ -829,15 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn joins_normalize_parent_segments() {
-        assert_eq!(
-            normalize(&Path::new("/repo").join("src/../docs/a.md")),
-            PathBuf::from("/repo/docs/a.md")
-        );
-    }
-
-    #[test]
-    fn git_and_change_codes_match_ts() {
+    fn git_and_change_codes_are_the_ones_the_client_knows() {
         assert_eq!(git_code(&GitError::Timeout), "timeout");
         assert_eq!(git_code(&GitError::Failed("x".into())), "error");
         assert_eq!(change_code(ChangeKind::TypeChanged), "type");
