@@ -87,10 +87,49 @@ jobs:
           . deploy/versions.env # the Caddy version servers fall back to
           docker run --rm -v "$out:/etc/caddy:ro" "caddy:$CADDY_VERSION" caddy validate --config /etc/caddy/briardr.caddy --adapter caddyfile
 
-      - name: Browser checks (WebKit, with the system libraries it needs)
+      # WebKit and the system packages it needs, about 225 MB from Playwright's CDN and the runner's Ubuntu
+      # mirror, are cached for the runner image and the Playwright version, and saved on main. The mirror can
+      # crawl: on 2026-11-18 it sent the packages at 100 kB/s for 22 minutes, and the job ran out of time in
+      # the last browser check. With the cache a run downloads only the packages Ubuntu has updated since,
+      # and a cache saved for an earlier image or Playwright still holds most of them.
+      - name: WebKit's cache key (the runner image and the Playwright version)
+        id: webkit-key
         run: |
+          echo "prefix=webkit-$ImageOS-" >> "$GITHUB_OUTPUT"
+          echo "key=webkit-$ImageOS-$ImageVersion-$(bun --bun playwright --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+      - name: Restore WebKit and its system libraries
+        id: webkit-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/webkit-packages
+          key: ${{ steps.webkit-key.outputs.key }}
+          restore-keys: ${{ steps.webkit-key.outputs.prefix }}
+      - name: WebKit and its system libraries
+        timeout-minutes: 10 # a slow download fails here, by name, instead of using up the job's time
+        run: |
+          # apt-get installs a package from its archive folder when the file there is the version it
+          # wants, and downloads the others. The folder, less what Ubuntu no longer serves, is then cached.
+          packages=~/.cache/webkit-packages
+          mkdir -p "$packages"
+          find "$packages" -name '*.deb' -exec sudo cp -t /var/cache/apt/archives {} +
           bun --bun playwright install --with-deps webkit
-          mise run test:ui
+          sudo apt-get autoclean -qq
+          rm -f "$packages"/*.deb
+          find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp -t "$packages" {} +
+      - name: Save WebKit and its system libraries
+        if: github.ref == 'refs/heads/main' && steps.webkit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/.cache/webkit-packages
+          key: ${{ steps.webkit-key.outputs.key }}
+
+      - name: Browser checks (WebKit)
+        timeout-minutes: 15 # about 6 minutes
+        run: mise run test:ui
 
   package:
     if: github.actor != 'briardr-release[bot]'
