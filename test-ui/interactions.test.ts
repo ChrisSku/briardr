@@ -747,6 +747,17 @@ describe('ownership (two devices)', () => {
     assert.equal(await a.page.getByRole('button', { name: 'Resume' }).count(), 0);
     await a.ctx.close();
   });
+
+  test('Hand back gives control back to Herdr and keeps watching', async () => {
+    const a = await device('iphone', 'phone-hand-back');
+    await openTarget(a.page);
+    await a.page.getByRole('button', { name: 'Stream actions' }).click();
+    await a.page.getByRole('menuitem', { name: /^Hand back to/ }).click();
+    await a.page.waitForSelector('[data-ownership=watching]');
+    await a.page.locator('.watch-banner', { hasText: 'Handed back to' }).waitFor();
+    await waitUntil('control to go back', () => s.run.hub.controllers === 0);
+    await a.ctx.close();
+  });
 });
 
 describe('agents list, peek, banners and links', () => {
@@ -1956,5 +1967,56 @@ describe('Changes review', () => {
     const review = (await bar.boundingBox())!;
     assert.ok(selbar.y + selbar.height <= review.y, 'the selection bar sits above the review bar');
     assert.ok(review.y + review.height <= viewport.height, 'both are in view');
+  });
+
+  test('on a branch with commits of its own, Changes also shows everything since the branch it started from', async () => {
+    const fs = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const repo = testPane('briardr-ui-changes-base');
+    onTestFinished(() => closeWorkspace(repo.workspace));
+    herdr('pane', 'rename', repo.pane, 'branch target');
+    const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir });
+    git('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'first');
+    git('checkout', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(repo.dir, 'b.txt'), 'committed work\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'work');
+    fs.writeFileSync(path.join(repo.dir, 'a.txt'), 'one\ntwo\n');
+    await s.run.herdr.refresh();
+
+    const a = await device('iphone', 'phone-changes-base');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.locator('.tree-streams .row-main', { hasText: 'branch target' }).click();
+    await a.page.waitForSelector('[data-ownership=controlling]');
+    await a.page.getByRole('tab', { name: 'Changes' }).click();
+    const files = () => a.page.locator('.file-toggle .file-path').allInnerTexts();
+    await a.page.locator('.file-toggle', { hasText: 'a.txt' }).click();
+    assert.deepEqual(await files(), ['a.txt'], 'uncommitted work first');
+    await a.page.getByLabel('Reviewed a.txt on this device').check();
+    const diffA = a.page.getByRole('region', { name: 'Diff of a.txt' });
+    await diffA.locator('.dl-add').click({ position: { x: 14, y: 4 } });
+    await a.page.getByRole('button', { name: 'Comment…' }).click();
+    await a.page.getByLabel('Comment', { exact: true }).fill('Say why');
+    await a.page.getByRole('button', { name: 'Add comment' }).click();
+    await diffA.locator('.is-noted').waitFor();
+
+    const compare = a.page.getByRole('group', { name: 'Compare with' });
+    await compare.getByRole('button', { name: 'Since main' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor();
+    assert.deepEqual((await files()).sort(), ['a.txt', 'b.txt']);
+    assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), false, 'a mark on the uncommitted change isn’t one on the whole branch');
+    // Nor does a comment written on the uncommitted change mark lines of this view's diff.
+    await diffA.locator('.is-noted').waitFor({ state: 'detached' });
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).click();
+    await a.page.getByRole('region', { name: 'Diff of b.txt' }).locator('.dl-add', { hasText: 'committed work' }).waitFor();
+
+    await compare.getByRole('button', { name: 'Uncommitted' }).click();
+    await a.page.locator('.file-toggle', { hasText: 'b.txt' }).waitFor({ state: 'detached' });
+    assert.equal(await a.page.getByLabel('Reviewed a.txt on this device').isChecked(), true);
+    await diffA.locator('.is-noted').waitFor();
   });
 });
