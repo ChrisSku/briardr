@@ -1,7 +1,7 @@
 // Visual and behavioural parity between two builds. Both are served the same fixture with a frozen
 // clock (server and page), then every screen is captured at iPhone, iPad and Mac sizes in light and
 // dark mode. For each screen it compares pixels, the visible text and the accessibility tree.
-//   bun bench/parity.ts base=bench/builds/main-<sha> cand=bench/builds/worktree --out bench/results/parity
+//   bun bench/parity.ts base=bench/builds/main-<sha> cand=bench/builds/worktree --out bench/results/parity [--profiles iphone,ipad,mac]
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, devices, webkit, type Browser, type Page } from 'playwright';
@@ -24,8 +24,8 @@ type Step = { name: string; run: (page: Page, s: FixtureServer) => Promise<void>
 // Builds from before the redesign have a Usage tab; after it, Usage is in Settings and Settings is a gear.
 const nav = (label: string) => async (page: Page) => {
   const main = page.locator('nav[aria-label="Main"]');
-  // On iPhone the Agents tab's name starts with how many need attention ("6 Agents").
-  const button = main.getByRole('button', { name: new RegExp(`^(\\d+ )?${label}$`) });
+  // On iPhone the Agents tab's name starts with its badge ("6 need you Agents").
+  const button = main.getByRole('button', { name: new RegExp(`(^| )${label}$`) });
   if (label === 'Usage' && !(await button.count())) return void (await main.getByRole('button', { name: 'Settings', exact: true }).click(), await page.locator('.usage-row').first().click());
   await button.click();
 };
@@ -54,7 +54,8 @@ const STEPS: Step[] = [
     run: async (page, s) => {
       await page.keyboard.press('Escape');
       await page.waitForSelector('.sheet.jump', { state: 'detached' });
-      await page.locator('.main .stream-row', { hasText: streamName(s) }).getByRole('button', { name: /More actions/ }).click();
+      // On touch the "…" is reached by swiping the row (it stays in the row, a pixel wide): press it directly.
+      await page.locator('.main .stream-row', { hasText: streamName(s) }).getByRole('button', { name: /More actions/ }).dispatchEvent('click');
     },
   },
   {
@@ -357,7 +358,9 @@ const browser = await webkit.launch();
 const judge = await (await chromium.launch()).newPage();
 const report: any[] = [];
 const errors: Record<string, string[]> = {};
-for (const profile of Object.keys(PROFILES))
+// --profiles iphone,mac compares only those sizes.
+const profiles = argv.includes('--profiles') ? argv[argv.indexOf('--profiles') + 1].split(',') : Object.keys(PROFILES);
+for (const profile of profiles)
   for (const scheme of ['light', 'dark'] as const) {
     const [A, B] = builds;
     const ra = await capture(browser, A, profile, scheme);
