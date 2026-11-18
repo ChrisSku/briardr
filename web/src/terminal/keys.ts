@@ -35,7 +35,7 @@ export function fromKeyEvent(e: KeyboardEvent, extra: Mod[] = []): Outgoing | nu
   }
   if (e.key.length === 1 && (e.ctrlKey || (e.altKey && !isOptionComposed(e)))) {
     const base = e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.code.startsWith('Digit') ? e.code.slice(5) : e.key.toLowerCase();
-    if (/^[a-z0-9]$/.test(base) || base === '@' || base === '[' || base === ']' || base === '\\') return { keys: [chord(base, m.filter((x) => x !== 'shift'))] };
+    if (/^[a-z0-9]$/.test(base) || base === '@' || base === '[' || base === ']' || base === '\\') return { keys: [charChord(base, m)] };
   }
   return null;
 }
@@ -45,15 +45,20 @@ function isOptionComposed(e: KeyboardEvent): boolean {
   return e.altKey && !e.ctrlKey && e.key.length === 1 && !/[a-z0-9]/i.test(e.key);
 }
 
+/**
+ * A character's chord. Without Command it leaves Shift out, as legacy Control characters do (⇧⌃C is ⌃C).
+ * Command reaches only a program with a keyboard protocol, which tells ⇧⌘Z from ⌘Z, so it keeps Shift.
+ */
+function charChord(c: string, m: Mod[]): string {
+  return chord(c, m.includes('super') ? m : m.filter((x) => x !== 'shift'));
+}
+
 /** Apply key-bar modifiers to text typed on the on-screen keyboard. */
 export function applyModsToText(text: string, m: Mod[]): Outgoing {
-  if (!m.length || text.length !== 1) return { text: m.includes('shift') ? text.toUpperCase() : text };
   const c = text.toLowerCase();
-  const rest = m.filter((x) => x !== 'shift' || !/[a-z]/.test(c));
-  if (rest.includes('ctrl') || rest.includes('alt')) {
-    if (/^[a-z0-9@\[\]\\]$/.test(c)) return { keys: [chord(c, rest.filter((x) => x !== 'shift'))] };
-  }
   // Command reaches the program as a kitty-protocol chord, so punctuation can carry it too.
-  if (rest.includes('super') && /^[a-z0-9@\[\]\\\/.,;'`=]$/.test(c)) return { keys: [chord(c, rest)] };
-  return { text: m.includes('shift') ? text.toUpperCase() : text };
+  const chordable = m.includes('super') ? /^[a-z0-9@\[\]\\\/.,;'`=]$/ : /^[a-z0-9@\[\]\\]$/;
+  if (!m.some((x) => x !== 'shift') || !chordable.test(c)) return { text: m.includes('shift') ? text.toUpperCase() : text };
+  // A capital is its letter with Shift, as a keyboard reports it.
+  return { keys: [charChord(c, c === text ? m : [...m, 'shift'])] };
 }

@@ -273,6 +273,9 @@ describe('terminal input (iPhone)', () => {
     await page.keyboard.type('a');
     await expectBytes(hex('\x1b[97;9u')); // kitty protocol: a, modifiers 1 + super(8)
     await page.getByRole('button', { name: 'Command', exact: true }).click();
+    await page.keyboard.type('Z');
+    await expectBytes(hex('\x1b[122;10u')); // the unshifted z, modifiers 1 + shift(1) + super(8)
+    await page.getByRole('button', { name: 'Command', exact: true }).click();
     await page.getByRole('button', { name: 'esc (Escape)', exact: true }).click();
     await expectBytes(hex('\x1b[27;9u'));
   });
