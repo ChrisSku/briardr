@@ -33,6 +33,7 @@ use crate::config::{
     lock_for, preview_origins, read_config, save_config, BriardrConfig, ConfigError, Paths,
 };
 use crate::diag::Diagnostics;
+use crate::docs::normalize_lexically;
 use crate::herdr::backend::Herdr;
 use crate::herdr::model::Model;
 use crate::herdr::rpc::HerdrError;
@@ -44,7 +45,7 @@ use crate::plugins::PluginInfo;
 use crate::power::{MacSummary, Power, PowerEvent};
 use crate::preview::Previews;
 use crate::push::Push;
-use crate::static_files::static_file;
+use crate::static_files::{extname, static_file};
 use crate::terminal_hub::{speaks_protocol, TerminalHub};
 use crate::usage::Usage;
 
@@ -281,7 +282,7 @@ pub fn security_headers(
     ]
 }
 
-/// `s.replace(/:\d+$/, '')`.
+/// A host without its port (`:` and digits at the end).
 fn strip_port(host: &str) -> &str {
     match host.rfind(':') {
         Some(i) if i + 1 < host.len() && host[i + 1..].bytes().all(|b| b.is_ascii_digit()) => {
@@ -295,7 +296,7 @@ fn strip_port(host: &str) -> &str {
 fn host_name(host: &str) -> String {
     let host = host.to_lowercase();
     if let Some(rest) = host.strip_prefix('[') {
-        // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
+        // `[::1]:7443` is `::1`; without the `]`, the last character is dropped all the same.
         match rest.find(']') {
             Some(i) => rest[..i].to_string(),
             None => {
@@ -369,7 +370,7 @@ pub async fn upload_body(
     let mut body = std::mem::replace(&mut ctx.body, Body::empty());
     let mut out = Vec::new();
     while let Some(frame) = body.frame().await {
-        // Bun reports a dropped client as an aborted request; hyper as a body error.
+        // A client that went away shows as a body error.
         let frame = frame.map_err(|_| UploadError::Cancelled)?;
         if let Ok(data) = frame.into_data() {
             if (out.len() + data.len()) as u64 > max {
@@ -396,20 +397,17 @@ fn declared_length(headers: &HeaderMap) -> u64 {
         .unwrap_or(0)
 }
 
-/// `decodeURIComponent`; None where it would throw.
-pub fn decode_uri_component(s: &str) -> Option<String> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' {
-            let hex = s.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(b[i]);
-            i += 1;
-        }
+/// A percent-encoded path, decoded; None when a `%` isn't followed by two hex digits or the bytes
+/// aren't UTF-8.
+pub fn percent_decode(s: &str) -> Option<String> {
+    let hex = |b: Option<u8>| char::from(b?).to_digit(16);
+    let mut bytes = s.bytes();
+    let mut out = Vec::with_capacity(s.len());
+    while let Some(b) = bytes.next() {
+        out.push(match b {
+            b'%' => (hex(bytes.next())? * 16 + hex(bytes.next())?) as u8,
+            b => b,
+        });
     }
     String::from_utf8(out).ok()
 }
@@ -490,18 +488,85 @@ type Handler = Box<dyn Fn(Arc<App>, Ctx) -> HandlerFuture + Send + Sync>;
 
 struct Route {
     method: Method,
-    pattern: String,
-    keys: Vec<String>,
+    segments: Vec<Segment>,
     public: bool,
     /// The built-in plugin the route belongs to; refused while that plugin is off.
     plugin: Option<&'static str>,
     h: Handler,
 }
 
+/// One part of a route's path, between slashes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Segment {
+    Literal(String),
+    /// `:key`: any one segment that isn't empty.
+    Param(String),
+    /// A final `*`: the rest of the path, at least one character, as the parameter `rest`.
+    Rest,
+}
+
+impl Segment {
+    fn parse_pattern(pattern: &str) -> Vec<Segment> {
+        let parts: Vec<&str> = pattern.trim_start_matches('/').split('/').collect();
+        let last = parts.len() - 1;
+        parts
+            .iter()
+            .enumerate()
+            .map(|(i, part)| match part.strip_prefix(':') {
+                Some(key) => Segment::Param(key.to_string()),
+                None if *part == "*" && i == last => Segment::Rest,
+                None => Segment::Literal(part.to_string()),
+            })
+            .collect()
+    }
+}
+
+/// The parameters of `path` (still percent-encoded) when it matches the route's segments, in order.
+fn captures<'p>(segments: &[Segment], path: &'p str) -> Option<Vec<&'p str>> {
+    let mut rest = path.strip_prefix('/')?;
+    let mut caps = Vec::new();
+    for (i, segment) in segments.iter().enumerate() {
+        if *segment == Segment::Rest {
+            return (!rest.is_empty()).then(|| {
+                caps.push(rest);
+                caps
+            });
+        }
+        let last = i + 1 == segments.len();
+        let (part, tail) = match rest.split_once('/') {
+            Some((part, tail)) if !last => (part, tail),
+            None if last => (rest, ""),
+            // More of the path than the route has, or less.
+            _ => return None,
+        };
+        match segment {
+            Segment::Literal(literal) if literal == part => {}
+            Segment::Param(_) if !part.is_empty() => caps.push(part),
+            _ => return None,
+        }
+        rest = tail;
+    }
+    Some(caps)
+}
+
+/// The route as a regular expression (`:key` is `([^/]+)`, `*` is `(.+)`), as `/__test/routes` lists it
+/// for the authentication test, which turns it back into a path.
+fn pattern_regex(segments: &[Segment]) -> String {
+    let parts: String = segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Literal(literal) => format!("\\/{literal}"),
+            Segment::Param(_) => "\\/([^/]+)".to_string(),
+            Segment::Rest => "\\/(.+)".to_string(),
+        })
+        .collect();
+    format!("^{parts}$")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RouteInfo {
     pub method: String,
-    /// The route pattern as JS `RegExp.source` writes it.
+    /// The route as `pattern_regex` writes it.
     pub pattern: String,
     pub public: bool,
 }
@@ -515,96 +580,14 @@ impl Routes {
         F: Fn(Arc<App>, Ctx) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Resp, ApiError>> + Send + 'static,
     {
-        let keys = pattern
-            .split('/')
-            .filter_map(|s| {
-                if s == "*" {
-                    Some("rest")
-                } else {
-                    s.strip_prefix(':')
-                }
-            })
-            .map(str::to_string)
-            .collect();
         self.0.push(Route {
             method,
-            pattern: pattern.to_string(),
-            keys,
+            segments: Segment::parse_pattern(pattern),
             public,
             plugin: crate::plugins::route_owner(pattern),
             h: Box::new(move |app, ctx| Box::pin(f(app, ctx))),
         });
     }
-}
-
-/// Matches `path` against a route pattern, compiled to a regex: `:key` is `([^/]+)`, every other
-/// character is a regex atom (so `.` matches any character), anchored at both ends.
-fn match_route(pattern: &str, path: &str) -> Option<Vec<String>> {
-    fn go(p: &[u8], s: &[u8], caps: &mut Vec<String>, src: &str, pi: usize, si: usize) -> bool {
-        if pi == p.len() {
-            return si == s.len();
-        }
-        // A final `*` takes the rest of the path, at least one character (`/api/plugins/:id/*`).
-        if p[pi] == b'*' && pi + 1 == p.len() {
-            if si < s.len() {
-                caps.push(src[si..].to_string());
-                return true;
-            }
-            return false;
-        }
-        if p[pi] == b':' {
-            let mut end = pi + 1;
-            while end < p.len() && p[end].is_ascii_alphabetic() {
-                end += 1;
-            }
-            if end > pi + 1 {
-                let mut j = si;
-                while j < s.len() && s[j] != b'/' {
-                    j += 1;
-                }
-                // Greedy with backtracking, like the regex engine.
-                while j > si {
-                    caps.push(src[si..j].to_string());
-                    if go(p, s, caps, src, end, j) {
-                        return true;
-                    }
-                    caps.pop();
-                    j -= 1;
-                }
-                return false;
-            }
-        }
-        if si < s.len() && (p[pi] == b'.' || p[pi] == s[si]) {
-            return go(p, s, caps, src, pi + 1, si + 1);
-        }
-        false
-    }
-    let mut caps = Vec::new();
-    // Character-wise matching on bytes is safe: patterns are ASCII and captures end at '/' or a literal.
-    go(pattern.as_bytes(), path.as_bytes(), &mut caps, path, 0, 0).then_some(caps)
-}
-
-/// `new RegExp('^' + pattern.replace(/:([a-zA-Z]+)/g, '([^/]+)') + '$').source`.
-fn regex_source(pattern: &str) -> String {
-    let mut out = String::from("^");
-    let mut chars = pattern.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == ':' && chars.peek().is_some_and(|n| n.is_ascii_alphabetic()) {
-            while chars.peek().is_some_and(|n| n.is_ascii_alphabetic()) {
-                chars.next();
-            }
-            // JS escapes `/` in `source`, but not inside a character class.
-            out.push_str("([^/]+)");
-        } else if c == '*' && chars.peek().is_none() {
-            out.push_str("(.+)");
-        } else if c == '/' {
-            out.push_str("\\/");
-        } else {
-            out.push(c);
-        }
-    }
-    out.push('$');
-    out
 }
 
 // ---------- the app ----------
@@ -924,7 +907,7 @@ impl App {
             .iter()
             .map(|r| RouteInfo {
                 method: r.method.to_string(),
-                pattern: regex_source(&r.pattern),
+                pattern: pattern_regex(&r.segments),
                 public: r.public,
             })
             .collect()
@@ -1100,15 +1083,20 @@ impl App {
             if r.method != method {
                 continue;
             }
-            let Some(caps) = match_route(&r.pattern, &path) else {
+            let Some(caps) = captures(&r.segments, &path) else {
                 continue;
             };
+            let keys = r.segments.iter().filter_map(|segment| match segment {
+                Segment::Literal(_) => None,
+                Segment::Param(key) => Some(key.as_str()),
+                Segment::Rest => Some("rest"),
+            });
             let mut params = BTreeMap::new();
-            for (k, v) in r.keys.iter().zip(caps) {
-                let Some(v) = decode_uri_component(&v) else {
+            for (k, v) in keys.zip(caps) {
+                let Some(v) = percent_decode(v) else {
                     return server_error(&self.host());
                 };
-                params.insert(k.clone(), v);
+                params.insert(k.to_string(), v);
             }
             let device = self.authenticate(&parts.headers);
             if device.is_none() && !self.anon_allowed(&client) {
@@ -1189,7 +1177,7 @@ impl App {
         if self.authenticate(headers).is_none() {
             return response(401, Body::empty(), &[]);
         }
-        let Some(rest) = decode_uri_component(rest) else {
+        let Some(rest) = percent_decode(rest) else {
             return not_found();
         };
         let Some((id, file)) = rest
@@ -1234,10 +1222,10 @@ impl App {
     /// The Content-Security-Policy for the page: the usual one, with its inline scripts (the import map and
     /// the theme) allowed by the hashes the build writes next to it (`index.html.csp`, scripts/build.ts).
     /// None without that file.
-    async fn page_csp(&self, headers: &HeaderMap, file: &str) -> Option<String> {
-        let listed = tokio::fs::read_to_string(format!("{file}.csp"))
-            .await
-            .ok()?;
+    async fn page_csp(&self, headers: &HeaderMap, file: &Path) -> Option<String> {
+        let mut listing = file.as_os_str().to_owned();
+        listing.push(".csp");
+        let listed = tokio::fs::read_to_string(listing).await.ok()?;
         let hashes: Vec<&str> = listed
             .split_whitespace()
             .filter(|h| is_script_hash(h))
@@ -1259,15 +1247,16 @@ impl App {
     }
 
     async fn serve_static(&self, req: Request<Body>, pathname: &str) -> Resp {
-        let Some(mut rel) = decode_uri_component(pathname) else {
+        let Some(mut rel) = percent_decode(pathname) else {
             return server_error(&self.host());
         };
         if rel == "/" || extname(&rel).is_empty() {
             rel = "/index.html".to_string(); // client-side routes
         }
-        let root = lexical_resolve(&self.d.web_dir, "");
-        let file = lexical_resolve(&self.d.web_dir, &format!(".{rel}"));
-        if !file.starts_with(&format!("{root}/")) {
+        let root = normalize_lexically(&self.d.web_dir);
+        // Relative to the root, as `rel` is absolute; `..` can't leave it.
+        let file = normalize_lexically(&root.join(format!(".{rel}")));
+        if !file.starts_with(&root) || file == root {
             return response(404, Body::empty(), &[]);
         }
         // Home-screen installs fetch these outside the page; record whether they arrive and how.
@@ -1312,7 +1301,7 @@ impl App {
             extra.push(("cross-origin-resource-policy".into(), "cross-origin".into()));
         }
         let accept = header_str(headers, "accept-encoding").map(str::to_string);
-        let file_path = PathBuf::from(&file);
+        let file_path = file.clone();
         let sf = match tokio::task::spawn_blocking(move || {
             static_file(&file_path, &meta, &rel, accept.as_deref(), &extra)
         })
@@ -1607,7 +1596,7 @@ impl App {
     }
 }
 
-/// `new URL(req.url).pathname`: WHATWG path normalization of the request target.
+/// The request's path, normalized as a browser's URL parser does (WHATWG: `.` and `..` segments).
 fn pathname(req: &Request<Body>) -> Option<String> {
     let target = req.uri().path_and_query().map_or("/", |p| p.as_str());
     url::Url::parse(&format!("http://h{target}"))
@@ -1615,33 +1604,8 @@ fn pathname(req: &Request<Body>) -> Option<String> {
         .map(|u| u.path().to_string())
 }
 
-/// `path.extname`.
-fn extname(p: &str) -> &str {
-    let base = p.rsplit('/').next().unwrap_or("");
-    match base.rfind('.') {
-        Some(0) | None => "",
-        Some(i) => &base[i..],
-    }
-}
-
-/// `path.resolve(root, rel)` for an absolute root: lexical, no symlinks, no trailing slash.
-fn lexical_resolve(root: &Path, rel: &str) -> String {
-    let joined = format!("{}/{}", root.to_string_lossy(), rel);
-    let mut parts: Vec<&str> = Vec::new();
-    for seg in joined.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            s => parts.push(s),
-        }
-    }
-    format!("/{}", parts.join("/"))
-}
-
-/// `/^\/(icons\/(apple-touch-icon|icon-192|icon-512|icon-maskable-512)|manifest)[.\w]*$/` group 2,
-/// or "manifest" for /manifest.webmanifest.
+/// Which home-screen icon (or the manifest) a path is: `/icons/<name>` followed only by letters, digits,
+/// `_` and dots (`/icons/icon-192.png`), or `/manifest.webmanifest`.
 fn icon_kind(rel: &str) -> Option<&'static str> {
     let rest_ok = |s: &str| {
         s.bytes()
@@ -1699,33 +1663,67 @@ mod tests {
         assert!(!cell.get().updates.check);
     }
 
+    fn route_captures(pattern: &str, path: &str) -> Option<Vec<String>> {
+        let segments = Segment::parse_pattern(pattern);
+        captures(&segments, path).map(|c| c.into_iter().map(String::from).collect())
+    }
+
     #[test]
-    fn routes_match_like_the_ts_regex() {
-        assert_eq!(match_route("/api/session", "/api/session"), Some(vec![]));
-        assert_eq!(match_route("/api/session", "/api/session/"), None);
+    fn routes_match_whole_segments() {
+        assert_eq!(route_captures("/api/session", "/api/session"), Some(vec![]));
+        assert_eq!(route_captures("/api/session", "/api/session/"), None);
+        assert_eq!(route_captures("/api/session", "/api/sessions"), None);
+        assert_eq!(route_captures("/api/session", "/api"), None);
         assert_eq!(
-            match_route(
+            route_captures(
                 "/api/streams/:id/notes/:note",
                 "/api/streams/w1%3Ap1/notes/abc"
             ),
             Some(vec!["w1%3Ap1".to_string(), "abc".to_string()])
         );
         assert_eq!(
-            match_route("/api/streams/:id/info", "/api/streams//info"),
+            route_captures("/api/streams/:id/info", "/api/streams//info"),
             None
         );
-        // `.` is a regex wildcard in the pattern.
-        assert!(match_route("/api/ca.mobileconfig", "/api/caXmobileconfig").is_some());
         assert_eq!(
-            match_route("/api/plugins/:id/*", "/api/plugins/ci/runs/42"),
+            route_captures(
+                "/api/streams/:id/notes/:note",
+                "/api/streams/a/notes/images/x"
+            ),
+            None,
+            "a parameter is one segment"
+        );
+        assert!(route_captures("/api/ca.mobileconfig", "/api/ca.mobileconfig").is_some());
+        assert_eq!(
+            route_captures("/api/ca.mobileconfig", "/api/caXmobileconfig"),
+            None
+        );
+        assert_eq!(
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci/runs/42"),
             Some(vec!["ci".to_string(), "runs/42".to_string()])
         );
-        assert_eq!(match_route("/api/plugins/:id/*", "/api/plugins/ci/"), None);
-        assert_eq!(match_route("/api/plugins/:id/*", "/api/plugins/ci"), None);
         assert_eq!(
-            regex_source("/api/streams/:id/info"),
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci/"),
+            None
+        );
+        assert_eq!(
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_route_list_writes_patterns_as_regular_expressions() {
+        let regex = |pattern: &str| pattern_regex(&Segment::parse_pattern(pattern));
+        assert_eq!(
+            regex("/api/streams/:id/info"),
             "^\\/api\\/streams\\/([^/]+)\\/info$"
         );
+        assert_eq!(
+            regex("/api/plugins/:id/*"),
+            "^\\/api\\/plugins\\/([^/]+)\\/(.+)$"
+        );
+        assert_eq!(regex("/api/ca.mobileconfig"), "^\\/api\\/ca.mobileconfig$");
     }
 
     #[test]
@@ -1741,17 +1739,11 @@ mod tests {
                 && is_loopback_name("::1")
         );
         assert!(!is_loopback_name("10.8.0.1") && !is_loopback_name("mac.tail1.ts.net"));
-        assert_eq!(decode_uri_component("w1%3Ap1").as_deref(), Some("w1:p1"));
-        assert_eq!(decode_uri_component("%E0%A4%A"), None);
-        assert_eq!(decode_uri_component("%FF"), None);
-        assert_eq!(extname("/a/b.js"), ".js");
-        assert_eq!(extname("/a/.hidden"), "");
-        assert_eq!(extname("/streams/x"), "");
-        assert_eq!(lexical_resolve(Path::new("/w/dist"), "./../x"), "/w/x");
-        assert_eq!(
-            lexical_resolve(Path::new("/w/dist"), "./index.html"),
-            "/w/dist/index.html"
-        );
+        assert_eq!(percent_decode("w1%3Ap1").as_deref(), Some("w1:p1"));
+        assert_eq!(percent_decode("caf%C3%A9+x").as_deref(), Some("café+x"));
+        assert_eq!(percent_decode("%E0%A4%A"), None);
+        assert_eq!(percent_decode("%FF"), None);
+        assert_eq!(percent_decode("%+1"), None);
         assert_eq!(icon_kind("/icons/icon-192.png"), Some("icon-192"));
         assert_eq!(icon_kind("/icons/icon-192-x.png"), None);
         assert_eq!(icon_kind("/manifest.webmanifest"), Some("manifest"));

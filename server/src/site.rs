@@ -82,7 +82,7 @@ pub async fn serve(app: &App, rest: &str) -> Resp {
     if !app.d.auth.list().iter().any(|d| d.id == device) || !app.plugins.get().is_enabled("files") {
         return not_found();
     }
-    let Some(path) = crate::app::decode_uri_component(path) else {
+    let Some(path) = crate::app::percent_decode(path) else {
         return not_found();
     };
     let Some(cwd) = app
