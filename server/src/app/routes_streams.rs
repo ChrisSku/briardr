@@ -9,12 +9,13 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, js_number, json_body, now_ms, ok, raw_body, response, stream_gone, upload_body,
-    ApiError, App, Ctx, Routes, JSON_LIMIT,
+    action_err, js_number, json_body, json_body_as, now_ms, ok, raw_body, response, stream_gone,
+    upload_body, ApiError, App, Ctx, Routes, JSON_LIMIT,
 };
+use crate::actions::NewStream;
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
-use crate::files::{delete_entry, list_dir, read_file, search_files, FileEntry};
+use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
 use crate::git::{
     base_of, changes, changes_since_base, file_diff, head_tree, ChangeKind, ChangedFile,
     ChangesReport, ChangesState, FileRef, GitError,
@@ -311,20 +312,22 @@ pub(super) fn register(r: &mut Routes) {
     );
 
     r.add(
+        Method::GET,
+        "/api/agents",
+        false,
+        |app: Arc<App>, _ctx: Ctx| async move {
+            ok(serde_json::to_value(app.d.actions.agents().await)
+                .map_err(|_| ApiError::Internal)?)
+        },
+    );
+
+    r.add(
         Method::POST,
         "/api/streams",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_stream(
-                    &field(&b, "projectId"),
-                    &field(&b, "kind"),
-                    &field(&b, "name"),
-                )
-                .await?)
+            let req: NewStream = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_stream(req).await?)
         },
     );
 
@@ -639,6 +642,16 @@ pub(super) fn register(r: &mut Routes) {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
             let query = ctx.query.get("q").unwrap_or("").to_string();
+            // `in=contents` looks inside the files instead of at their names.
+            if ctx.query.get("in") == Some("contents") {
+                let found = blocking(move || {
+                    let changed = changed_docs(&cwd).unwrap_or_default();
+                    search_contents(&cwd, &query, &changed, "git")
+                })
+                .await?
+                .map_err(docs_err)?;
+                return ok(serde_json::to_value(found).map_err(|_| ApiError::Internal)?);
+            }
             let result = blocking(move || {
                 let changed = changed_docs(&cwd).unwrap_or_default();
                 search_files(&cwd, &query, &changed)

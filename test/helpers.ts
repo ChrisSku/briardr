@@ -1,6 +1,7 @@
 // Test helpers: the Briardr server binary on free loopback ports, using a throwaway data directory (uploads
 // too) and the test run's own Herdr session, or herdr-cores of its own. Nothing here touches the developer's
-// real panes or terminals, and runs in parallel (other worktrees, other agents) don't share anything.
+// real panes or terminals, or reads the Mac's battery, and runs in parallel (other worktrees, other agents)
+// don't share anything.
 // The binary is `BRIARDR_SERVER_BIN`, else server/target/debug/briardr (`mise run build:test-server`): a build
 // with the loopback test hooks (/__test/*), which stand in for reaching into the server from a test.
 import { execFileSync, spawn } from 'node:child_process';
@@ -15,6 +16,11 @@ import tls from 'node:tls';
  *  to keep instead, such as briardr-dev to watch the tests in Herdr. */
 export const SESSION = process.env.BRIARDR_TEST_SESSION || `briardr-test-${process.pid}`;
 const OWN_SESSION = !process.env.BRIARDR_TEST_SESSION;
+/** Stand-ins for the agents tests start (test/fixtures/agents/record): what they were given goes to `.agent-args`
+ *  in their folder. They come first on the PATH of this run's own session's panes, so no test starts a real
+ *  agent there; a session BRIARDR_TEST_SESSION names has the real ones (`standInAgents` is false). */
+export const AGENTS = path.resolve(import.meta.dir, 'fixtures', 'agents');
+export const standInAgents = OWN_SESSION;
 
 /** The folders this run made, one per line, so they go when it ends, or at the next run if it was killed. The
  *  folders themselves stay directly in the temp directory: a pane's folder shows in its prompt, and a longer one
@@ -61,10 +67,13 @@ export function ensureSession(): void {
   if (!started && OWN_SESSION) removeStaleSessions();
   started = true;
   if (running()) return;
-  // Pane shells start without your zsh startup files (an empty ZDOTDIR), as in CI. Yours can run commands in
-  // other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
-  // reports that folder as the pane's.
-  const env = { ...scrubbed(), ZDOTDIR: tmpDir('briardr-zdotdir-') };
+  // Pane shells start without your zsh startup files (a ZDOTDIR of their own), as in CI. Yours can run commands
+  // in other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
+  // reports that folder as the pane's. Its .zshrc puts the stand-in agents first again after a login zsh put
+  // the system's folders first (macOS's path_helper).
+  const zdotdir = tmpDir('briardr-zdotdir-');
+  fs.writeFileSync(path.join(zdotdir, '.zshrc'), `path=(${JSON.stringify(AGENTS)} $path)\n`);
+  const env = { ...scrubbed(), ZDOTDIR: zdotdir, PATH: `${AGENTS}:${process.env.PATH}` };
   const child = spawn('herdr', ['--session', SESSION, 'server'], { env, stdio: 'ignore', detached: true });
   child.unref();
   const until = Date.now() + 10_000;
@@ -236,38 +245,34 @@ export async function freePort(): Promise<number> {
 
 export const SERVER_BIN = process.env.BRIARDR_SERVER_BIN || path.resolve(import.meta.dir, '..', 'server', 'target', 'debug', 'briardr');
 
+type ServerOptions = { pair?: boolean; config?: object; files?: Record<string, string>; platform?: string; env?: Record<string, string> };
+
 /** What tests reach through `s.run`: each member calls a test hook or the CLI. */
 export interface Running {
   auth: {
     createPairingCode(): { code: string };
     pair(code: string, name: string, ip?: string): any;
     revoke(id: string): boolean;
+    /** Saves the devices file, as the server does once a minute when a device was seen. */
+    flush(): void;
   };
+  /** Runs `briardr <args>` on the server's data directory, as on the host, and returns what it printed. */
+  cli(...args: string[]): string;
   herdr: { refresh(): Promise<unknown> };
   app: { listRoutes(): { method: string; pattern: string; public: boolean }[]; d: { previews: { open(device: string, port: number): Promise<any> } } };
   push: { sendImpl: (sub: unknown, body: string, opts: object) => unknown; readonly subject: string };
   hub: { readonly sent: unknown[]; readonly controllers: number };
+  /** The fake Mac's battery from now on: charging on the power adapter (`ac`), else on battery. The server
+   *  reads it at its next poll (GET /api/mac polls). */
+  power: { battery(percent: number, ac: boolean): void };
   readonly urls: string[];
 }
 
-/** `config`: written to config.json first (e.g. proxy mode). `platform`: run as that host (BRIARDR_PLATFORM).
- *  `env`: more environment for the server. */
-export function startServer(opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> } = {}): Promise<TestServer> {
-  if (!fs.existsSync(SERVER_BIN)) throw new Error(`${SERVER_BIN} is missing: run \`mise run build:test-server\``);
-  return startBinary(SERVER_BIN, opts);
-}
-
-/**
- * The binary as a child process with its own env and data dir. Tests reach
- * `s.run.*` synchronously, so the shim below calls the `/__test/*` hooks with curl. A hook
- * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
- */
-async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> }): Promise<TestServer> {
-  ensureSession();
-  const dataDir = tmpDir('briardr-data-');
-  if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
-  const port = await freePort();
-  const env: NodeJS.ProcessEnv = {
+/** The environment of a server under test (`briardr serve`), for tests that start their own: this run's data
+ *  and uploads folders, ports and Herdr session, and the test hooks. With the hooks on, the server runs on a
+ *  fake Mac on its power adapter (`run.power`), never this machine's battery and sleep settings. */
+export function serverEnv(dataDir: string, port: number): NodeJS.ProcessEnv {
+  return {
     ...scrubbed(),
     BRIARDR_DATA_DIR: dataDir,
     BRIARDR_UPLOADS_DIR: path.join(dataDir, 'briardr-uploads'), // not the shared one in the temp directory
@@ -278,6 +283,30 @@ async function startBinary(bin: string, opts: { pair?: boolean; config?: object;
     BRIARDR_NO_DICTATION: '1',
     BRIARDR_TEST_HOOKS: '1',
   };
+}
+
+/** `config`: written to config.json first (e.g. proxy mode). `files`: more files written first, by path in
+ *  the data directory. `platform`: run as that host (BRIARDR_PLATFORM). `env`: more environment for the server. */
+export function startServer(opts: ServerOptions = {}): Promise<TestServer> {
+  if (!fs.existsSync(SERVER_BIN)) throw new Error(`${SERVER_BIN} is missing: run \`mise run build:test-server\``);
+  return startBinary(SERVER_BIN, opts);
+}
+
+/**
+ * The binary as a child process with its own env and data dir. Tests reach
+ * `s.run.*` synchronously, so the shim below calls the `/__test/*` hooks with curl. A hook
+ * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
+ */
+async function startBinary(bin: string, opts: ServerOptions): Promise<TestServer> {
+  ensureSession();
+  const dataDir = tmpDir('briardr-data-');
+  if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
+  for (const [file, text] of Object.entries(opts.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(dataDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, file), text);
+  }
+  const port = await freePort();
+  const env = serverEnv(dataDir, port);
   if (opts.platform) env.BRIARDR_PLATFORM = opts.platform;
   Object.assign(env, opts.env);
   const child = spawn(bin, ['serve'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -337,17 +366,19 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
   const missing = (name: string): never => {
     throw new Error(`test hook for ${name} is not available on the Rust server yet`);
   };
+  const cli = (...args: string[]) => execFileSync(bin, args, { env: { ...env, BRIARDR_DATA_DIR: s.dataDir }, encoding: 'utf8' });
   const shim = {
     auth: {
       createPairingCode: () => {
-        const out = execFileSync(bin, ['pair'], { env: { ...env, BRIARDR_DATA_DIR: s.dataDir }, encoding: 'utf8' });
-        const m = out.match(/[A-Z0-9]{4}-[A-Z0-9]{4}/);
+        const m = cli('pair').match(/[A-Z0-9]{4}-[A-Z0-9]{4}/);
         if (!m) throw new Error('no pairing code');
         return { code: m[0] };
       },
       pair: (code: string, name: string, ip?: string) => hook('POST', '/auth/pair', { code, name, ip }),
       revoke: (id: string) => hook('POST', '/auth/revoke', { id }),
+      flush: () => hook('POST', '/auth/flush', {}),
     },
+    cli,
     herdr: { refresh: async () => hook('POST', '/herdr/refresh', {}) },
     app: {
       listRoutes: () => hook('GET', '/routes'),
@@ -381,6 +412,11 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
       /** Control connections open, or closed but not yet given back to Herdr. */
       get controllers() {
         return hook('GET', '/hub/controllers');
+      },
+    },
+    power: {
+      battery: (percent: number, ac: boolean) => {
+        if (!hook('POST', '/power', { percent, ac }).ok) throw new Error('the fake Mac took no battery');
       },
     },
     get urls(): string[] {
@@ -525,6 +561,13 @@ export function closed(sock: WebSocket, ms = WAIT): Promise<number> {
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A real P-256 subscription key pair, as a browser would create, for `/api/notifications/subscribe`. */
+export function pushKeys(): { p256dh: string; auth: string } {
+  const ecdh = crypto.createECDH('prime256v1');
+  ecdh.generateKeys();
+  return { p256dh: ecdh.getPublicKey('base64url'), auth: Buffer.alloc(16, 7).toString('base64url') };
+}
+
 /** Herdr CLI against the isolated session only. */
 export function herdr(...args: string[]): any {
   const env: NodeJS.ProcessEnv = {};
@@ -535,6 +578,12 @@ export function herdr(...args: string[]): any {
   } catch {
     return out;
   }
+}
+
+/** Sets a pane's terminal title, as an agent does, and keeps it: `cat` holds back the shell's prompt, which
+ *  sets the title again where the prompt has it (bash on Ubuntu). Ctrl+C ends it. */
+export function holdTitle(pane: string, title: string) {
+  herdr('pane', 'run', pane, `printf '\\033]0;${title}\\007'; cat`);
 }
 
 /** A dedicated test workspace with a shell pane in a disposable folder. */

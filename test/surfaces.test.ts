@@ -6,7 +6,7 @@ import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, onTestFinished, test } from 'bun:test';
-import { closeWorkspace, herdr, request, sleep, startServer, testPane, tmpDir, type TestServer } from './helpers.ts';
+import { closeWorkspace, herdr, request, sleep, standInAgents, startServer, testPane, tmpDir, waitUntil, type TestServer } from './helpers.ts';
 
 let s: TestServer;
 let pane: string;
@@ -330,6 +330,53 @@ describe('creating work and stream actions', () => {
     assert.equal(created.name, 'tests');
     assert.equal(created.projectId, p.json.projectId);
     assert.equal(model.projects.find((x: any) => x.id === p.json.projectId).name, 'backend');
+    closeWorkspace(w.json.workspaceId);
+  });
+
+  test('offers the agents Herdr starts, and checks the kind and the prompt before anything starts', async () => {
+    const r = await api('GET', '/api/agents');
+    assert.equal(r.status, 200);
+    const kinds: string[] = r.json.agents.map((a: { kind: string }) => a.kind);
+    assert.deepEqual(kinds.slice(0, 2), ['claude', 'codex']);
+    assert.ok(kinds.includes('gemini') && kinds.length > 10, `Herdr’s kinds: ${kinds}`);
+    assert.deepEqual(
+      r.json.agents.filter((a: { prompt: boolean }) => a.prompt).map((a: { kind: string }) => a.kind),
+      ['claude', 'codex'],
+    );
+    const panes = () => herdr('pane', 'list').result.panes.length;
+    const before = panes();
+    const refused = async (body: object) => {
+      const x = await api('POST', '/api/streams', { projectId: 'none', ...body });
+      return `${x.status} ${x.json.error}`;
+    };
+    assert.equal(await refused({ kind: 'vim' }), '400 invalid_kind');
+    assert.equal(await refused({ kind: 3 }), '400 bad_json');
+    assert.equal(await refused({ kind: 'shell', prompt: 'ls' }), '400 prompt_not_supported');
+    assert.equal(await refused({ kind: 'gemini', prompt: 'hi' }), '400 prompt_not_supported');
+    assert.equal(await refused({ kind: 'claude', prompt: 'one\ntwo' }), '400 invalid_prompt');
+    assert.equal(await refused({ kind: 'claude', prompt: 'x'.repeat(r.json.maxPrompt + 1) }), '400 prompt_too_long');
+    assert.equal(await refused({ kind: 'claude', prompt: 'fine' }), '404 project_gone');
+    assert.equal(panes(), before, 'no pane was made');
+  });
+
+  test.skipIf(!standInAgents)('an agent starts with the prompt as its argument; another agent Herdr starts too', async () => {
+    const folder = tmpDir('briardr-agent-');
+    const w = await api('POST', '/api/workspaces', { name: 'briardr-test-agent', folder });
+    assert.equal(w.status, 200, JSON.stringify(w.json));
+    const args = path.join(folder, '.agent-args');
+    const started = async (body: object) => {
+      fs.rmSync(args, { force: true });
+      const st = await api('POST', '/api/streams', { projectId: w.json.projectId, ...body });
+      assert.equal(st.status, 200, JSON.stringify(st.json));
+      assert.equal(st.json.note, null);
+      await waitUntil('the agent', () => fs.existsSync(args));
+      return fs.readFileSync(args, 'utf8').split('\n').slice(0, -1);
+    };
+    // Herdr types it into the pane's shell, quoted: none of it runs there.
+    const prompt = `it's "$HOME" \`touch pwned\` ; echo \\ done`;
+    assert.deepEqual(await started({ kind: 'claude', name: 'with prompt', prompt }), ['--', prompt]);
+    assert.ok(!fs.existsSync(path.join(folder, 'pwned')));
+    assert.deepEqual(await started({ kind: 'gemini' }), []);
     closeWorkspace(w.json.workspaceId);
   });
 

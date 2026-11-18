@@ -1,0 +1,5 @@
+#!/bin/sh
+# A stand-in for an agent (and, for herdr-core, for the shell agents start in): it writes the arguments it
+# was started with to .agent-args in its folder, one a line, and stays, as an agent does.
+for arg; do printf '%s\n' "$arg"; done > .agent-args
+exec sleep 600

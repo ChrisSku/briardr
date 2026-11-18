@@ -2,12 +2,13 @@
 // Briardr server and the test run's own Herdr session. Verifies what actually reaches the program.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, onTestFinished, test } from 'bun:test';
 import { promisify } from 'node:util';
 import { devices, webkit, type Browser, type BrowserContext, type Locator, type Page } from 'playwright';
-import { closeWorkspace, herdr, request, SESSION, sleep, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
+import { closeWorkspace, herdr, holdTitle, request, SESSION, sleep, standInAgents, startServer, testPane, WAIT, waitUntil, type TestServer } from '../test/helpers.ts';
 
 let s: TestServer;
 /** The host as the server under test describes it before pairing: the "Mac" on macOS, the "server" on Linux
@@ -765,6 +766,26 @@ describe('agents list, peek, banners and links', () => {
     await a.ctx.close();
   });
 
+  test('an agent’s row shows what its terminal title says it’s doing, and Jump finds it by that', async () => {
+    await settleShell();
+    holdTitle(ws.pane, 'Reviewing the parser');
+    herdr('pane', 'report-agent', ws.pane, '--source', 'custom:briardr-ui', '--agent', 'claude', '--state', 'working');
+    // The pane stays an agent's, as the tests after this one find it; only its title goes.
+    onTestFinished(async () => {
+      await settleShell();
+      herdr('pane', 'run', ws.pane, "printf '\\033]0;\\007'");
+    });
+    const a = await device('iphone', 'phone-task');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    const row = a.page.locator('.stream-row', { hasText: 'ui target' });
+    await row.locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+    // VoiceOver hears it with the rest of the row.
+    await row.getByRole('button', { name: /ui target.*Reviewing the parser/ }).waitFor();
+    await a.page.getByRole('button', { name: 'Jump to a stream' }).click();
+    await a.page.getByLabel('Search streams').fill('parser');
+    await a.page.locator('#jump-list .row-main', { hasText: 'ui target' }).locator('.row-task', { hasText: 'Reviewing the parser' }).waitFor();
+  });
+
   test('a paste into Peek goes nowhere, not into the stream that’s open beside it', async () => {
     const a = await device('mac', 'mac-peek-paste');
     onTestFinished(() => a.ctx.close().catch(() => {}));
@@ -1185,6 +1206,38 @@ describe('workspaces and menus', () => {
 
     await rename('More actions for rename-stream', 'Rename stream', 'renamed stream');
     await a.page.locator('.row-title', { hasText: 'renamed stream' }).waitFor();
+  });
+
+  test.skipIf(!standInAgents)('a new stream starts any agent Herdr starts; Claude’s prompt starts it with Enter', async () => {
+    const t = testPane('new agent');
+    onTestFinished(() => closeWorkspace(t.workspace));
+    await s.run.herdr.refresh();
+    const projectName = herdr('tab', 'get', herdr('pane', 'get', t.pane).result.pane.tab_id).result.tab.label;
+    const a = await device('iphone', 'phone-new-stream');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await a.page.goto(s.base + '/workspaces');
+    await a.page.locator('.tree-ws', { hasText: 'new agent' }).getByRole('button', { name: `Actions for ${projectName}`, exact: true }).click();
+    await a.page.getByRole('menuitem', { name: 'New stream' }).click();
+    const sheet = a.page.getByRole('dialog', { name: `New stream in ${projectName}` });
+    const run = sheet.getByRole('group', { name: 'Run' });
+    await run.getByText('Other', { exact: true }).click();
+    assert.ok(await run.evaluate((el) => el.scrollWidth <= el.clientWidth), 'Shell, Claude, Codex and Other fit a phone');
+    // Herdr's other agents are in a list, and start without a prompt.
+    const agent = sheet.getByLabel('Agent');
+    assert.ok((await agent.locator('option').allTextContents()).includes('Gemini'));
+    await agent.selectOption('gemini');
+    assert.equal(await sheet.getByLabel(/^Prompt/).count(), 0);
+
+    await run.getByText('Claude', { exact: true }).click();
+    const prompt = sheet.getByLabel(/^Prompt/);
+    const text = `fix the "login" bug, it's in $HOME`;
+    await prompt.fill(text.replace(', ', ',\n'));
+    assert.equal(await prompt.inputValue(), text, 'one line');
+    await prompt.press('Enter');
+    await sheet.waitFor({ state: 'detached' });
+    const args = path.join(t.dir, '.agent-args');
+    await waitUntil('the agent', () => fs.existsSync(args));
+    assert.deepEqual(fs.readFileSync(args, 'utf8').split('\n').slice(0, -1), ['--', text]);
   });
 
   test('closing asks first, says what closes with it, and leaves a stream that closed while open', async () => {

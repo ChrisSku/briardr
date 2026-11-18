@@ -5,6 +5,23 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.27
+
+- **The server's dependencies are updated past three RustSec advisories.** rustls-webpki 0.103.17 (RUSTSEC-2026-0382), and crypto-bigint 0.7.11 (RUSTSEC-2026-0387) and ctutils 0.4.8 (RUSTSEC-2026-0385), which the Web Push encryption uses. Nothing to change in your setup. ([#56](https://github.com/ChrisSku/briardr/pull/56))
+
+## 0.3.26
+
+- **An agent's row shows what it's working on.** In the Agents and Workspaces lists and in Jump, an agent's row has a line with its terminal title (Claude Code sets it to the task at hand), unless it only repeats the stream's name, the agent's own name or where it runs (a path, or a shell prompt's "user@host: ~/app"). Jump and the Workspaces search find agents by it too. With the Herdr app, a stream named after its terminal's title no longer starts with the agent's spinner. ([#46](https://github.com/ChrisSku/briardr/pull/46))
+- **`briardr revoke` signs a device out while Briardr is running.** Until now a lost device revoked with
+  `briardr revoke` on the host stayed signed in until Briardr restarted, and Briardr could write it back
+  into its devices file a minute later, undoing the revoke. Now it works like revoking in Settings →
+  Devices: the device's next request is refused, its open pages disconnect within a second, and its alerts
+  stop. If you revoked a device with `briardr revoke` while Briardr was running, check `briardr devices`
+  and revoke it again if it is still listed. ([#52](https://github.com/ChrisSku/briardr/pull/52))
+- **An address with a stray `%` opens Agents instead of a blank page.** Briardr couldn't decode an address
+  like `/stream/100%` and didn't start when it opened from its offline copy, with the host out of reach. ([#53](https://github.com/ChrisSku/briardr/pull/53))
+- **Files can search inside files.** The search in Files finds files by name, as before, or, with Contents, the lines that contain what you type (as plain text, in any case). A line opens its file there, picked, ready to add to a prompt. The search reads text files up to 1 MB and, in a Git repository, leaves out what `.gitignore` names (dependencies, build output). ([#50](https://github.com/ChrisSku/briardr/pull/50))
+
 ## 0.3.25
 
 - **Pair a device by scanning a QR code.** `briardr pair` (in a terminal) and Settings → Devices → Add a device show a QR code beside the one-time code. The new device's camera opens Briardr with the code filled in, and you still name the device and choose Sign in. The code travels after the link's `#`, which browsers send to no server or proxy, Briardr takes it out of the address once it has read it, and it still works once and expires after ten minutes. From the host itself (`localhost`), Settings shows the address `briardr pair` prints, which other devices can open. On an iPhone or iPad the pairing screen reminds you to add Briardr to the Home Screen first, since the Home Screen app signs in separately. ([#51](https://github.com/ChrisSku/briardr/pull/51))

@@ -1,3 +1,11 @@
+<script module lang="ts">
+  import type { AgentChoice } from '../../types.ts';
+
+  // The agents the server offered last time, so the sheet shows them at once; each opening asks again.
+  let known = $state<AgentChoice[]>([]);
+  let maxPrompt = $state(2000);
+</script>
+
 <script lang="ts">
   import { TheHost } from '../../host.ts';
   import { api } from '../../api.ts';
@@ -9,11 +17,34 @@
   import { Submit } from '../submit.svelte.ts';
 
   let { project, onClose }: { project: Project; onClose: () => void } = $props();
+  /** One tap away; the other agents Herdr starts are under Other. */
+  const PINNED = ['claude', 'codex'];
   let name = $state('');
-  const KINDS = ['shell', 'claude', 'codex'] as const;
-  let kind = $state<(typeof KINDS)[number]>('shell');
+  let choice = $state('shell');
+  let otherKind = $state('');
+  let prompt = $state('');
+  const pinned = $derived(known.filter((a) => PINNED.includes(a.kind)));
+  const others = $derived(known.filter((a) => !PINNED.includes(a.kind)));
+  const kind = $derived(choice === 'other' ? otherKind || others[0]?.kind || 'shell' : choice);
+  const agent = $derived(known.find((a) => a.kind === kind));
+
+  api<{ agents: AgentChoice[]; maxPrompt: number }>('GET', '/api/agents')
+    .then((r) => {
+      known = r.agents;
+      maxPrompt = r.maxPrompt;
+    })
+    .catch(() => {});
+
+  // The prompt is one line: Enter starts the stream, and pasted line breaks become spaces.
+  function promptKey(e: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) {
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault();
+    e.currentTarget.form?.requestSubmit();
+  }
+
   const s = new Submit(async () => {
-    const r = await api('POST', '/api/streams', { projectId: project.id, kind, name }, { timeout: 45_000 });
+    const body = { projectId: project.id, kind, name, prompt: agent?.prompt ? prompt : undefined };
+    const r = await api('POST', '/api/streams', body, { timeout: 45_000 });
     toast(r.note || 'Created stream', r.note ? 6000 : 2600);
     onClose();
     const st = model.value?.streams.find((x) => x.id === r.streamId);
@@ -24,14 +55,46 @@
 <Sheet title="New stream in {project.name}" {onClose}>
   <form onsubmit={s.run} class="form">
     <fieldset class="segmented" aria-label="Run">
-      {#each KINDS as k}
-        <label class={kind === k ? 'is-on' : ''}>
-          <input type="radio" name="kind" value={k} bind:group={kind} />
-          <ToolIcon tool={k === 'shell' ? 'zsh' : k} kind={k === 'shell' ? 'shell' : 'agent'} size={18} />
-          {k === 'shell' ? 'Shell' : k === 'claude' ? 'Claude' : 'Codex'}
+      <label class={choice === 'shell' ? 'is-on' : ''}>
+        <input type="radio" name="kind" value="shell" bind:group={choice} />
+        <ToolIcon tool="zsh" kind="shell" size={18} />
+        Shell
+      </label>
+      {#each pinned as a (a.kind)}
+        <label class={choice === a.kind ? 'is-on' : ''}>
+          <input type="radio" name="kind" value={a.kind} bind:group={choice} />
+          <ToolIcon tool={a.kind} kind="agent" size={18} />
+          {a.name}
         </label>
       {/each}
+      {#if others.length}
+        <label class={choice === 'other' ? 'is-on' : ''}>
+          <input type="radio" name="kind" value="other" bind:group={choice} />
+          <ToolIcon tool="agent" kind="agent" size={18} />
+          Other
+        </label>
+      {/if}
     </fieldset>
+    {#if choice === 'other'}
+      <select class="field" aria-label="Agent" value={kind} onchange={(e) => (otherKind = e.currentTarget.value)}>
+        {#each others as a (a.kind)}<option value={a.kind}>{a.name}</option>{/each}
+      </select>
+    {/if}
+    {#if agent?.prompt}
+      <label class="field-label">
+        Prompt (optional)
+        <textarea
+          class="field new-stream-prompt"
+          rows="3"
+          maxlength={maxPrompt}
+          enterkeyhint="go"
+          value={prompt}
+          oninput={(e) => (prompt = e.currentTarget.value.replace(/[\r\n\t]+/g, ' '))}
+          onkeydown={promptKey}
+          placeholder="What should {agent.name} do?"
+        ></textarea>
+      </label>
+    {/if}
     {#if onHerdrApp()}
       <p class="hint">The Herdr app puts it beside this project’s last pane, and keeps its current focus.</p>
     {:else}
@@ -44,7 +107,11 @@
     {#if s.error}<p class="error" role="alert">{s.error}</p>{/if}
     <div class="form-actions">
       <button type="button" class="btn" onclick={onClose}>Cancel</button>
-      <button class="btn btn-primary" disabled={s.busy}>{s.busy ? 'Starting…' : 'Create'}</button>
+      <button class="btn btn-primary" disabled={s.busy}>{s.busy ? 'Starting…' : 'Start'}</button>
     </div>
   </form>
 </Sheet>
+
+<style>
+  .new-stream-prompt { resize: vertical; line-height: 1.45; }
+</style>

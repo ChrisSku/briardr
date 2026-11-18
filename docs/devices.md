@@ -57,6 +57,14 @@ whatever its system says, the terminal included.
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
 
+**New stream** in a project's menu starts a shell, Claude Code or Codex, and with Herdr TUI, under
+**Other**, any other agent it can start (Gemini, OpenCode, Copilot and more). Claude Code and Codex can
+start with a **Prompt**: one line of up to 2,000 characters, which they get as their prompt argument
+when they start, and begin on at once. That is your own submission, made with **Start** (or Enter in the
+field): nothing is typed into the agent for it. With Herdr TUI, the agent's command, prompt included, is
+typed into the new pane's shell, so the prompt is handed over only in sh, bash, zsh, dash or ksh; in
+another shell (fish, for one) the agent starts without it, and Briardr says so.
+
 The iPad layout makes room for navigation beside a stream. To give a stream the whole screen, choose
 Full screen in its ⋯ menu (or press ⇧⌘↩ with a keyboard): the header, the tabs and the navigation
 beside it hide until you tap the button in the top right corner or press ⇧⌘↩ again. For dictation, the
@@ -182,8 +190,10 @@ keeps at most 60 characters.
 ## Lost device or changed URL
 
 Revoke a lost device in Settings → Devices, or run `briardr devices` followed by
-`briardr revoke DEVICE_ID` on the host. For managed WireGuard, also run
-`scripts/setup-linux.sh wg-remove NAME`. Deleting the Home Screen icon does not revoke the device.
+`briardr revoke DEVICE_ID` on the host. Either way it is signed out at once, whether or not Briardr is
+running: its next request is refused, its open pages disconnect, and it gets no more alerts. For managed
+WireGuard, also run `scripts/setup-linux.sh wg-remove NAME`. Deleting the Home Screen icon does not
+revoke the device.
 If Briardr cannot save the revocation, it reports an error and the device keeps access. Restore write
 access to the data directory (or free disk space), then retry the revocation.
 

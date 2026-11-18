@@ -7,8 +7,9 @@
 // - another machine (a second core joined as one): its terminals are shown, and its files never looked for here.
 import assert from 'node:assert/strict';
 import { afterAll, beforeAll, describe, test } from 'bun:test';
-import crypto from 'node:crypto';
-import { request, startCore, startServer, tmpDir, until, waitUntil, ws, type TestCore, type TestServer } from './helpers.ts';
+import fs from 'node:fs';
+import path from 'node:path';
+import { AGENTS, pushKeys, request, startCore, startServer, tmpDir, until, waitUntil, ws, type TestCore, type TestServer } from './helpers.ts';
 
 /** Reports each read from its terminal as a hex line, after turning on the modes its arguments name. */
 const ECHO = `
@@ -24,12 +25,6 @@ while True:
 /** An agent as far as the core can tell (OSC 7501): it works for a moment, then is done. */
 const AGENT = `printf '\\033]7501;state=working:app=claude-code\\033\\\\'; sleep 1; printf '\\033]7501;state=done:app=claude-code\\033\\\\'; exec sleep 600`;
 
-const keys = () => {
-  const ecdh = crypto.createECDH('prime256v1');
-  ecdh.generateKeys();
-  return { p256dh: ecdh.getPublicKey('base64url'), auth: Buffer.alloc(16, 7).toString('base64url') };
-};
-
 let core: TestCore;
 let s: TestServer;
 const model = async () => (await request(s, 'GET', '/api/state')).json.model;
@@ -41,7 +36,9 @@ const reads = (t: string) => core.hc('read', t).split('\n').map((l) => l.trim())
 
 beforeAll(async () => {
   core = startCore();
-  s = await startServer({ config: { herdrBackend: 'core', herdrCoreSocket: core.socket, notifications: { debounceMs: 200 } } });
+  // Agents start in the person's shell ($SHELL): here a stand-in that writes what it's given, so none runs.
+  const env = { SHELL: path.join(AGENTS, 'record') };
+  s = await startServer({ config: { herdrBackend: 'core', herdrCoreSocket: core.socket, notifications: { debounceMs: 200 } }, env });
   await waitUntil('herdr-core', async () => (await request(s, 'GET', '/api/state')).json?.herdr?.ok === true);
 });
 afterAll(() => s?.close());
@@ -88,6 +85,29 @@ describe('the layout', () => {
   });
 });
 
+describe('agents', () => {
+  test('Claude and Codex start in the person’s shell, a prompt as their argument and never as shell source', async () => {
+    const agents = (await request(s, 'GET', '/api/agents')).json.agents;
+    assert.deepEqual(
+      agents.map((a: { kind: string; prompt: boolean }) => [a.kind, a.prompt]),
+      [['claude', true], ['codex', true]],
+      'herdr-core lists no agents: the two Briardr has always started there',
+    );
+    const dir = tmpDir('briardr-ws-');
+    const w = await request(s, 'POST', '/api/workspaces', { name: 'agents', folder: dir });
+    assert.equal(w.status, 200, w.body);
+    assert.equal((await request(s, 'POST', '/api/streams', { projectId: w.json.projectId, kind: 'gemini' })).status, 400);
+    const prompt = `it's "$HOME" \`touch pwned\``;
+    const st = await request(s, 'POST', '/api/streams', { projectId: w.json.projectId, kind: 'codex', prompt });
+    assert.equal(st.status, 200, st.body);
+    const args = path.join(dir, '.agent-args');
+    await waitUntil('the agent', () => fs.existsSync(args));
+    const argv = fs.readFileSync(args, 'utf8').split('\n').slice(0, -1);
+    assert.deepEqual(argv.slice(2), [path.join(AGENTS, 'record'), 'codex', '--', prompt], `the shell runs "$@": ${argv}`);
+    assert.equal((await request(s, 'POST', `/api/workspaces/${w.json.workspaceId}/close`)).status, 200);
+  });
+});
+
 describe('typing', () => {
   test('keys, pastes and clicks arrive encoded for the program’s modes; the browser terminal’s replies go as its own', async () => {
     const t = run('python3', '-c', ECHO, 'kitty', 'paste', 'mouse');
@@ -116,7 +136,7 @@ describe('seen and alerts', () => {
   test('a finished agent alerts; seen and unread are shared through herdr.seen', async () => {
     const pushes: string[] = [];
     s.run.push.sendImpl = async (_sub, body) => (pushes.push(body), { statusCode: 201 });
-    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/core', keys: keys() } })).status, 200);
+    assert.equal((await request(s, 'POST', '/api/notifications/subscribe', { subscription: { endpoint: 'https://web.push.apple.com/core', keys: pushKeys() } })).status, 200);
     const t = run('sh', '-c', AGENT);
     await waitUntil('done', async () => (await stream(t))?.state === 'done');
     await waitUntil('the alert', async () => {

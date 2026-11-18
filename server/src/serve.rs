@@ -23,7 +23,7 @@ use crate::monitor::{AlertSink, Monitor};
 use crate::net::{listen_addresses, missing_local_addresses, tailscale_info, TailscaleInfo};
 use crate::notes::Notes;
 use crate::platform::{capabilities, host_platform};
-use crate::power::Power;
+use crate::power::{Host, Power, SystemHost};
 use crate::preview::Previews;
 use crate::push::Push;
 use crate::terminal_hub::TerminalHub;
@@ -104,6 +104,15 @@ fn uuid_upper() -> String {
         &h[16..20],
         &h[20..32]
     )
+}
+
+/// The commands behind the battery, Always on and Sleep: this machine's, except under the test hooks.
+fn power_host() -> Box<dyn Host> {
+    #[cfg(feature = "test-hooks")]
+    if let Some(host) = crate::test_hooks::power_host() {
+        return host;
+    }
+    Box::new(SystemHost)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -261,10 +270,11 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
     let host = the_host(&caps);
     let actions = Arc::new(Actions::new(herdr.clone(), host.clone()));
     let hub = Arc::new(TerminalHub::new(herdr.clone(), diag.clone(), host.clone()));
-    let power = Arc::new(Mutex::new(Power::system(
+    let power = Arc::new(Mutex::new(Power::new(
         paths.power_state(),
         caps.clone(),
         diag.clone(),
+        power_host(),
     )));
     let public_origin = crate::public_origin_of(&cfg, ts.dns_name.as_deref())?;
     // The VAPID subject. Apple's push service rejects made-up domains (mailto:…@localhost.localdomain,
@@ -277,7 +287,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         (None, Some(dns)) => format!("https://{dns}"),
         (None, None) => public_origin.clone(),
     };
-    let cell = Arc::new(ConfigCell::new(cfg.clone(), paths.clone()));
+    let cell = Arc::new(ConfigCell::new(cfg.clone(), paths.clone(), env.clone()));
     let push = {
         // Devices follow the host's alert settings where they didn't choose.
         let c = cell.clone();
@@ -293,9 +303,11 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             .map_err(|e| ServeError::Other(e.to_string()))?,
         )
     };
-    // A device revoked while Briardr wasn't running (`briardr revoke`) gets no more alerts.
-    let paired: HashSet<String> = auth.list().into_iter().map(|d| d.id).collect();
-    let _ = push.forget_unpaired(&paired);
+    // A device revoked while Briardr wasn't running (`briardr revoke`) gets no more alerts. A devices file
+    // that can't be read says nothing about which devices are paired, so then no device's alerts go.
+    if let Ok(paired) = auth.paired() {
+        let _ = push.forget_unpaired(&paired);
+    }
     let tap = StatuslineTap::new(
         PathBuf::from(cfg.usage.claude_config_dir.clone().unwrap_or_default()),
         paths.state(),
@@ -468,6 +480,16 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             tick.tick().await;
             let a = auth_flush.clone();
             let _ = tokio::task::spawn_blocking(move || a.flush_last_seen()).await;
+        }
+    }));
+    // A device revoked with `briardr revoke` can't sign in from the next request on; this closes its
+    // live connections and stops its alerts as well, within a second.
+    let auth_reload = auth.clone();
+    timers.push(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            auth_reload.reload();
         }
     }));
 

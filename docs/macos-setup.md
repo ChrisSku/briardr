@@ -73,7 +73,8 @@ With the Herdr app:
 
 - Workspaces and projects are its spaces and tabs. Renaming them, and new ones, change its layout as the
   app would; a new stream goes beside the tab's last pane. Its terminals have no names, so streams can't
-  be renamed.
+  be renamed. A new stream offers Claude Code and Codex: herdr-core has no list of agents (the app keeps
+  its agent menu to itself).
 - An agent shows as needing you, working, finished or idle as it reports itself to the app. Opening a
   finished one in Briardr marks it seen in the app too (and **Mark as not seen** makes it finished again
   everywhere).
@@ -146,7 +147,7 @@ To run a checkout instead (to work on Briardr, or to make plugins), install
 [mise](https://mise.jdx.dev/getting-started.html), Git and Apple's Command Line Tools, then:
 
 ```sh
-git clone --branch v0.3.25 https://github.com/ChrisSku/briardr.git
+git clone --branch v0.3.27 https://github.com/ChrisSku/briardr.git
 cd briardr
 mise trust
 mise install
