@@ -56,7 +56,7 @@ export async function buildPlugin(dir: string, out = path.join(dir, 'dist')): Pr
     minify: true,
     splitting: true,
     conditions: ['production', 'browser'],
-    plugins: [shared, sveltePlugin({ dev: false, css: 'injected', onWarning: (w) => warnings.push(w) })],
+    plugins: [shared, sveltePlugin({ dev: false, onWarning: (w) => warnings.push(w) })],
     define: { 'process.env.NODE_ENV': '"production"' },
     outdir: out,
     naming: { entry: '[name].[hash].[ext]', chunk: 'chunk.[hash].[ext]', asset: '[name].[hash].[ext]' },
