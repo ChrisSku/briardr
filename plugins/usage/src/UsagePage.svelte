@@ -80,3 +80,11 @@
 {#if resetting !== null}
   <UseResetSheet {briardr} name="Codex" available={resetting} onClose={() => (resetting = null)} onUsed={(usage) => (cached.value = usage)} />
 {/if}
+
+<style>
+  /* A card per provider, then Sources. */
+  .usage { display: flex; flex-direction: column; gap: 10px; }
+  .usage > :global(*) { flex: none; }
+  .usage-top { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font: var(--type-footnote); letter-spacing: var(--track-footnote); margin: -4px 0 -4px; }
+  .usage-top span { flex: 1; }
+</style>

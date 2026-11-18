@@ -70,3 +70,7 @@
     {/if}
   {/if}
 </div>
+
+<style>
+  .md-source { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.82rem; background: var(--bg-sunken); padding: 12px; border-radius: 10px; }
+</style>

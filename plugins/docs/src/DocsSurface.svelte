@@ -71,3 +71,7 @@
     </div>
   {/if}
 {/if}
+
+<style>
+  .doc-list .row-main { min-height: 52px; }
+</style>

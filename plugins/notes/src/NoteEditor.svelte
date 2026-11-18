@@ -410,3 +410,18 @@
     {#if !canInsert && !kb.current}<span class="hint">Take control in Terminal to send.</span>{/if}
   </div>
 </div>
+
+<style>
+  .notes { display: flex; flex-direction: column; gap: 8px; }
+  .notes-drop { outline: 2px dashed var(--ink-default); outline-offset: -2px; }
+  .notes-back { margin-left: -10px; }
+  .notes-status.st-offline, .notes-status.st-error, .notes-status.st-conflict { color: var(--state-attention); font-weight: 600; }
+  .note.conflict p { margin: 0 0 8px; }
+  /* The editor or the preview is the only thing that scrolls; it fills the space above the actions
+     (and above the keyboard), so scrolling never switches between the page and the text. */
+  .notes-area, .notes-preview { flex: 1 1 0; min-height: 5.5em; overflow-y: auto; overscroll-behavior: contain; }
+  .notes-area { resize: none; font-size: max(16px, 1rem); line-height: 1.5; padding: 12px; }
+  .notes-preview { max-width: none; padding-bottom: 16px; }
+  .notes-preview :global(img) { display: block; margin: 8px 0; max-height: 70vh; object-fit: contain; }
+  .notes-actions { flex: none; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+</style>

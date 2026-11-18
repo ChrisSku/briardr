@@ -187,6 +187,57 @@ export function docText(path: string): string {
   return parts.join('\n');
 }
 
+/** A stream's folder for Files: two folders, files of several kinds, one changed file and a link. */
+const FOLDER: Record<string, { name: string; dir?: boolean; size?: number; link?: boolean; changed?: boolean }[]> = {
+  '': [{ name: 'docs', dir: true }, { name: 'src', dir: true }, { name: 'README.md', size: 2400 }, { name: 'logo.png', size: 9100 }, { name: 'package.json', size: 640 }, { name: 'notes.txt', size: 310, changed: true }, { name: 'current', size: 12, link: true }],
+  docs: [{ name: 'guide.md', size: 4200 }],
+  src: [{ name: 'App.svelte', size: 1800 }, { name: 'main.rs', size: 3300 }, { name: 'retry.ts', size: 1500, changed: true }, { name: 'styles.css', size: 900 }],
+};
+
+export function filesList(dir: string, now: number) {
+  const entries = (FOLDER[dir] || []).map((e) => ({ name: e.name, path: dir ? `${dir}/${e.name}` : e.name, dir: !!e.dir, size: e.size ?? 0, link: !!e.link, changed: !!e.changed }));
+  return { path: dir, entries, total: entries.length, truncated: false, asOf: now };
+}
+
+export function fileText(path: string): string {
+  if (!path.endsWith('.ts')) return `${path}\n\nA plain file with a few lines\nof text about retries.\n`;
+  return [
+    '// Retries a request with exponential backoff, up to a limit.',
+    "import { sleep } from './time.ts';",
+    '',
+    'export interface RetryOptions {',
+    '  attempts: number;',
+    '  baseMs: number;',
+    '}',
+    '',
+    'export async function retry<T>(run: () => Promise<T>, { attempts, baseMs }: RetryOptions): Promise<T> {',
+    '  let last: unknown = null;',
+    '  for (let i = 0; i < attempts; i++) {',
+    '    try {',
+    '      return await run();',
+    '    } catch (e) {',
+    '      last = e;',
+    "      await sleep(baseMs * 2 ** i); // wait longer each time",
+    '    }',
+    '  }',
+    "  throw new Error(`gave up after ${attempts} attempts: ${String(last)}`);",
+    '}',
+    '',
+  ].join('\n');
+}
+
+/** Files' search: by name over the whole folder, or the lines that contain `q` (`in=contents`). */
+export function filesSearch(q: string, contents: boolean) {
+  const all = Object.keys(FOLDER).flatMap((dir) => filesList(dir, 0).entries);
+  const needle = q.toLowerCase();
+  if (!contents) return { entries: all.filter((e) => e.name.toLowerCase().includes(needle)), truncated: false };
+  const matches = all
+    .filter((e) => !e.dir && !e.link && /\.(ts|txt)$/.test(e.name))
+    .flatMap((e) => fileText(e.path).split('\n').map((text, i) => ({ path: e.path, line: i + 1, text, changed: e.changed })))
+    .filter((m) => m.text.toLowerCase().includes(needle));
+  return { matches, truncated: false };
+}
+
 export function noteText(i: number): string {
   return `## Note ${i}\n\nNext prompts for the agent:\n\n- ask Claude to add retries to the ${WORDS[i % WORDS.length]} client\n- check the flaky test in \`test/${i}.ts\`\n- [ ] review the migration plan\n\n| step | owner |\n|---|---|\n| one | me |\n| two | agent |\n\n${'More context. '.repeat(30)}`;
 }

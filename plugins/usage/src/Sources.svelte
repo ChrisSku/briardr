@@ -67,3 +67,13 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .tap-review { border-top: 1px solid var(--line-default); padding-top: 8px; margin-top: 8px; }
+  /* The change to the settings file: the line removed, then the line added. */
+  .diff { overflow-x: auto; background: var(--bg-canvas); border: 1px solid var(--line-default); border-radius: 10px; }
+  .diff pre { margin: 0; padding: 0 0 6px; font: var(--type-mono-small); min-width: max-content; white-space: pre-wrap; word-break: break-all; }
+  .diff pre > span { display: block; padding: 0 12px; white-space: pre; }
+  .dl-add { background: var(--diff-add-bg); color: var(--diff-add); }
+  .dl-del { background: var(--diff-del-bg); color: var(--diff-del); }
+</style>

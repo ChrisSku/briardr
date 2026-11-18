@@ -153,3 +153,49 @@
     }} />
   {/if}
 {/if}
+
+<style>
+  /* The branch and totals in a card, a quiet read-only hint, files with M/A/D chips and the open file's
+     diff inline with line numbers. */
+  .surface.changes { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; }
+  .surface.changes > :global(*) { flex: none; }
+  .branch-card { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .branch-row { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); min-height: 32px; }
+  .branch-row .icon-btn { margin: -6px -8px -6px auto; }
+  /* In full screen the way back floats in the top right corner: the row ends before it. */
+  :global(.is-full .surfaces) .branch-row { margin-right: calc(var(--full-clear) - var(--gutter) - 6px); }
+  .branch-name { font: var(--type-mono-strong); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .branch-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font: var(--type-footnote); color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+  .branch-meta .sep, .branch-meta :global(.asof) { color: var(--text-tertiary); }
+  .changes-since { margin-top: 4px; }
+  .changes-hint { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 4px; font: var(--type-footnote); color: var(--text-tertiary); }
+  .files { list-style: none; margin: 0; padding: 0; }
+  .file + .file { border-top: 1px solid var(--line-subtle); }
+  .file-row { display: flex; align-items: center; }
+  .file-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 11px 4px 11px 12px; text-align: left; min-height: 48px; color: var(--text-primary); flex-wrap: wrap; }
+  .file-path { font: var(--type-mono); word-break: break-all; flex: 1; min-width: 40%; }
+  .file-dir { color: var(--text-tertiary); }
+  .file-meta { display: flex; gap: 6px; align-items: center; font: var(--type-mono-small); }
+  .file-toggle :global(.file-chev) { color: var(--text-tertiary); }
+  .file.is-reviewed .file-path { color: var(--text-secondary); }
+  .chg { font: var(--type-mono-strong); width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; background: var(--bg-sunken); color: var(--text-secondary); flex: none; }
+  .chg-modified, .chg-renamed, .chg-copied, .chg-type { color: var(--state-working); background: var(--state-working-bg); }
+  .chg-added, .chg-untracked { color: var(--state-finished); background: var(--state-finished-bg); }
+  .chg-deleted { color: var(--state-danger); background: var(--state-danger-bg); }
+  .chg-conflict { color: var(--text-on-state); background: var(--state-danger); }
+  .add { color: var(--diff-add); }
+  .del { color: var(--diff-del); }
+  .review-check { display: flex; align-items: center; justify-content: center; width: var(--size-tap); height: var(--size-tap); position: relative; color: var(--text-tertiary); cursor: pointer; flex: none; }
+  .review-check input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+  .review-check :global(.icon) { border: 1.5px solid currentColor; border-radius: 6px; padding: 1px; }
+  .review-check input:checked + :global(.icon) { color: var(--text-on-ink); background: var(--ink-default); border-color: var(--ink-default); }
+  .review-check input:focus-visible + :global(.icon) { outline: 2px solid var(--ink-default); outline-offset: 2px; }
+  /* The selection bar (in a diff) and the review bar stay along the bottom while the files scroll, one
+     above the other (the card clips without being a scroller, so they can stick). */
+  .changes .files.card { overflow: clip; }
+  .changes-review {
+    position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--line-default); border-radius: var(--radius-lg); background: var(--bg-surface); box-shadow: var(--shadow-menu);
+  }
+  .changes-review-label { flex: 1; min-width: 0; font-weight: 600; font-size: 0.9rem; }
+</style>

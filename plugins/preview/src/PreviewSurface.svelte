@@ -129,3 +129,21 @@
     <p class="hint padded">Show a web server running on {theHost()}. Tap a localhost link in the terminal, or enter its port. The server itself stays private to {theHost()}.</p>
   {/if}
 </div>
+
+<style>
+  .preview { display: flex; flex-direction: column; padding: 0; }
+  .preview-bar { display: flex; align-items: center; gap: 6px; padding: 8px var(--gutter); border-bottom: 1px solid var(--line-default); flex-wrap: wrap; }
+  .preview-bar .port { width: 90px; flex: none; }
+  .preview-bar .path { flex: 1; min-width: 100px; }
+  /* In full screen the way back floats in the top right corner: the bar ends before it. */
+  :global(.is-full .surfaces) .preview-bar { padding-right: var(--full-clear); }
+  :global(.is-full .surfaces) .preview-bar .path { min-width: 60px; }
+  .preview-tools { display: flex; align-items: center; gap: 6px; padding: 2px var(--gutter); border-bottom: 1px solid var(--line-default); }
+  .preview-zoom { display: flex; align-items: center; margin-left: auto; }
+  .preview-zoom-reset { min-width: 60px; min-height: var(--size-tap); padding: 0 6px; border: 0; border-radius: 10px; background: none; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .preview-zoom-reset:hover { background: var(--bg-sunken); }
+  .preview .hint, .preview .error { margin: 12px var(--gutter); }
+  .preview-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--page-bg); }
+  /* Size the cross-origin frame before scaling so it fills the viewport at every zoom level. */
+  .preview-frame { position: absolute; inset: 0 auto auto 0; width: var(--preview-size); height: var(--preview-size); transform: scale(var(--preview-scale)); transform-origin: top left; border: 0; background: var(--page-bg); }
+</style>

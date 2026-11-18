@@ -148,7 +148,7 @@ try {
   }
 
   if (STAGES.includes('parity')) {
-    log('stage: parity (20 screens × iPhone/iPad/Mac × light/dark, WebKit)');
+    log('stage: parity (32 screens × iPhone/iPad/Mac × light/dark, WebKit)');
     const screens = path.join(ROOT, 'bench', 'screens-full', NAME);
     run([BUN, 'bench/parity.ts', `${base.label}=${base.dist}`, `${cand.label}=${cand.dist}`, '--out', path.join(OUT, 'parity'), '--screens', screens], { quiet: true, allowFail: true });
     const p = JSON.parse(fs.readFileSync(path.join(OUT, 'parity', 'parity.json'), 'utf8'));

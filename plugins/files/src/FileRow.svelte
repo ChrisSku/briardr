@@ -33,3 +33,17 @@
     <Icon name="more" size={18} />
   </button>
 </div>
+
+<style>
+  .ft-entry { display: flex; align-items: stretch; border-radius: 8px; }
+  .ft-entry:hover { background: color-mix(in srgb, var(--text-primary) 6%, transparent); }
+  .ft-entry.is-on { background: color-mix(in srgb, var(--ink-default) 16%, transparent); }
+  .icon-btn.ft-more { flex: none; align-self: center; min-width: 32px; width: 32px; min-height: 32px; height: 32px; opacity: 0.55; }
+  .icon-btn.ft-more:hover, .icon-btn.ft-more:focus-visible { opacity: 1; }
+  @media (pointer: coarse) { .icon-btn.ft-more { min-width: 44px; width: 44px; min-height: 44px; height: 44px; } }
+  .ft-row.ft-result { padding-top: 6px; padding-bottom: 6px; }
+  .ft-row :global(.ft-chev) { flex: none; width: 14px; color: var(--text-tertiary); transition: transform 0.15s ease; }
+  .ft-row :global(.ft-chev.is-open) { transform: rotate(90deg); }
+  .ft-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ft-row :global(.ft-link) { flex: none; color: var(--text-tertiary); }
+</style>
