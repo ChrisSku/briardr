@@ -16,6 +16,11 @@ import tls from 'node:tls';
  *  to keep instead, such as briardr-dev to watch the tests in Herdr. */
 export const SESSION = process.env.BRIARDR_TEST_SESSION || `briardr-test-${process.pid}`;
 const OWN_SESSION = !process.env.BRIARDR_TEST_SESSION;
+/** Stand-ins for the agents tests start (test/fixtures/agents/record): what they were given goes to `.agent-args`
+ *  in their folder. They come first on the PATH of this run's own session's panes, so no test starts a real
+ *  agent there; a session BRIARDR_TEST_SESSION names has the real ones (`standInAgents` is false). */
+export const AGENTS = path.resolve(import.meta.dir, 'fixtures', 'agents');
+export const standInAgents = OWN_SESSION;
 
 /** The folders this run made, one per line, so they go when it ends, or at the next run if it was killed. The
  *  folders themselves stay directly in the temp directory: a pane's folder shows in its prompt, and a longer one
@@ -62,10 +67,13 @@ export function ensureSession(): void {
   if (!started && OWN_SESSION) removeStaleSessions();
   started = true;
   if (running()) return;
-  // Pane shells start without your zsh startup files (an empty ZDOTDIR), as in CI. Yours can run commands in
-  // other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
-  // reports that folder as the pane's.
-  const env = { ...scrubbed(), ZDOTDIR: tmpDir('briardr-zdotdir-') };
+  // Pane shells start without your zsh startup files (a ZDOTDIR of their own), as in CI. Yours can run commands
+  // in other folders while a pane starts (Oh My Zsh's update check runs git in ~/.oh-my-zsh), and Herdr then
+  // reports that folder as the pane's. Its .zshrc puts the stand-in agents first again after a login zsh put
+  // the system's folders first (macOS's path_helper).
+  const zdotdir = tmpDir('briardr-zdotdir-');
+  fs.writeFileSync(path.join(zdotdir, '.zshrc'), `path=(${JSON.stringify(AGENTS)} $path)\n`);
+  const env = { ...scrubbed(), ZDOTDIR: zdotdir, PATH: `${AGENTS}:${process.env.PATH}` };
   const child = spawn('herdr', ['--session', SESSION, 'server'], { env, stdio: 'ignore', detached: true });
   child.unref();
   const until = Date.now() + 10_000;
@@ -237,6 +245,8 @@ export async function freePort(): Promise<number> {
 
 export const SERVER_BIN = process.env.BRIARDR_SERVER_BIN || path.resolve(import.meta.dir, '..', 'server', 'target', 'debug', 'briardr');
 
+type ServerOptions = { pair?: boolean; config?: object; files?: Record<string, string>; platform?: string; env?: Record<string, string> };
+
 /** What tests reach through `s.run`: each member calls a test hook or the CLI. */
 export interface Running {
   auth: {
@@ -275,9 +285,9 @@ export function serverEnv(dataDir: string, port: number): NodeJS.ProcessEnv {
   };
 }
 
-/** `config`: written to config.json first (e.g. proxy mode). `platform`: run as that host (BRIARDR_PLATFORM).
- *  `env`: more environment for the server. */
-export function startServer(opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> } = {}): Promise<TestServer> {
+/** `config`: written to config.json first (e.g. proxy mode). `files`: more files written first, by path in
+ *  the data directory. `platform`: run as that host (BRIARDR_PLATFORM). `env`: more environment for the server. */
+export function startServer(opts: ServerOptions = {}): Promise<TestServer> {
   if (!fs.existsSync(SERVER_BIN)) throw new Error(`${SERVER_BIN} is missing: run \`mise run build:test-server\``);
   return startBinary(SERVER_BIN, opts);
 }
@@ -287,10 +297,14 @@ export function startServer(opts: { pair?: boolean; config?: object; platform?: 
  * `s.run.*` synchronously, so the shim below calls the `/__test/*` hooks with curl. A hook
  * that is not built yet fails the test with its name, so a gap shows up as a failure, not a silent pass.
  */
-async function startBinary(bin: string, opts: { pair?: boolean; config?: object; platform?: string; env?: Record<string, string> }): Promise<TestServer> {
+async function startBinary(bin: string, opts: ServerOptions): Promise<TestServer> {
   ensureSession();
   const dataDir = tmpDir('briardr-data-');
   if (opts.config) fs.writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify(opts.config));
+  for (const [file, text] of Object.entries(opts.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(dataDir, file)), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, file), text);
+  }
   const port = await freePort();
   const env = serverEnv(dataDir, port);
   if (opts.platform) env.BRIARDR_PLATFORM = opts.platform;

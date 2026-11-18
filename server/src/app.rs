@@ -9,7 +9,7 @@
 //      without one are rate-limited per client and overall.
 //   4. State-changing requests and WebSockets must come from Briardr's own origin (in proxy mode,
 //      exactly the configured public origin).
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -28,7 +28,9 @@ use tokio::sync::mpsc;
 
 use crate::actions::{from_herdr, ActionError, Actions};
 use crate::auth::{Auth, Device, RateLimiter};
-use crate::config::{preview_origins, save_config, BriardrConfig, Paths};
+use crate::config::{
+    lock_for, preview_origins, read_config, save_config, BriardrConfig, ConfigError, Paths,
+};
 use crate::diag::Diagnostics;
 use crate::herdr::backend::Herdr;
 use crate::herdr::rpc::HerdrError;
@@ -575,18 +577,23 @@ fn regex_source(pattern: &str) -> String {
 
 // ---------- the app ----------
 
-/// Shared, live configuration: handlers read it, settings routes replace and save it.
+/// Shared, live configuration: handlers read it, settings routes change it. config.json isn't only the
+/// server's: `briardr configure` changes it while Briardr runs, for the next start, so a settings change
+/// is made to the file as it is on disk and to the running configuration, each keeping the rest.
 pub struct ConfigCell {
     cfg: RwLock<BriardrConfig>,
     paths: Paths,
+    /// For the defaults, where config.json leaves a setting out.
+    env: HashMap<String, String>,
     changes: tokio::sync::Mutex<()>,
 }
 
 impl ConfigCell {
-    pub fn new(cfg: BriardrConfig, paths: Paths) -> Self {
+    pub fn new(cfg: BriardrConfig, paths: Paths, env: HashMap<String, String>) -> Self {
         ConfigCell {
             cfg: RwLock::new(cfg),
             paths,
+            env,
             changes: tokio::sync::Mutex::new(()),
         }
     }
@@ -597,12 +604,17 @@ impl ConfigCell {
     pub async fn lock_changes(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.changes.lock().await
     }
-    /// Saves before publishing, so a failed write leaves the current configuration intact.
-    pub fn set(&self, c: BriardrConfig) -> Result<(), ApiError> {
+    /// Makes `change` to config.json, read again under config.lock, and then to the running
+    /// configuration, which it returns. A file that can't be read or saved changes neither.
+    pub fn change(&self, change: impl Fn(&mut BriardrConfig)) -> Result<BriardrConfig, ApiError> {
+        let internal = |_: ConfigError| ApiError::Internal;
+        let _held = lock_for(&self.paths.config()).map_err(internal)?;
+        let mut on_disk = read_config(&self.paths, &self.env).map_err(internal)?;
+        change(&mut on_disk);
+        save_config(&self.paths, &on_disk).map_err(internal)?;
         let mut cfg = self.cfg.write().unwrap_or_else(|e| e.into_inner());
-        save_config(&self.paths, &c).map_err(|_| ApiError::Internal)?;
-        *cfg = c;
-        Ok(())
+        change(&mut cfg);
+        Ok(cfg.clone())
     }
     pub fn paths(&self) -> &Paths {
         &self.paths
@@ -723,7 +735,7 @@ impl App {
         let weak = Arc::downgrade(self);
         let paths = self.d.cfg.paths().clone();
         tokio::spawn(async move {
-            let mut last: Option<Vec<(std::path::PathBuf, Option<std::time::SystemTime>)>> = None;
+            let mut last: Option<Vec<(std::path::PathBuf, Option<crate::config::Stamp>)>> = None;
             loop {
                 let p = paths.clone();
                 let now = tokio::task::spawn_blocking(move || crate::plugins::fingerprint(&p))
@@ -733,9 +745,9 @@ impl App {
                 if let (Some(before), Some(after)) = (&last, &now) {
                     // A rebuilt or edited plugin's backend starts again with the new code on its next request.
                     let plugins_dir = paths.plugins();
-                    for (file, mtime) in after {
+                    for (file, stamp) in after {
                         let was = before.iter().find(|(f, _)| f == file).map(|(_, m)| m);
-                        if was.is_some_and(|m| m != mtime) {
+                        if was.is_some_and(|m| m != stamp) {
                             if let Ok(rest) = file.strip_prefix(&plugins_dir) {
                                 if let Some(id) = rest.components().next() {
                                     app.backends.stop(&id.as_os_str().to_string_lossy());
@@ -1569,6 +1581,39 @@ fn icon_kind(rel: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scratch::Scratch;
+    use std::fs;
+
+    #[test]
+    fn a_settings_change_keeps_what_another_process_saved_for_the_restart() {
+        let root = Scratch::new("config-cell");
+        let paths = Paths::new(root.path());
+        let env = HashMap::from([("HOME".to_string(), root.display().to_string())]);
+        let mut running = read_config(&paths, &env).unwrap();
+        running.port = 9443; // as BRIARDR_PORT gives it: the running server's, not the file's
+        let cell = ConfigCell::new(running, paths.clone(), env.clone());
+        cell.change(|c| c.notifications.ready = true).unwrap();
+        let mut on_disk = read_config(&paths, &env).unwrap();
+        assert_eq!(on_disk.port, 7443);
+        assert!(on_disk.notifications.ready);
+
+        // `briardr configure` while the server runs: for the next start.
+        on_disk.allowed_networks = vec!["10.8.0.0/24".to_string()];
+        save_config(&paths, &on_disk).unwrap();
+        let after = cell.change(|c| c.updates.check = false).unwrap();
+        assert!(after.allowed_networks.is_empty(), "applied at the restart");
+        assert_eq!((after.port, after.updates.check), (9443, false));
+        let on_disk = read_config(&paths, &env).unwrap();
+        assert_eq!(on_disk.allowed_networks, ["10.8.0.0/24"]);
+        assert_eq!((on_disk.port, on_disk.updates.check), (7443, false));
+        assert!(on_disk.notifications.ready);
+
+        // One that can't be read isn't saved over, and the running configuration stays as it is.
+        fs::write(paths.config(), "{\"port\":").unwrap();
+        assert!(cell.change(|c| c.updates.check = true).is_err());
+        assert_eq!(fs::read_to_string(paths.config()).unwrap(), "{\"port\":");
+        assert!(!cell.get().updates.check);
+    }
 
     #[test]
     fn routes_match_like_the_ts_regex() {

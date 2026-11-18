@@ -1,9 +1,10 @@
 # Git hooks, run by lefthook: `bun install` installs them (outside CI), `mise exec -- lefthook install`
 # does it by hand. They're what CI and review expect, so a pull request, by a person or an agent, can't
 # leave without it: formatting before each commit, so commits stay quick; before each push, a changeset, a
-# consistent version, typecheck, lint, and the test suites the change needs. Each test run has its own
-# Herdr session, ports and client build, so parallel pushes don't collide. CI runs all of them again, for
-# every change, so skipping these with --no-verify only moves the failure there.
+# consistent version, typecheck, lint, the crates' licenses and sources, and the test suites the change
+# needs. Each test run has its own Herdr session, ports and client build, so parallel pushes don't collide.
+# CI runs all of them again, for every change, so skipping these with --no-verify only moves the failure
+# there.
 # Commands go through mise, which provides Bun, Rust and the linters at the versions mise.toml pins, also
 # in shells that don't have them on PATH.
 # lefthook-local.yml (ignored by Git) can override them for one checkout.
@@ -31,6 +32,11 @@ pre-push:
     - name: rust
       glob: ["server/**", "mise.toml"]
       run: mise run check
+    # Under a second, and offline once the crates are downloaded. The advisories need the network and change
+    # without a push, so only CI checks them (audit.yml).
+    - name: deps
+      glob: ["server/Cargo.toml", "server/Cargo.lock", "server/deny.toml", "mise.toml"]
+      run: mise run deps:check
     - name: lint
       glob: [".github/workflows/*", "scripts/setup-linux.sh", "site/install.sh", "mise.toml"]
       run: mise run lint

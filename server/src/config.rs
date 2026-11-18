@@ -1,10 +1,11 @@
 // Configuration: data-dir paths, defaults, loading and validation. Owner-only writes (0600) for anything secret.
 use std::collections::HashSet;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Write};
 use std::net::IpAddr;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -373,14 +374,13 @@ pub fn load_config(
     paths: &Paths,
     env: &std::collections::HashMap<String, String>,
 ) -> Result<BriardrConfig, ConfigError> {
-    let defaults = serde_json::to_value(default_config(env, &home_dir(env)))?;
     let raw = fs::read(paths.config())
         .ok()
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| Value::Object(Map::new()));
-    let mut cfg: BriardrConfig = serde_json::from_value(deep_merge(defaults, raw))?;
+    let mut cfg = over_defaults(raw, env)?;
     if let Some(session) = env.get("BRIARDR_HERDR_SESSION") {
         cfg.herdr_session = session.clone();
     }
@@ -398,6 +398,35 @@ pub fn load_config(
         };
     }
     Ok(cfg)
+}
+
+/// config.json as it is on disk, for a change to save over: without the `BRIARDR_*` overrides, which are
+/// the running server's, and with no file meaning the defaults. Unlike `load_config`, a file that can't be
+/// read or parsed is an error, so a change is never saved over it.
+pub fn read_config(
+    paths: &Paths,
+    env: &std::collections::HashMap<String, String>,
+) -> Result<BriardrConfig, ConfigError> {
+    let raw = match fs::read(paths.config()) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Value::Object(Map::new()),
+        Err(e) => return Err(e.into()),
+    };
+    if !raw.is_object() {
+        return Err(ConfigError::Invalid(
+            "config.json must be a JSON object.".to_string(),
+        ));
+    }
+    over_defaults(raw, env)
+}
+
+/// The settings in `raw` (config.json's object), with the defaults for the rest.
+fn over_defaults(
+    raw: Value,
+    env: &std::collections::HashMap<String, String>,
+) -> Result<BriardrConfig, ConfigError> {
+    let defaults = serde_json::to_value(default_config(env, &home_dir(env)))?;
+    Ok(serde_json::from_value(deep_merge(defaults, raw))?)
 }
 
 /// JSON string literal, as `JSON.stringify` writes it in error messages.
@@ -603,6 +632,42 @@ pub fn write_file_atomic(file: &Path, data: &[u8], mode: u32) -> Result<(), Conf
         return Err(e.into());
     }
     Ok(())
+}
+
+/// Holds `<file>.lock` (config.lock, secrets/devices.lock) until the returned file is dropped. Every
+/// Briardr process takes it to change `file` (the server, and commands such as `briardr configure`), reads
+/// `file` once it has it and saves before letting go, so none saves over what another just wrote.
+pub fn lock_for(file: &Path) -> Result<File, ConfigError> {
+    let held = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(file.with_extension("lock"))?;
+    held.lock()?;
+    Ok(held)
+}
+
+/// What tells one version of a file from another: a save (`write_file_atomic`) is a new file, so a new
+/// inode, and an edit in place changes its size or modification time. The modification time alone
+/// misses a save within the same tick of a coarse clock (Linux).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    ino: u64,
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Stamp {
+    /// `None` when there is no such file.
+    pub fn of(file: &Path) -> Option<Stamp> {
+        let m = fs::metadata(file).ok()?;
+        Some(Stamp {
+            ino: m.ino(),
+            len: m.len(),
+            modified: m.modified().ok(),
+        })
+    }
 }
 
 /// Read a JSON file; missing or unparseable yields `fallback`.
@@ -933,6 +998,24 @@ mod tests {
         assert_eq!(cfg.tls.cert_file.as_deref(), Some("/c.pem"));
         assert_eq!(cfg.tls.key_file, None);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn read_config_is_the_file_alone_and_refuses_one_it_cant_parse() {
+        let root = Scratch::new("config-read");
+        let paths = Paths::new(root.path());
+        let env = env_with(&[
+            ("HOME", root.to_str().unwrap_or("")),
+            ("BRIARDR_PORT", "8443"),
+        ]);
+        assert_eq!(read_config(&paths, &env).unwrap().port, 7443, "no file");
+        fs::write(paths.config(), r#"{"port": 9001}"#).unwrap();
+        assert_eq!(read_config(&paths, &env).unwrap().port, 9001);
+        assert_eq!(load_config(&paths, &env).unwrap().port, 8443);
+        for broken in ["{\"port\":", "[]", "{\"port\": \"x\"}"] {
+            fs::write(paths.config(), broken).unwrap();
+            assert!(read_config(&paths, &env).is_err(), "{broken}");
+        }
     }
 
     #[test]
