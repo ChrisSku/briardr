@@ -12,7 +12,7 @@ use base64::prelude::{Engine, BASE64_STANDARD};
 
 use super::{
     action_err, header_str, json_body_as, ok, raw_body, response, stream_gone, ApiError, App, Ctx,
-    DeviceRef, Resp, Routes, JSON_LIMIT,
+    DeviceRef, LiveMessage, Resp, Routes, JSON_LIMIT,
 };
 use crate::herdr::model::Stream;
 use crate::herdr::state::HerdrReader;
@@ -148,7 +148,7 @@ pub(super) fn register(r: &mut Routes) {
             }
             app.event("plugin_toggle", json!({"builtin": plugin.builtin, "enabled": enabled}));
             let plugins = plugin_list(&app).await?;
-            app.broadcast(&json!({"t": "plugins", "plugins": plugins}));
+            app.broadcast(&LiveMessage::Plugins { plugins: &plugins });
             ok(Plugins { plugins })
         },
     );

@@ -7,7 +7,7 @@ use serde_json::json;
 
 use super::{
     action_err, done, json_body_as, ok, refuse, refuse_code, response, send, ApiError, App, Ctx,
-    DeviceRef, Done, RenameBody, Routes, VERSION,
+    DeviceRef, Done, LiveMessage, RenameBody, Routes, VERSION,
 };
 use crate::auth::{device_name, Device, DeviceInfo, PairError};
 use crate::platform::{HostCapabilities, HostPlatform};
@@ -289,7 +289,7 @@ pub(super) fn register(r: &mut Routes) {
         Method::GET,
         "/api/state",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move { ok(app.model_message()) },
+        |app: Arc<App>, _ctx: Ctx| async move { ok(LiveMessage::Model(app.model_state())) },
     );
 
     r.add(
