@@ -39,7 +39,7 @@
     "markdown-it": "^15.0.3",
     "mermaid": "^12.3.0",
     "pdfjs-dist": "^6.5.438",
-    "playwright": "^1.65.0",
+    "playwright": "^1.65.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",
     "typescript": "^5.9.3"
