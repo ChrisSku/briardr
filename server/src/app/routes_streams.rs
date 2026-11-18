@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::http::Method;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    action_err, js_number, json_body, json_body_as, now_ms, ok, raw_body, response, stream_gone,
-    upload_body, ApiError, App, Ctx, Routes, JSON_LIMIT,
+    action_err, json_body_as, now_ms, ok, raw_body, response, stream_gone, upload_body, ApiError,
+    App, Ctx, RenameBody, Routes, JSON_LIMIT,
 };
-use crate::actions::NewStream;
+use crate::actions::{NewProject, NewStream, NewWorkspace};
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
@@ -33,9 +33,10 @@ where
         .map_err(|_| ApiError::Internal)
 }
 
-/// A body field: a missing key is treated like null.
-fn field(body: &Value, key: &str) -> Value {
-    body.get(key).cloned().unwrap_or(Value::Null)
+/// `POST /api/streams/:id/seen`: whether the agent's turn has been seen; left out, it has.
+#[derive(Deserialize)]
+struct SeenBody {
+    seen: Option<bool>,
 }
 
 /// Node's `path.normalize` on an absolute or relative path, without touching the disk.
@@ -288,12 +289,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/workspaces",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_workspace(&field(&b, "name"), &field(&b, "folder"))
-                .await?)
+            let req: NewWorkspace = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_workspace(req).await?)
         },
     );
 
@@ -302,12 +299,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/projects",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_project(&field(&b, "workspaceId"), &field(&b, "name"))
-                .await?)
+            let req: NewProject = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_project(req).await?)
         },
     );
 
@@ -337,10 +330,10 @@ pub(super) fn register(r: &mut Routes) {
         "/api/workspaces/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename_workspace(ctx.param("id"), &field(&b, "name"))
+                .rename_workspace(ctx.param("id"), b.name.as_deref())
                 .await?;
             ok(json!({"ok": true}))
         },
@@ -361,10 +354,10 @@ pub(super) fn register(r: &mut Routes) {
         "/api/projects/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename_project(ctx.param("id"), &field(&b, "name"))
+                .rename_project(ctx.param("id"), b.name.as_deref())
                 .await?;
             ok(json!({"ok": true}))
         },
@@ -396,10 +389,10 @@ pub(super) fn register(r: &mut Routes) {
         "/api/streams/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename(ctx.param("id"), &field(&b, "name"))
+                .rename(ctx.param("id"), b.name.as_deref())
                 .await?;
             ok(json!({"ok": true}))
         },
@@ -410,8 +403,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/streams/:id/seen",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            let seen = field(&b, "seen") != json!(false);
+            let b: SeenBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            let seen = b.seen.unwrap_or(true);
             ok(app.d.actions.mark_seen(ctx.param("id"), seen).await?)
         },
     );
@@ -432,12 +425,7 @@ pub(super) fn register(r: &mut Routes) {
             if !app.stream_exists(id) {
                 return Err(stream_gone());
             }
-            let lines = js_number(
-                ctx.query
-                    .get("lines")
-                    .filter(|v| !v.is_empty())
-                    .unwrap_or("1000"),
-            );
+            let lines = ctx.query.get("lines").and_then(|n| n.parse().ok());
             ok(app.d.actions.history(id, lines).await?)
         },
     );

@@ -4,12 +4,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use axum::http::Method;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use base64::prelude::{Engine, BASE64_STANDARD};
 
 use super::{
-    action_err, header_str, json_body, ok, raw_body, response, stream_gone, ApiError, App, Ctx,
+    action_err, header_str, json_body_as, ok, raw_body, response, stream_gone, ApiError, App, Ctx,
     Resp, Routes, JSON_LIMIT,
 };
 use crate::herdr::state::HerdrReader;
@@ -33,6 +34,14 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|_| ApiError::Internal)
+}
+
+/// `PUT /api/plugins/:id`: on or off. A plugin with a backend runs a program on the host, so turning it
+/// on needs the hash of the command the user was shown (`backend.hash` in the list) in `approve`.
+#[derive(Deserialize)]
+struct PluginChange {
+    enabled: Option<bool>,
+    approve: Option<String>,
 }
 
 /// Changes one at a time, so two quick toggles can't each save over the other's config.
@@ -63,17 +72,15 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, _ctx: Ctx| async move { ok(json!({"plugins": plugin_list(&app).await?})) },
     );
 
-    // {enabled, approve?}: a plugin with a backend runs a program on the host, so turning it on
-    // needs the hash of the command the user was shown (`backend.hash` in the list).
     r.add(
         Method::PUT,
         "/api/plugins/:id",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let id = ctx.param("id").to_string();
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: PluginChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
             let _one_at_a_time = CHANGES.lock().await;
-            let Some(enabled) = b.get("enabled").and_then(Value::as_bool) else {
+            let Some(enabled) = b.enabled else {
                 return Err(action_err(400, "invalid", "Say whether the plugin should be on."));
             };
             let paths = app.d.cfg.paths().clone();
@@ -90,7 +97,7 @@ pub(super) fn register(r: &mut Routes) {
                 if let Some(spec) = backend {
                     let hash = backend_hash(spec);
                     let approved = state.approved.get(&id) == Some(&hash);
-                    if !approved && b.get("approve").and_then(Value::as_str) != Some(hash.as_str()) {
+                    if !approved && b.approve.as_deref() != Some(hash.as_str()) {
                         return Err(action_err(
                             409,
                             "approval_needed",

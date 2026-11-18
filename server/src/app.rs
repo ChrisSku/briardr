@@ -23,6 +23,7 @@ use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -284,7 +285,7 @@ fn is_loopback_name(name: &str) -> bool {
 /// Read a request body, refusing it as soon as it grows past the limit (413 `too_large`).
 pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<Vec<u8>, ApiError> {
     let too_large = || action_err(413, "too_large", "Request too large");
-    if js_number(header_str(headers, "content-length").unwrap_or("0")) > limit as f64 {
+    if declared_length(headers) > limit as u64 {
         return Err(too_large());
     }
     let mut body = body;
@@ -299,11 +300,6 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
         }
     }
     Ok(out)
-}
-
-/// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
-pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
-    json_body_as(ctx, limit).await
 }
 
 /// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
@@ -328,8 +324,8 @@ pub async fn upload_body(
 ) -> Result<Vec<u8>, crate::uploads::UploadError> {
     use crate::uploads::UploadError;
     let max = UploadError::max_bytes(kind);
-    let declared = js_number(header_str(&ctx.headers, "content-length").unwrap_or("0"));
-    if declared > max as f64 {
+    let declared = declared_length(&ctx.headers);
+    if declared > max {
         return Err(UploadError::DeclaredTooLarge(kind));
     }
     let mut body = std::mem::replace(&mut ctx.body, Body::empty());
@@ -344,7 +340,7 @@ pub async fn upload_body(
             out.extend_from_slice(&data);
         }
     }
-    if declared > 0.0 && (out.len() as f64) < declared {
+    if declared > 0 && (out.len() as u64) < declared {
         return Err(UploadError::Cancelled);
     }
     Ok(out)
@@ -352,6 +348,14 @@ pub async fn upload_body(
 
 pub fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// The body size a request declares, 0 when it declares none (hyper refuses a Content-Length that
+/// isn't a number).
+fn declared_length(headers: &HeaderMap) -> u64 {
+    header_str(headers, "content-length")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// JS `Number(s)` for header and query values: trimmed decimal, empty = 0, anything else NaN.
@@ -394,14 +398,10 @@ pub fn decode_uri_component(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-pub(crate) use crate::actions::{js_string, js_truthy};
-
-/// `String(x || '')` for a JSON body field.
-pub fn str_or_empty(v: Option<&Value>) -> String {
-    match v {
-        Some(v) if js_truthy(v) => js_string(v),
-        _ => String::new(),
-    }
+/// The new name of a device, workspace, project or stream (`POST /api/…/:id/rename`).
+#[derive(Deserialize)]
+pub struct RenameBody {
+    pub name: Option<String>,
 }
 
 /// URL query values as `URLSearchParams.get` returns them (first match, form-decoded).

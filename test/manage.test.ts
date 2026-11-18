@@ -35,6 +35,7 @@ describe('renaming', () => {
       const r = await post(p, { name: '   ' });
       assert.equal(r.status, 400);
       assert.equal(r.json.error, 'invalid_name');
+      assert.equal((await post(p, { name: 42 })).json.error, 'bad_json', 'a name is text');
     }
     assert.equal(herdr('workspace', 'get', w.workspace).result.workspace.label, 'new ws');
     assert.equal((await post(`/api/streams/${enc(w.pane)}/rename`, { name: '' })).status, 200);
