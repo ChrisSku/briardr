@@ -12,11 +12,10 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal, type ITheme } from '@xterm/xterm';
 import { randomId, wsUrl } from '../api.ts';
 import { state, type State } from '../reactive.svelte.ts';
-import { Backoff, onNetworkChange } from '../backoff.ts';
 import { anon, networkKind, record } from '../diag.ts';
 import { idbGet, idbSet, type CachedScreen } from '../idb.ts';
 import { viewportInset } from '../keyboard.svelte.ts';
-import { PROTOCOL } from '../live.ts';
+import { PROTOCOL, ReconnectingSocket } from '../socket.ts';
 import { applyModsToText, fromKeyEvent, type Outgoing } from './keys.ts';
 import { linkAt, registerLinkProvider } from './links.ts';
 import { activeMods, consumeMods } from './mods.ts';
@@ -53,9 +52,10 @@ export interface TermStatus {
 
 /** Lines of a herdr-core stream's history this terminal keeps (its first paint sends 500). */
 const RAW_SCROLLBACK = 1000;
-const PING_EVERY = 10_000;
-const PONG_DEADLINE = 5_000;
 const RESIZE_DEBOUNCE = 250;
+/** The server confirms a hand back by closing the connection, at most 1.5 s after it (RELEASE_GRACE in
+ *  server/src/herdr/stream.rs). */
+const RELEASE_WAIT = 2000;
 
 /** xterm's colours for the page's theme now: the --term-* tokens in styles.css, which xterm can't read itself. */
 function terminalTheme(): ITheme {
@@ -90,23 +90,17 @@ export class TerminalController {
    *  one, as in Peek, a paste goes nowhere: never to another terminal that's open. */
   onPaste: ((p: Pasted) => void) | null = null;
   private serialize = new SerializeAddon();
-  private ws: WebSocket | null = null;
+  private socket = new ReconnectingSocket({ name: 'term', maxWait: 15_000, reconnect: () => this.connect(this.wantMode, false) });
   private clientSession = randomId(10);
-  private backoff = new Backoff(500, 15_000);
-  private retryTimer: number | null = null;
-  private pingTimer: number | null = null;
-  private pongTimer: number | null = null;
   private inputId = 0;
   private host: HTMLElement | null = null;
   private screen: HTMLElement | null = null;
   private resizeObs: ResizeObserver | null = null;
   private resizeTimer: number | null = null;
   private lastSentSize = '';
-  private wantTakeover = false;
   private wantMode: 'control' | 'observe';
   private saveTimer: number | null = null;
   private disposed = false;
-  private netOff: (() => void) | null = null;
   /** The stream is the program's own output (herdr-core): this terminal keeps its history. */
   private raw = false;
   /** The program takes the mouse, so scrolling goes to it (herdr-core says; Herdr TUI doesn't). */
@@ -294,17 +288,7 @@ export class TerminalController {
   connect(mode: 'control' | 'observe' = this.wantMode, takeover = false) {
     if (this.disposed) return;
     this.wantMode = mode;
-    this.wantTakeover = takeover;
-    this.closeSocket();
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-    if (!this.netOff)
-      this.netOff = onNetworkChange(() => {
-        this.backoff.reset();
-        if (this.status.value.ownership === 'reconnecting') this.connect(this.wantMode, false);
-      });
-    const gen = this.generation.value + 1;
-    this.generation.value = gen;
+    this.generation.value++;
     const { cols, rows } = this.fit();
     this.desired = { cols, rows };
     this.lastSentSize = mode === 'control' ? `${cols}x${rows}` : '';
@@ -312,90 +296,68 @@ export class TerminalController {
     const t0 = performance.now();
     this.status.value = { ...this.status.value, ownership: this.status.value.ownership === 'reconnecting' ? 'reconnecting' : 'connecting', message: null, retryAt: null };
     record('term_connect', { mode, takeover, stream: anon(this.opts.streamId), net: networkKind() });
-    const ws = new WebSocket(wsUrl(`/ws/term?${q}`));
-    ws.binaryType = 'arraybuffer';
-    this.ws = ws;
     let gotLive = false;
-    ws.onmessage = (e) => {
-      if (this.ws !== ws || gen !== this.generation.value) return;
-      if (typeof e.data !== 'string') return this.onFrame(new Uint8Array(e.data));
-      let msg: any;
-      try {
-        msg = JSON.parse(e.data);
-      } catch {
-        return;
-      }
-      switch (msg.t) {
-        case 'hello':
-          this.raw = msg.raw === true;
-          this.programMouse = false;
-          this.term.options.scrollback = this.raw ? RAW_SCROLLBACK : 0;
-          break;
-        case 'modes':
-          this.programMouse = msg.mouse === true;
-          break;
-        case 'live':
-          gotLive = true;
-          this.backoff.reset();
-          record('term_live', { mode: msg.mode, ms: Math.round(performance.now() - t0) });
-          this.status.value = {
-            ...this.status.value,
-            ownership: msg.mode === 'control' ? 'controlling' : 'watching',
-            watchReason: msg.mode === 'control' ? null : this.status.value.watchReason || (this.opts.mode === 'observe' ? 'peek' : 'chosen'),
-            liveAt: Date.now(),
-            width: msg.width,
-            height: msg.height,
-            message: null,
-          };
-          this.startPing();
-          break;
-        case 'pong':
-          if (this.pongTimer) clearTimeout(this.pongTimer);
-          this.pongTimer = null;
-          break;
-        case 'closed':
-          this.onClosed(msg.category, msg.reason);
-          break;
-        case 'input_rejected':
-          if (msg.reason === 'connecting' || msg.reason === 'not_controlling' || msg.reason === 'watching') this.opts.onNotice('Not sent — this stream isn’t under your control right now.');
-          else if (msg.reason !== 'invalid') this.opts.onNotice(`${TheHost()} didn’t accept that input.`);
-          break;
-      }
-    };
-    ws.onclose = (e) => {
-      if (this.ws !== ws) return;
-      this.ws = null;
-      this.stopPing();
-      if (gen !== this.generation.value || this.disposed) return;
-      if (e.code === 4401) {
-        this.status.value = { ...this.status.value, ownership: 'error', message: 'This device was signed out of Briardr.' };
-        return;
-      }
-      if (e.code === 4400) {
-        this.status.value = { ...this.status.value, ownership: 'error', message: `Briardr on ${theHost()} was updated. Reload to continue.` };
-        return;
-      }
-      const o = this.status.value.ownership;
-      if (o === 'gone' || o === 'idle' || o === 'error') return;
-      // Network loss or a dead connection: retry with backoff in the same mode, never with takeover.
-      record('term_drop', { live: gotLive, code: e.code });
-      this.scheduleReconnect();
-    };
+    // Replaces the connection before this one: nothing it sent from now on reaches this terminal.
+    this.socket.open(wsUrl(`/ws/term?${q}`), {
+      frame: (buf) => this.onFrame(buf),
+      message: (msg) => {
+        switch (msg.t) {
+          case 'hello':
+            this.raw = msg.raw === true;
+            this.programMouse = false;
+            this.term.options.scrollback = this.raw ? RAW_SCROLLBACK : 0;
+            break;
+          case 'modes':
+            this.programMouse = msg.mouse === true;
+            break;
+          case 'live':
+            gotLive = true;
+            this.socket.up();
+            record('term_live', { mode: msg.mode, ms: Math.round(performance.now() - t0) });
+            this.status.value = {
+              ...this.status.value,
+              ownership: msg.mode === 'control' ? 'controlling' : 'watching',
+              watchReason: msg.mode === 'control' ? null : this.status.value.watchReason || (this.opts.mode === 'observe' ? 'peek' : 'chosen'),
+              liveAt: Date.now(),
+              width: msg.width,
+              height: msg.height,
+              message: null,
+            };
+            break;
+          case 'closed':
+            this.onClosed(msg.category, msg.reason);
+            break;
+          case 'input_rejected':
+            if (msg.reason === 'connecting' || msg.reason === 'not_controlling' || msg.reason === 'watching') this.opts.onNotice('Not sent — this stream isn’t under your control right now.');
+            else if (msg.reason !== 'invalid') this.opts.onNotice(`${TheHost()} didn’t accept that input.`);
+            break;
+        }
+      },
+      lost: (code) => {
+        if (code === 4401) {
+          this.status.value = { ...this.status.value, ownership: 'error', message: 'This device was signed out of Briardr.' };
+          return;
+        }
+        if (code === 4400) {
+          this.status.value = { ...this.status.value, ownership: 'error', message: `Briardr on ${theHost()} was updated. Reload to continue.` };
+          return;
+        }
+        const o = this.status.value.ownership;
+        if (o === 'gone' || o === 'idle' || o === 'error') return;
+        // Network loss or a dead connection (code null): retry with backoff in the same mode, never with takeover.
+        record('term_drop', { live: gotLive, code });
+        this.scheduleReconnect();
+      },
+    });
   }
 
   private scheduleReconnect() {
-    const delay = this.backoff.next();
-    record('term_retry', { delay_ms: delay, net: networkKind() });
+    const delay = this.socket.retry();
     this.status.value = { ...this.status.value, ownership: 'reconnecting', retryAt: Date.now() + delay, message: navigator.onLine ? `Reconnecting to ${theHost()}…` : 'This device is offline.' };
-    this.retryTimer = window.setTimeout(() => {
-      this.retryTimer = null;
-      this.connect(this.wantMode, false);
-    }, delay);
   }
 
   retryNow() {
-    this.backoff.reset();
-    this.connect(this.wantMode, false);
+    this.socket.retryNow();
   }
 
   private onClosed(category: string, reason: string) {
@@ -420,7 +382,7 @@ export class TerminalController {
     }
     if (category === 'pane_gone') {
       this.status.value = { ...s, ownership: 'gone', message: reason };
-      this.closeSocket();
+      this.socket.close();
       return;
     }
   }
@@ -430,7 +392,10 @@ export class TerminalController {
     if (this.status.value.ownership !== 'controlling') return;
     this.send({ t: 'release' });
     record('term_hand_back', {});
-    await new Promise((r) => setTimeout(r, 250));
+    // Watch once the pane is back: the server says `released` and closes this connection then.
+    const gen = this.generation.value;
+    await this.socket.ended(RELEASE_WAIT);
+    if (gen !== this.generation.value) return; // left, or connected again meanwhile
     this.status.value = { ...this.status.value, watchReason: 'released' };
     this.connect('observe', false);
     this.status.value = { ...this.status.value, watchReason: 'released' };
@@ -442,9 +407,7 @@ export class TerminalController {
     record('term_suspend', { reason });
     if (save) this.saveNow();
     this.generation.value++;
-    this.closeSocket();
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
+    this.socket.close();
     this.status.value = { ...this.status.value, ownership: 'idle', retryAt: null };
   }
 
@@ -464,7 +427,7 @@ export class TerminalController {
       if (this.saveTimer) clearTimeout(this.saveTimer);
       if (this.resizeTimer) clearTimeout(this.resizeTimer);
       this.saveNow();
-      this.netOff?.();
+      this.socket.dispose();
       this.themeOff();
       this.resizeObs?.disconnect();
       this.webgl?.dispose();
@@ -472,39 +435,6 @@ export class TerminalController {
     };
     requestAnimationFrame(() => setTimeout(free));
     setTimeout(free, 1000); // no animation frames while the page is hidden
-  }
-
-  private closeSocket() {
-    this.stopPing();
-    const ws = this.ws;
-    this.ws = null;
-    if (ws && ws.readyState <= WebSocket.OPEN) ws.close(1000);
-  }
-
-  private startPing() {
-    this.stopPing();
-    this.pingTimer = window.setInterval(() => {
-      const ws = this.ws;
-      if (!ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ t: 'ping', id: Date.now() }));
-      if (this.pongTimer) clearTimeout(this.pongTimer);
-      this.pongTimer = window.setTimeout(() => {
-        // A dead network must never leave the terminal looking live.
-        record('term_health_fail', { net: networkKind() });
-        if (this.ws === ws) {
-          this.ws = null;
-          ws.close();
-          this.stopPing();
-          this.scheduleReconnect();
-        }
-      }, PONG_DEADLINE);
-    }, PING_EVERY);
-  }
-
-  private stopPing() {
-    if (this.pingTimer) clearInterval(this.pingTimer);
-    if (this.pongTimer) clearTimeout(this.pongTimer);
-    this.pingTimer = this.pongTimer = null;
   }
 
   private onFrame(buf: Uint8Array) {
@@ -523,13 +453,11 @@ export class TerminalController {
   // ---------- input (only while controlling; never queued) ----------
 
   get canInput(): boolean {
-    return this.status.value.ownership === 'controlling' && this.ws?.readyState === WebSocket.OPEN;
+    return this.status.value.ownership === 'controlling' && this.socket.isOpen;
   }
 
   private send(msg: { t: string; [k: string]: unknown }): boolean {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify(msg));
+    if (!this.socket.send(msg)) return false;
     if (msg.t === 'input') lastInput = Date.now();
     return true;
   }

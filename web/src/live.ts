@@ -1,24 +1,17 @@
 // The live connection to the Mac: workspace/agent state, Mac summary, attention transitions.
 import { api, ApiError, wsUrl } from './api.ts';
-import { Backoff, onNetworkChange } from './backoff.ts';
+import { onNetworkChange } from './backoff.ts';
 import { networkKind, record } from './diag.ts';
+import { PROTOCOL, ReconnectingSocket } from './socket.ts';
 import { clockSkew, conn, herdr, host, mac, model, pushBanner, session, visibleStreamId, prefs } from './store.ts';
 import type { Model } from './types.ts';
 import { theHost } from './host.ts';
 import { checkForUpdate } from './updates.ts';
 
-export const PROTOCOL = 1;
-const PING_EVERY = 10_000;
-const PONG_DEADLINE = 5_000;
-
 type Listener = (msg: any) => void;
 
 class Live {
-  private ws: WebSocket | null = null;
-  private backoff = new Backoff(500, 30_000);
-  private retryTimer: number | null = null;
-  private pingTimer: number | null = null;
-  private pongTimer: number | null = null;
+  private socket = new ReconnectingSocket({ name: 'live', maxWait: 30_000, reconnect: () => this.connect() });
   private stopped = false;
   private openedAt = 0;
   private serverInstance: unknown = null;
@@ -30,16 +23,11 @@ class Live {
     if (this.started) return this.retryNow(); // e.g. paired again after being signed out
     this.started = true;
     this.stopped = false;
-    onNetworkChange((kind) => {
-      record('network_change', { kind, net: networkKind() });
-      this.backoff.reset();
-      if (conn.value.state !== 'online' && !this.stopped) this.connectNow();
-    });
+    onNetworkChange((kind) => record('network_change', { kind, net: networkKind() })); // the socket reconnects by itself
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && !this.stopped) {
-        this.backoff.reset();
-        if (conn.value.state !== 'online') this.connectNow();
-        else this.ping(); // verify the connection survived the background quickly
+        if (conn.value.state !== 'online') this.socket.retryNow();
+        else this.socket.ping(); // verify the connection survived the background quickly
       }
     });
     this.connect();
@@ -53,7 +41,7 @@ class Live {
   /** Stop retrying after an authentication or protocol failure; the UI shows the recovery action. */
   private stop(category: 'auth' | 'protocol', message: string) {
     this.stopped = true;
-    this.clearTimers();
+    this.socket.close();
     record('live_stopped', { category });
     conn.value = { ...conn.value, state: 'stopped', error: { category, message }, retryAt: null };
     if (category === 'auth') session.value = { status: 'signed_out', reason: message };
@@ -61,56 +49,30 @@ class Live {
 
   retryNow() {
     this.stopped = false;
-    this.backoff.reset();
-    this.connectNow();
-  }
-
-  private connectNow() {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
-    this.connect();
-  }
-
-  private clearTimers() {
-    if (this.retryTimer) clearTimeout(this.retryTimer);
-    if (this.pingTimer) clearInterval(this.pingTimer);
-    if (this.pongTimer) clearTimeout(this.pongTimer);
-    this.retryTimer = this.pingTimer = this.pongTimer = null;
+    this.socket.retryNow();
   }
 
   private connect() {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+    if (this.socket.connected) return;
     conn.value = { ...conn.value, state: 'connecting', retryAt: null };
     const t0 = performance.now();
-    record('live_connect', { attempt: this.backoff.attempts, net: networkKind() });
-    const ws = new WebSocket(wsUrl(`/ws/live?v=${PROTOCOL}`));
-    this.ws = ws;
-    ws.onopen = () => {
-      this.openedAt = Date.now();
-      this.backoff.reset();
-      record('live_open', { ms: Math.round(performance.now() - t0) });
-      conn.value = { state: 'online', error: null, retryAt: null, lastOnlineAt: Date.now() };
-      this.pingTimer = window.setInterval(() => this.ping(), PING_EVERY);
-    };
-    ws.onmessage = (e) => {
-      let msg: any;
-      try {
-        msg = JSON.parse(e.data);
-      } catch {
-        return;
-      }
-      this.onMessage(msg);
-    };
-    ws.onclose = (e) => {
-      if (this.ws !== ws) return;
-      this.ws = null;
-      this.clearTimers();
-      record('live_close', { code: e.code, held_s: this.openedAt ? Math.round((Date.now() - this.openedAt) / 1000) : 0 });
-      this.openedAt = 0;
-      if (e.code === 4401) return this.stop('auth', 'This device was signed out of Briardr.');
-      if (e.code === 4400) return this.stop('protocol', `Briardr on ${theHost()} was updated. Reload to continue.`);
-      this.afterFailure();
-    };
+    record('live_connect', { attempt: this.socket.attempts, net: networkKind() });
+    this.socket.open(wsUrl(`/ws/live?v=${PROTOCOL}`), {
+      opened: () => {
+        this.openedAt = Date.now();
+        this.socket.up();
+        record('live_open', { ms: Math.round(performance.now() - t0) });
+        conn.value = { state: 'online', error: null, retryAt: null, lastOnlineAt: Date.now() };
+      },
+      message: (msg) => this.onMessage(msg),
+      lost: (code) => {
+        record('live_close', { code, held_s: this.openedAt ? Math.round((Date.now() - this.openedAt) / 1000) : 0 });
+        this.openedAt = 0;
+        if (code === 4401) return this.stop('auth', 'This device was signed out of Briardr.');
+        if (code === 4400) return this.stop('protocol', `Briardr on ${theHost()} was updated. Reload to continue.`);
+        this.afterFailure();
+      },
+    });
   }
 
   private async afterFailure() {
@@ -121,31 +83,8 @@ class Live {
     } catch (e) {
       if (e instanceof ApiError && e.category === 'auth') return this.stop('auth', 'This device isn’t signed in to Briardr.');
     }
-    const delay = this.backoff.next();
-    record('live_retry', { delay_ms: delay, net: networkKind() });
+    const delay = this.socket.retry();
     conn.value = { ...conn.value, state: 'offline', error: { category: 'network', message: navigator.onLine ? `Can’t reach ${theHost()}.` : 'This device is offline.' }, retryAt: Date.now() + delay };
-    this.retryTimer = window.setTimeout(() => {
-      this.retryTimer = null;
-      this.connect();
-    }, delay);
-  }
-
-  private ping() {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    try {
-      ws.send(JSON.stringify({ t: 'ping', id: Date.now() }));
-    } catch {}
-    if (this.pongTimer) clearTimeout(this.pongTimer);
-    this.pongTimer = window.setTimeout(() => {
-      record('live_health_fail', { net: networkKind() });
-      ws.close(); // a dead network must never look live
-      if (this.ws === ws) {
-        this.ws = null;
-        this.clearTimers();
-        this.afterFailure();
-      }
-    }, PONG_DEADLINE);
   }
 
   private onMessage(msg: any) {
@@ -157,8 +96,6 @@ class Live {
     if (msg.t === 'pong') {
       // Retry a shell check that failed while this tab was coming back online.
       void checkForUpdate(this.serverInstance);
-      if (this.pongTimer) clearTimeout(this.pongTimer);
-      this.pongTimer = null;
       if (typeof msg.now === 'number') clockSkew.value = msg.now - Date.now();
       return;
     }

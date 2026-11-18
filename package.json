@@ -1,6 +1,6 @@
 {
   "name": "briardr",
-  "version": "0.3.28",
+  "version": "0.3.29",
   "private": true,
   "license": "MIT",
   "description": "A remote window into Herdr on your Mac or Linux server, for your phone, tablet and desktop.",
@@ -39,7 +39,7 @@
     "markdown-it": "^15.0.3",
     "mermaid": "^12.3.0",
     "pdfjs-dist": "^6.5.438",
-    "playwright": "^1.65.0",
+    "playwright": "^1.65.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",
     "typescript": "^5.9.3"
