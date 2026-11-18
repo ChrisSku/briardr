@@ -24,7 +24,7 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, 
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Number, Value};
 use tokio::sync::mpsc;
 
 use crate::actions::{from_herdr, ActionError, Actions};
@@ -34,16 +34,18 @@ use crate::config::{
 };
 use crate::diag::Diagnostics;
 use crate::herdr::backend::Herdr;
+use crate::herdr::model::Model;
 use crate::herdr::rpc::HerdrError;
-use crate::herdr::state::{HerdrEvent, HerdrReader};
+use crate::herdr::state::{HerdrEvent, HerdrHealth, HerdrReader, Transition};
 use crate::net::{forwarded_client, is_allowed_peer, is_trusted_proxy};
 use crate::notes::Notes;
 use crate::platform::{HostCapabilities, HostPlatform};
+use crate::plugins::PluginInfo;
 use crate::power::{MacSummary, Power, PowerEvent};
 use crate::preview::Previews;
 use crate::push::Push;
 use crate::static_files::static_file;
-use crate::terminal_hub::{TerminalHub, PROTOCOL};
+use crate::terminal_hub::{speaks_protocol, TerminalHub};
 use crate::usage::Usage;
 
 mod routes_misc;
@@ -53,7 +55,7 @@ mod routes_session;
 mod routes_streams;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Bun's maxPayloadLength for WebSocket messages.
+/// The largest WebSocket message a client may send (an input or a paste is at most 128K characters).
 pub const MAX_WS_MESSAGE: usize = 512 * 1024;
 /// Default limit for JSON request bodies.
 pub const JSON_LIMIT: usize = 1024 * 1024;
@@ -394,28 +396,6 @@ fn declared_length(headers: &HeaderMap) -> u64 {
         .unwrap_or(0)
 }
 
-/// JS `Number(s)` for header and query values: trimmed decimal, empty = 0, anything else NaN.
-pub fn js_number(s: &str) -> f64 {
-    let t = s.trim();
-    if t.is_empty() {
-        return 0.0;
-    }
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        return u64::from_str_radix(hex, 16).map_or(f64::NAN, |n| n as f64);
-    }
-    match t {
-        "Infinity" | "+Infinity" => f64::INFINITY,
-        "-Infinity" => f64::NEG_INFINITY,
-        _ if t
-            .bytes()
-            .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-')) =>
-        {
-            t.parse::<f64>().unwrap_or(f64::NAN)
-        }
-        _ => f64::NAN,
-    }
-}
-
 /// `decodeURIComponent`; None where it would throw.
 pub fn decode_uri_component(s: &str) -> Option<String> {
     let b = s.as_bytes();
@@ -709,6 +689,69 @@ enum Out {
     Close(u16, &'static str),
 }
 
+/// What Briardr sends on /ws/live, by its `t`.
+#[derive(Serialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum LiveMessage<'a> {
+    /// The first message: `instance_id` changes on every server start, so a client can refresh after
+    /// reconnecting to a new one.
+    #[serde(rename_all = "camelCase")]
+    Hello { instance_id: &'a str },
+    /// The streams and Herdr's health (also `GET /api/state`).
+    Model(ModelState),
+    /// The power state, and what the host can do.
+    Mac {
+        mac: &'a MacSummary,
+        host: &'a HostCapabilities,
+    },
+    /// The battery fell to the low level (`sleeping`: the Mac goes to sleep).
+    Battery {
+        level: Option<u32>,
+        percent: Option<u32>,
+        sleeping: bool,
+    },
+    /// An agent's state changed.
+    Transition(&'a Transition),
+    /// The plugins changed on the host.
+    Plugins { plugins: &'a [PluginInfo] },
+    /// What a plugin's backend pushed for its client.
+    PluginEvent {
+        plugin: &'a str,
+        topic: &'a str,
+        data: &'a Value,
+    },
+    /// A stream's note changed (`revision` 0: it was deleted).
+    #[serde(rename_all = "camelCase")]
+    Notes {
+        stream_id: &'a str,
+        note_id: &'a str,
+        revision: u64,
+    },
+    /// The answer to the client's `ping`, with the host's time.
+    Pong {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<Number>,
+        now: u64,
+    },
+}
+
+/// The streams and Herdr's health, with the host's time and Briardr's version.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelState {
+    model: Option<Model>,
+    herdr: HerdrHealth,
+    server_now: u64,
+    version: &'static str,
+}
+
+/// What a client sends on /ws/live: only `ping`; anything else is ignored.
+#[derive(Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+enum LiveRequest {
+    Ping { id: Option<Number> },
+}
+
 pub struct App {
     pub d: AppDeps,
     /// Changes on every server start, so connected clients can refresh after reconnecting.
@@ -774,9 +817,11 @@ impl App {
         tokio::spawn(async move {
             while let Some((plugin, topic, data)) = events.recv().await {
                 let Some(app) = weak.upgrade() else { return };
-                app.broadcast(
-                    &json!({"t": "plugin_event", "plugin": plugin, "topic": topic, "data": data}),
-                );
+                app.broadcast(&LiveMessage::PluginEvent {
+                    plugin: &plugin,
+                    topic: &topic,
+                    data: &data,
+                });
             }
         });
     }
@@ -817,7 +862,7 @@ impl App {
                             .map(|p| p.id.clone())
                             .collect();
                         app.backends.retain(&active);
-                        app.broadcast(&json!({"t": "plugins", "plugins": plugins}));
+                        app.broadcast(&LiveMessage::Plugins { plugins: &plugins });
                     }
                 }
                 drop(app);
@@ -840,16 +885,7 @@ impl App {
                 let Some(app) = weak.upgrade() else { return };
                 match ev {
                     HerdrEvent::Model(_) | HerdrEvent::Health(_) => app.broadcast_model(),
-                    HerdrEvent::Transition(t) => {
-                        let mut msg = serde_json::to_value(&t).unwrap_or_else(|_| json!({}));
-                        if let Value::Object(map) = &mut msg {
-                            let mut out = serde_json::Map::new();
-                            out.insert("t".into(), json!("transition"));
-                            out.extend(std::mem::take(map));
-                            msg = Value::Object(out);
-                        }
-                        app.broadcast(&msg);
-                    }
+                    HerdrEvent::Transition(t) => app.broadcast(&LiveMessage::Transition(&t)),
                 }
             }
         });
@@ -996,7 +1032,7 @@ impl App {
             .to_string();
         let mut res = self.clone().dispatch(req, peer).await;
         if res.status() == StatusCode::SWITCHING_PROTOCOLS {
-            return res; // an upgraded socket: Bun returns nothing, so no headers are added
+            return res; // an upgraded socket: its handshake answer gets no headers
         }
         let cfg = self.cfg();
         let previews = (cfg.tls.mode == "proxy").then(|| preview_origins(&cfg).unwrap_or_default());
@@ -1350,7 +1386,7 @@ impl App {
     }
 
     async fn on_live(self: Arc<Self>, mut ws: WebSocket, device: Device, q: Query) {
-        if js_number(q.get("v").unwrap_or("null")) != f64::from(PROTOCOL) {
+        if !speaks_protocol(&q) {
             let _ = ws
                 .send(Message::Close(Some(CloseFrame {
                     code: 4400,
@@ -1368,15 +1404,21 @@ impl App {
         });
         let anon = self.d.diag.anon(&device.id);
         self.event("live_open", json!({ "device": anon }));
-        let _ = tx.send(Out::Text(
-            json!({"t": "hello", "instanceId": self.instance_id}).to_string(),
-        ));
-        let _ = tx.send(Out::Text(self.model_message().to_string()));
+        let hello = LiveMessage::Hello {
+            instance_id: &self.instance_id,
+        };
+        let mut first = vec![hello, LiveMessage::Model(self.model_state())];
         let summary = lock(&self.d.power).summary().cloned();
-        if let Some(mac) = summary {
-            let _ = tx.send(Out::Text(
-                json!({"t": "mac", "mac": mac, "host": &self.d.caps}).to_string(),
-            ));
+        if let Some(mac) = &summary {
+            first.push(LiveMessage::Mac {
+                mac,
+                host: &self.d.caps,
+            });
+        }
+        for m in &first {
+            if let Ok(text) = serde_json::to_string(m) {
+                let _ = tx.send(Out::Text(text));
+            }
         }
         // Briardr sends its own pings and drops sockets that stop answering them.
         let mut alive = true;
@@ -1389,17 +1431,11 @@ impl App {
                 msg = ws.recv() => match msg {
                     Some(Ok(Message::Text(text))) => {
                         alive = true;
-                        if let Ok(m) = serde_json::from_str::<Value>(text.as_str()) {
-                            if m.get("t").and_then(Value::as_str) == Some("ping") {
-                                let mut pong = serde_json::Map::new();
-                                pong.insert("t".into(), json!("pong"));
-                                if let Some(id) = m.get("id") {
-                                    pong.insert("id".into(), id.clone());
-                                }
-                                pong.insert("now".into(), json!(now_ms()));
-                                if ws.send(Message::Text(Value::Object(pong).to_string().into())).await.is_err() {
-                                    break;
-                                }
+                        if let Ok(LiveRequest::Ping { id }) = serde_json::from_str(text.as_str()) {
+                            let pong = LiveMessage::Pong { id, now: now_ms() };
+                            let Ok(pong) = serde_json::to_string(&pong) else { continue };
+                            if ws.send(Message::Text(pong.into())).await.is_err() {
+                                break;
                             }
                         }
                     }
@@ -1441,7 +1477,10 @@ impl App {
             .await
             .map_err(|_| ApiError::Internal)?;
         self.power_events(&report.events);
-        self.broadcast(&json!({"t": "mac", "mac": report.summary, "host": &self.d.caps}));
+        self.broadcast(&LiveMessage::Mac {
+            mac: &report.summary,
+            host: &self.d.caps,
+        });
         Ok(report.summary)
     }
 
@@ -1453,7 +1492,11 @@ impl App {
             let PowerEvent::LowBattery(b) = ev else {
                 continue;
             };
-            self.broadcast(&json!({"t": "battery", "level": b.level, "percent": b.percent, "sleeping": b.sleeping}));
+            self.broadcast(&LiveMessage::Battery {
+                level: b.level,
+                percent: b.percent,
+                sleeping: b.sleeping,
+            });
             if !self.d.caps.battery || !self.d.push.wanted("battery") {
                 continue;
             }
@@ -1478,14 +1521,13 @@ impl App {
         }
     }
 
-    pub fn model_message(&self) -> Value {
-        json!({
-            "t": "model",
-            "model": self.d.herdr.model(),
-            "herdr": self.d.herdr.health(),
-            "serverNow": now_ms(),
-            "version": VERSION,
-        })
+    pub fn model_state(&self) -> ModelState {
+        ModelState {
+            model: self.d.herdr.model(),
+            herdr: self.d.herdr.health(),
+            server_now: now_ms(),
+            version: VERSION,
+        }
     }
 
     /// Coalesces model broadcasts for 80 ms.
@@ -1498,15 +1540,16 @@ impl App {
             tokio::time::sleep(Duration::from_millis(80)).await;
             if let Some(app) = weak.upgrade() {
                 app.model_pending.store(false, Ordering::SeqCst);
-                let msg = app.model_message();
-                app.broadcast(&msg);
+                app.broadcast(&LiveMessage::Model(app.model_state()));
             }
         });
     }
 
     /// Sends a message to every open live socket.
-    pub fn broadcast(&self, msg: &Value) {
-        let data = msg.to_string();
+    pub fn broadcast(&self, msg: &LiveMessage) {
+        let Ok(data) = serde_json::to_string(msg) else {
+            return;
+        };
         for s in lock(&self.live).iter() {
             let _ = s.tx.send(Out::Text(data.clone()));
         }
@@ -1701,9 +1744,6 @@ mod tests {
         assert_eq!(decode_uri_component("w1%3Ap1").as_deref(), Some("w1:p1"));
         assert_eq!(decode_uri_component("%E0%A4%A"), None);
         assert_eq!(decode_uri_component("%FF"), None);
-        assert_eq!(js_number(""), 0.0);
-        assert_eq!(js_number(" 12 "), 12.0);
-        assert!(js_number("12abc").is_nan());
         assert_eq!(extname("/a/b.js"), ".js");
         assert_eq!(extname("/a/.hidden"), "");
         assert_eq!(extname("/streams/x"), "");
@@ -1716,6 +1756,55 @@ mod tests {
         assert_eq!(icon_kind("/icons/icon-192-x.png"), None);
         assert_eq!(icon_kind("/manifest.webmanifest"), Some("manifest"));
         assert_eq!(icon_kind("/app.js"), None);
+    }
+
+    #[test]
+    fn live_messages_are_tagged_by_t() {
+        let json = |m: LiveMessage| serde_json::to_value(m).unwrap();
+        assert_eq!(
+            json(LiveMessage::Hello { instance_id: "ab" }),
+            json!({"t": "hello", "instanceId": "ab"})
+        );
+        assert_eq!(
+            json(LiveMessage::Notes {
+                stream_id: "w1:p1",
+                note_id: "0123456789abcdef",
+                revision: 0
+            }),
+            json!({"t": "notes", "streamId": "w1:p1", "noteId": "0123456789abcdef", "revision": 0})
+        );
+        assert_eq!(
+            json(LiveMessage::PluginEvent {
+                plugin: "ci",
+                topic: "run",
+                data: &json!({"n": 1})
+            }),
+            json!({"t": "plugin_event", "plugin": "ci", "topic": "run", "data": {"n": 1}})
+        );
+        assert_eq!(
+            json(LiveMessage::Pong { id: None, now: 5 }),
+            json!({"t": "pong", "now": 5})
+        );
+        let transition = Transition {
+            stream_id: "w1:p1".into(),
+            terminal_id: "t1".into(),
+            from: None,
+            to: None,
+            kind: crate::herdr::model::StreamKind::Agent,
+            tool: "claude".into(),
+            state_change_seq: Some(2),
+            at: 9,
+        };
+        let text = serde_json::to_string(&LiveMessage::Transition(&transition)).unwrap();
+        assert!(
+            text.starts_with(r#"{"t":"transition","streamId":"w1:p1","#),
+            "{text}"
+        );
+        assert!(matches!(
+            serde_json::from_value(json!({"t": "ping", "id": 3})),
+            Ok(LiveRequest::Ping { id: Some(_) })
+        ));
+        assert!(serde_json::from_value::<LiveRequest>(json!({"t": "hello"})).is_err());
     }
 
     #[test]

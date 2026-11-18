@@ -44,7 +44,6 @@ use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::app::js_number;
 use crate::auth::Auth;
 use crate::config::{
     default_data_dir, load_config, lock_for, parse_public_origin, save_config, validate_config,
@@ -900,13 +899,10 @@ pub fn apply_configure(
                 next.herdr_path = p;
             }
             "--port" => {
-                let n = js_number(&take_value(args, &mut i, a)?);
-                if !(n.fract() == 0.0 && (1.0..=65535.0).contains(&n)) {
-                    return Err(ConfigError::Invalid(
-                        "--port must be a port number.".to_string(),
-                    ));
-                }
-                next.port = n as u16;
+                let port = take_value(args, &mut i, a)?.trim().parse::<u16>();
+                next.port = port.ok().filter(|&p| p > 0).ok_or_else(|| {
+                    ConfigError::Invalid("--port must be a port number.".to_string())
+                })?;
             }
             _ => {
                 return Err(ConfigError::Invalid(format!(
@@ -1095,7 +1091,7 @@ mod main_tests {
 
     #[test]
     fn port_must_be_a_port_number() {
-        for bad in ["0", "65536", "7443.5", "abc", ""] {
+        for bad in ["0", "65536", "7443.5", "abc", "", "-1", "0x1d1f"] {
             assert!(
                 apply_err(&["--port", bad]).contains("--port must be a port number."),
                 "{bad}"
@@ -1103,6 +1099,8 @@ mod main_tests {
         }
         let (cfg, _) = apply_configure(&base(), &args(&["--port", "8443"])).expect("port");
         assert_eq!(cfg.port, 8443);
+        let (cfg, _) = apply_configure(&base(), &args(&["--port", " 9443 "])).expect("port");
+        assert_eq!(cfg.port, 9443);
     }
 
     #[test]
