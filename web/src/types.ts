@@ -50,6 +50,14 @@ export interface Model {
   asOf: number;
 }
 
+/** An agent a new stream can start (`GET /api/agents`), as the connected Herdr starts it. */
+export interface AgentChoice {
+  kind: string;
+  name: string;
+  /** It takes a first message when it starts. */
+  prompt: boolean;
+}
+
 export interface HerdrHealth {
   /** Herdr TUI, or herdr-core under the Herdr app (missing in a cache an older Briardr wrote). */
   backend?: 'tui' | 'core';

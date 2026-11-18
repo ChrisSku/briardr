@@ -5,6 +5,22 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.28
+
+- **A setting changed in the app no longer undoes what `briardr configure` saved before the restart.** Briardr used to save its whole running configuration on any change in Settings, so a `briardr configure` change waiting for the restart (such as `--allowed-networks`) was lost. Now a change from the app is made to `config.json` as it is on disk, and only to its own setting; the two take turns with a lock (`config.lock` in the data directory), and the restart applies both. Briardr also no longer writes its `BRIARDR_*` environment overrides into `config.json`, and won't save over a `config.json` it can't read. Plugins turned on or off with `briardr plugin enable|disable` are now noticed even when Linux gives the file the same modification time as the server's last save, and a devices file that can't be read at startup no longer makes Briardr forget every device's alert choices. ([#57](https://github.com/ChrisSku/briardr/pull/57))
+- **A new stream can start any agent Herdr starts, and Claude Code or Codex with a prompt.** New stream
+  offers Shell, Claude and Codex as before, and with Herdr TUI, under Other, every other agent kind the
+  installed Herdr can start (Gemini, OpenCode, Copilot and more, as `herdr agent start` lists them). Claude
+  Code and Codex take an optional one-line prompt (up to 2,000 characters) that they get as their prompt
+  argument when they start; nothing is typed into the agent for it. With Herdr TUI the prompt is handed
+  over only when the new pane's shell is sh, bash, zsh, dash or ksh, since Herdr types the command into
+  it; with the Herdr app, which lists no agents, New stream keeps offering Claude Code and Codex. The
+  sheet's button is now Start. ([#58](https://github.com/ChrisSku/briardr/pull/58))
+
+## 0.3.27
+
+- **The server's dependencies are updated past three RustSec advisories.** rustls-webpki 0.103.17 (RUSTSEC-2026-0382), and crypto-bigint 0.7.11 (RUSTSEC-2026-0387) and ctutils 0.4.8 (RUSTSEC-2026-0385), which the Web Push encryption uses. Nothing to change in your setup. ([#56](https://github.com/ChrisSku/briardr/pull/56))
+
 ## 0.3.26
 
 - **An agent's row shows what it's working on.** In the Agents and Workspaces lists and in Jump, an agent's row has a line with its terminal title (Claude Code sets it to the task at hand), unless it only repeats the stream's name, the agent's own name or where it runs (a path, or a shell prompt's "user@host: ~/app"). Jump and the Workspaces search find agents by it too. With the Herdr app, a stream named after its terminal's title no longer starts with the agent's spinner. ([#46](https://github.com/ChrisSku/briardr/pull/46))
