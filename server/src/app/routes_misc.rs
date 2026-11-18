@@ -9,8 +9,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{
-    action_err, caps_json, js_number, js_truthy, json_body, json_body_as, lock, now_ms, ok,
-    response, send, str_or_empty, ApiError, App, Ctx, Routes, JSON_LIMIT, VERSION,
+    action_err, caps_json, json_body_as, lock, now_ms, ok, response, send, ApiError, App, Ctx,
+    Routes, JSON_LIMIT, VERSION,
 };
 use crate::config::BriardrConfig;
 use crate::herdr::backend::Target;
@@ -30,21 +30,77 @@ where
         .map_err(|_| ApiError::Internal)
 }
 
-/// JS `Number(v)` for a JSON body field; a missing field is NaN.
-fn js_number_of(v: Option<&Value>) -> f64 {
-    match v {
-        None => f64::NAN,
-        Some(Value::Null) | Some(Value::Bool(false)) => 0.0,
-        Some(Value::Bool(true)) => 1.0,
-        Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
-        Some(Value::String(s)) => js_number(s),
-        Some(_) => f64::NAN,
-    }
+/// `POST /api/previews`: the port on the host to preview. Any number reaches the port check.
+#[derive(Deserialize)]
+struct PreviewOpen {
+    port: Option<f64>,
 }
 
-/// A boolean field of a JSON object, if it is one.
-fn bool_field(v: &Value, key: &str) -> Option<bool> {
-    v.get(key).and_then(Value::as_bool)
+/// `POST /api/usage/codex/reset-credit`: `confirm: true`, so a stray request can't spend a reset.
+#[derive(Deserialize)]
+struct ResetCredit {
+    confirm: Option<bool>,
+}
+
+/// `POST /api/usage/statusline`: put Briardr's status line into Claude Code's settings (the one whose
+/// preview the user saw: its fingerprint), or take it out again.
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+enum StatuslineChange {
+    Install { fingerprint: Option<String> },
+    Remove,
+}
+
+/// `POST /api/notifications/subscribe`: the browser's `PushSubscription.toJSON()`. A part left out is an
+/// invalid subscription.
+#[derive(Default, Deserialize)]
+struct SubscribeBody {
+    subscription: Option<BrowserSubscription>,
+}
+
+#[derive(Default, Deserialize)]
+struct BrowserSubscription {
+    endpoint: Option<String>,
+    keys: Option<BrowserKeys>,
+}
+
+#[derive(Default, Deserialize)]
+struct BrowserKeys {
+    p256dh: Option<String>,
+    auth: Option<String>,
+}
+
+/// `POST /api/notifications/ack`: the alert the service worker showed.
+#[derive(Deserialize)]
+struct AckBody {
+    id: Option<String>,
+}
+
+/// `POST /api/power/sleep`: the client's own ID for the request, so a retry isn't a second sleep.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SleepBody {
+    request_id: Option<String>,
+}
+
+/// `POST /api/power/keep-awake`: Always on, on or off (left out: off).
+#[derive(Deserialize)]
+struct KeepAwakeBody {
+    on: Option<bool>,
+}
+
+/// `POST /api/update/install`: the version the user chose, which must still be the latest.
+#[derive(Deserialize)]
+struct InstallBody {
+    version: Option<String>,
+}
+
+/// `POST /api/diagnostics/client`: the device's own diagnostics events, each with its name in `ev`.
+/// Their fields are the client's; only those on the allow-list are recorded (`Diagnostics::record`).
+#[derive(Deserialize)]
+struct ClientEvents {
+    #[serde(default)]
+    events: Vec<BTreeMap<String, Value>>,
 }
 
 /// What `PUT /api/settings` changes. A setting left out (or `null`) stays as it is.
@@ -111,15 +167,6 @@ impl SettingsChange {
     }
 }
 
-/// A string at a path in a JSON body, or "" when absent (the subscription check refuses "").
-fn str_at(v: Option<&Value>, path: &[&str]) -> String {
-    let mut cur = v;
-    for key in path {
-        cur = cur.and_then(|c| c.get(*key));
-    }
-    cur.and_then(Value::as_str).unwrap_or("").to_string()
-}
-
 fn preview_json(p: &PreviewInfo) -> Value {
     let mut v = json!({
         "id": p.id,
@@ -146,12 +193,12 @@ pub(super) fn register(r: &mut Routes) {
         "/api/previews",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: PreviewOpen = json_body_as(&mut ctx, JSON_LIMIT).await?;
             let device = ctx.device()?.id.clone();
             if !app.d.previews.available() {
                 return Err(app.unsupported("Preview (no preview origins are configured)"));
             }
-            let port = js_number_of(b.get("port"));
+            let port = b.port.unwrap_or(f64::NAN);
             let invalid_port = || {
                 Ok(send(
                     400,
@@ -223,8 +270,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/usage/codex/reset-credit",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, 1024).await?;
-            if bool_field(&b, "confirm") != Some(true) {
+            let b: ResetCredit = json_body_as(&mut ctx, 1024).await?;
+            if b.confirm != Some(true) {
                 return Err(action_err(
                     400,
                     "confirm_required",
@@ -275,26 +322,25 @@ pub(super) fn register(r: &mut Routes) {
         "/api/usage/statusline",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let change: StatuslineChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
             let usage = app.d.usage.clone();
             let failed = |e: crate::usage::claude::TapError| {
                 action_err(409, "statusline_failed", e.to_string())
             };
-            match b.get("action").and_then(Value::as_str) {
-                Some("install") => {
-                    let fingerprint = str_or_empty(b.get("fingerprint"));
+            match change {
+                StatuslineChange::Install { fingerprint } => {
+                    let fingerprint = fingerprint.unwrap_or_default();
                     blocking(move || usage.tap.install(&fingerprint))
                         .await?
                         .map_err(failed)?;
                     ok(json!({"ok": true}))
                 }
-                Some("remove") => {
+                StatuslineChange::Remove => {
                     let restored = blocking(move || usage.tap.remove())
                         .await?
                         .map_err(failed)?;
                     ok(json!({"ok": true, "restored": restored}))
                 }
-                _ => Err(action_err(400, "invalid", "Unknown action")),
             }
         },
     );
@@ -347,11 +393,14 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let device = ctx.device()?.id.clone();
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            let sub = b.get("subscription");
-            let endpoint = str_at(sub, &["endpoint"]);
-            let p256dh = str_at(sub, &["keys", "p256dh"]);
-            let auth = str_at(sub, &["keys", "auth"]);
+            let b: SubscribeBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            let sub = b.subscription.unwrap_or_default();
+            let keys = sub.keys.unwrap_or_default();
+            let endpoint = sub.endpoint.unwrap_or_default();
+            let (p256dh, auth) = (
+                keys.p256dh.unwrap_or_default(),
+                keys.auth.unwrap_or_default(),
+            );
             let push = app.d.push.clone();
             blocking(move || push.subscribe(&device, &endpoint, &p256dh, &auth))
                 .await?
@@ -435,8 +484,8 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let device = ctx.device()?.id.clone();
-            let b = json_body(&mut ctx, 4096).await?;
-            let id = str_or_empty(b.get("id"));
+            let b: AckBody = json_body_as(&mut ctx, 4096).await?;
+            let id = b.id.unwrap_or_default();
             let push = app.d.push.clone();
             let acked = blocking(move || push.ack(&id, &device)).await?;
             ok(json!({"ok": acked}))
@@ -452,8 +501,8 @@ pub(super) fn register(r: &mut Routes) {
             if !app.d.caps.sleep {
                 return Err(app.unsupported("Sleep"));
             }
-            let b = json_body(&mut ctx, 4096).await?;
-            let request_id = str_or_empty(b.get("requestId"));
+            let b: SleepBody = json_body_as(&mut ctx, 4096).await?;
+            let request_id = b.request_id.unwrap_or_default();
             let power = app.d.power.clone();
             let now = now_ms();
             let body = blocking(move || lock(&power).request_sleep(&request_id, now)).await?;
@@ -470,8 +519,8 @@ pub(super) fn register(r: &mut Routes) {
             if !app.d.caps.keep_awake {
                 return Err(app.unsupported("Always on"));
             }
-            let b = json_body(&mut ctx, 4096).await?;
-            let on = b.get("on").is_some_and(js_truthy);
+            let b: KeepAwakeBody = json_body_as(&mut ctx, 4096).await?;
+            let on = b.on.unwrap_or(false);
             let _change = app.d.cfg.lock_changes().await;
             let cell = app.d.cfg.clone();
             blocking(move || cell.change(|c| c.power.keep_awake = on)).await??;
@@ -614,8 +663,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/update/install",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            let version = str_or_empty(b.get("version"));
+            let b: InstallBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            let version = b.version.unwrap_or_default();
             match app.d.updates.install(&version).await {
                 Ok(restarts) => {
                     app.event("update_installed", json!({"restarts": restarts}));
@@ -635,27 +684,14 @@ pub(super) fn register(r: &mut Routes) {
         "/api/diagnostics/client",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, 256 * 1024).await?;
-            // Only the first 500 events, and only those with a string `ev`, are recorded.
-            let events: Vec<(String, BTreeMap<String, Value>)> = b
-                .get("events")
-                .and_then(Value::as_array)
-                .map(|list| {
-                    list.iter()
-                        .take(500)
-                        .filter_map(|e| {
-                            let obj = e.as_object()?;
-                            let ev = obj.get("ev")?.as_str()?.to_string();
-                            let fields = obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                            Some((ev, fields))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let b: ClientEvents = json_body_as(&mut ctx, 256 * 1024).await?;
             let diag = app.d.diag.clone();
             blocking(move || {
-                for (ev, fields) in &events {
-                    diag.record("client", ev, fields);
+                // Only the first 500 events, and only those with a string `ev`, are recorded.
+                for fields in b.events.iter().take(500) {
+                    if let Some(ev) = fields.get("ev").and_then(Value::as_str) {
+                        diag.record("client", ev, fields);
+                    }
                 }
             })
             .await?;
@@ -690,4 +726,61 @@ pub(super) fn register(r: &mut Routes) {
             ))
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse<T: serde::de::DeserializeOwned>(v: Value) -> Option<T> {
+        serde_json::from_value(v).ok()
+    }
+
+    #[test]
+    fn bodies_take_what_the_client_sends_and_refuse_other_types() {
+        let b: PreviewOpen = parse(json!({"port": 5173})).unwrap();
+        assert_eq!(b.port, Some(5173.0));
+        let b: PreviewOpen = parse(json!({"port": 1.5})).unwrap();
+        assert_eq!(
+            b.port,
+            Some(1.5),
+            "the port check refuses it, as invalid_port"
+        );
+        assert!(parse::<PreviewOpen>(json!({"port": "5173"})).is_none());
+
+        let install = parse(json!({"action": "install", "fingerprint": "abc"}));
+        assert!(
+            matches!(install, Some(StatuslineChange::Install { fingerprint: Some(f) }) if f == "abc")
+        );
+        assert!(matches!(
+            parse(json!({"action": "remove"})),
+            Some(StatuslineChange::Remove)
+        ));
+        assert!(parse::<StatuslineChange>(json!({"action": "replace"})).is_none());
+
+        let b: KeepAwakeBody = parse(json!({})).unwrap();
+        assert_eq!(b.on, None);
+        assert!(parse::<KeepAwakeBody>(json!({"on": 1})).is_none());
+
+        let b: SubscribeBody = parse(json!({"subscription": {"endpoint": "https://push.example/x", "expirationTime": null, "keys": {"p256dh": "k", "auth": "a"}}})).unwrap();
+        let sub = b.subscription.unwrap();
+        assert_eq!(sub.endpoint.as_deref(), Some("https://push.example/x"));
+        assert_eq!(sub.keys.unwrap().auth.as_deref(), Some("a"));
+        let b: SubscribeBody =
+            parse(json!({"subscription": {"endpoint": "https://push.example/x"}})).unwrap();
+        assert!(
+            b.subscription.unwrap().keys.is_none(),
+            "an invalid subscription, refused as one"
+        );
+    }
+
+    #[test]
+    fn client_events_keep_their_fields_for_the_allow_list() {
+        let b: ClientEvents =
+            parse(json!({"events": [{"ev": "live_open", "n": 3}, {"n": 1}]})).unwrap();
+        assert_eq!(b.events.len(), 2);
+        assert_eq!(b.events[0]["ev"], "live_open");
+        assert!(parse::<ClientEvents>(json!({})).unwrap().events.is_empty());
+        assert!(parse::<ClientEvents>(json!({"events": ["live_open"]})).is_none());
+    }
 }
