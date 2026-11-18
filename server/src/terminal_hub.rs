@@ -759,9 +759,7 @@ fn parse_input(m: &Value) -> Option<Input> {
     let text = paste.get("text").and_then(Value::as_str).filter(short)?;
     Some(Input::Paste {
         text: sanitize_paste(text),
-        bracketed: paste
-            .get("bracketed")
-            .is_some_and(crate::actions::js_truthy),
+        bracketed: paste.get("bracketed").and_then(Value::as_bool) == Some(true),
     })
 }
 

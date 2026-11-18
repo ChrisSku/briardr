@@ -2,14 +2,14 @@
 use std::sync::Arc;
 
 use axum::http::Method;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::{
-    action_err, json_body_as, ok, response, send, stream_gone, upload_body, ApiError, App, Ctx,
-    Resp, Routes,
+    action_err, done, json_body_as, ok, response, send, stream_gone, upload_body, ApiError, App,
+    Ctx, Resp, Routes,
 };
-use crate::notes::{NotesError, SaveResult, MAX_NOTES};
+use crate::notes::{Note, NotesError, SaveResult, MAX_NOTES};
 use crate::uploads::{UploadError, UploadKind};
 
 const NOTE_BODY_LIMIT: usize = 512 * 1024;
@@ -27,6 +27,32 @@ struct NoteSave {
 #[derive(Deserialize)]
 struct NotePaste {
     text: Option<String>,
+}
+
+/// `GET /api/streams/:id/notes`: the stream's notes, newest first.
+#[derive(Serialize)]
+struct NoteList {
+    notes: Vec<Note>,
+}
+
+/// A note as it's read or saved.
+#[derive(Serialize)]
+struct NoteBody {
+    note: Note,
+}
+
+/// A save over a revision that isn't the note's any more: the note as it is now (None: deleted).
+#[derive(Serialize)]
+struct NoteConflict {
+    error: &'static str,
+    message: &'static str,
+    note: Option<Note>,
+}
+
+/// `POST /api/streams/:id/notes/images`: the stored image's name in the note.
+#[derive(Serialize)]
+struct NoteImage {
+    name: String,
 }
 
 fn invalid_note() -> ApiError {
@@ -80,8 +106,8 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let notes = app.d.notes.clone();
             let id = ctx.param("id").to_string();
-            let list = blocking(move || notes.list(&id)).await?;
-            ok(json!({ "notes": list }))
+            let notes = blocking(move || notes.list(&id)).await?;
+            ok(NoteList { notes })
         },
     );
 
@@ -96,7 +122,7 @@ pub(super) fn register(r: &mut Routes) {
             let note = blocking(move || notes.get(&id, &nid))
                 .await?
                 .ok_or_else(note_gone)?;
-            ok(json!({ "note": note }))
+            ok(NoteBody { note })
         },
     );
 
@@ -130,15 +156,16 @@ pub(super) fn register(r: &mut Routes) {
                     } else {
                         "This note was deleted on another device."
                     };
-                    Ok(send(
-                        409,
-                        &json!({"error": "conflict", "message": message, "note": note}),
-                        &[],
-                    ))
+                    let body = NoteConflict {
+                        error: "conflict",
+                        message,
+                        note,
+                    };
+                    Ok(send(409, &body, &[]))
                 }
                 SaveResult::Ok(note) => {
                     app.broadcast(&json!({"t": "notes", "streamId": stream, "noteId": nid, "revision": note.revision}));
-                    ok(json!({ "note": note }))
+                    ok(NoteBody { note })
                 }
             }
         },
@@ -161,7 +188,7 @@ pub(super) fn register(r: &mut Routes) {
                     &json!({"t": "notes", "streamId": stream, "noteId": nid, "revision": 0}),
                 );
             }
-            ok(json!({ "ok": true }))
+            done()
         },
     );
 
@@ -179,7 +206,7 @@ pub(super) fn register(r: &mut Routes) {
             let pasted = blocking(move || notes.for_terminal(&stream, &text))
                 .await?
                 .map_err(|_| ApiError::Internal)?;
-            ok(serde_json::to_value(pasted).map_err(|_| ApiError::Internal)?)
+            ok(pasted)
         },
     );
 
@@ -196,7 +223,7 @@ pub(super) fn register(r: &mut Routes) {
             };
             let notes = app.d.notes.clone();
             match blocking(move || notes.add_image(&stream, &bytes)).await? {
-                Ok(name) => ok(json!({ "name": name })),
+                Ok(name) => ok(NoteImage { name }),
                 Err(NotesError::Upload(e)) => upload_failure(&e),
                 Err(_) => upload_failure(&UploadError::Io(std::io::Error::other("save"))),
             }

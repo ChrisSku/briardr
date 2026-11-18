@@ -8,7 +8,10 @@ use std::path::Path;
 use futures_util::future::join_all;
 use serde_json::{json, Value};
 
-use super::{err, from_herdr, prompt_args, ActionError, Actions};
+use super::{
+    err, from_herdr, prompt_args, ActionError, Actions, CreatedProject, CreatedStream,
+    CreatedWorkspace, Seen,
+};
 use crate::herdr::core::layout;
 use crate::herdr::core::model::{qualify, split_machine, OTHER};
 use crate::herdr::core::state::CoreState;
@@ -134,7 +137,7 @@ impl Actions {
         c: &CoreState,
         name: Option<String>,
         cwd: String,
-    ) -> Result<Value, ActionError> {
+    ) -> Result<CreatedWorkspace, ActionError> {
         let (space, tab, pane) = (
             layout::fresh_id("sp"),
             layout::fresh_id("tb"),
@@ -150,9 +153,12 @@ impl Actions {
         })
         .await?;
         self.refresh().await?;
-        Ok(
-            json!({"workspaceId": space, "projectId": tab, "streamId": terminal, "focusUnchanged": true}),
-        )
+        Ok(CreatedWorkspace {
+            workspace_id: Some(space),
+            project_id: Some(tab),
+            stream_id: Some(terminal),
+            focus_unchanged: true,
+        })
     }
 
     pub(super) async fn core_create_project(
@@ -160,7 +166,7 @@ impl Actions {
         c: &CoreState,
         ws: &Workspace,
         name: Option<String>,
-    ) -> Result<Value, ActionError> {
+    ) -> Result<CreatedProject, ActionError> {
         if ws.id == OTHER {
             return Err(not_a_space());
         }
@@ -190,9 +196,11 @@ impl Actions {
             ));
         }
         self.refresh().await?;
-        Ok(
-            json!({"projectId": qualify(machine, &tab), "streamId": terminal, "focusUnchanged": true}),
-        )
+        Ok(CreatedProject {
+            project_id: Some(qualify(machine, &tab)),
+            stream_id: Some(terminal),
+            focus_unchanged: true,
+        })
     }
 
     pub(super) async fn core_create_stream(
@@ -201,7 +209,7 @@ impl Actions {
         cwd: Option<String>,
         kind: &str,
         prompt: Option<&str>,
-    ) -> Result<Value, ActionError> {
+    ) -> Result<CreatedStream, ActionError> {
         let (machine, tab) = split_machine(&project.id);
         let machine = if project.id == OTHER { "" } else { machine };
         let mut command = vec![kind.to_string()];
@@ -215,7 +223,11 @@ impl Actions {
         let place = (project.id != OTHER).then_some((space, tab));
         let terminal = self.start(machine, argv, cwd.as_deref(), place).await?;
         self.refresh().await?;
-        Ok(json!({"streamId": terminal, "note": null, "focusUnchanged": true}))
+        Ok(CreatedStream {
+            stream_id: Some(terminal),
+            note: None,
+            focus_unchanged: true,
+        })
     }
 
     /// Names a space or a tab in the layout document.
@@ -224,7 +236,7 @@ impl Actions {
         c: &CoreState,
         id: &str,
         name: &str,
-    ) -> Result<Value, ActionError> {
+    ) -> Result<(), ActionError> {
         if id == OTHER {
             return Err(not_a_space());
         }
@@ -235,15 +247,14 @@ impl Actions {
         {
             return Err(not_in_layout());
         }
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
     /// Ends the terminals of what `belongs` picks.
     pub(super) async fn core_close(
         &self,
         belongs: impl Fn(&Stream) -> bool,
-    ) -> Result<Value, ActionError> {
+    ) -> Result<(), ActionError> {
         let terminals = self
             .herdr
             .model()
@@ -255,21 +266,20 @@ impl Actions {
                     .collect()
             })
             .unwrap_or_default();
-        self.end(terminals).await?;
-        Ok(Value::Null)
+        self.end(terminals).await
     }
 
     /// Records that the person has seen an agent's last turn, or marks it unread, in `herdr.seen`
     /// (the Herdr app's docs/labels.md), so every Herdr client agrees. Herdr TUI keeps no such label:
     /// there the client's own record is all there is.
-    pub async fn mark_seen(&self, stream_id: &str, seen: bool) -> Result<Value, ActionError> {
+    pub async fn mark_seen(&self, stream_id: &str, seen: bool) -> Result<Seen, ActionError> {
         let stream = self
             .herdr
             .model()
             .and_then(|m| m.streams.into_iter().find(|s| s.id == stream_id))
             .ok_or_else(|| err(404, "stream_gone", "That stream no longer exists."))?;
         let (Some(c), StreamKind::Agent) = (self.core(), stream.kind) else {
-            return Ok(json!({"shared": false}));
+            return Ok(Seen { shared: false });
         };
         let Some(record) = c.terminal(stream_id) else {
             return Err(err(404, "stream_gone", "That stream no longer exists."));
@@ -293,7 +303,7 @@ impl Actions {
             )
             .await?;
         }
-        Ok(json!({"shared": true}))
+        Ok(Seen { shared: true })
     }
 }
 

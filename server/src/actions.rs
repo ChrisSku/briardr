@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use thiserror::Error;
 use tokio::time::sleep;
 
@@ -43,53 +43,17 @@ pub fn expand_home(path: &str, home: &str) -> String {
     }
 }
 
-/// JS `String(v)` for a JSON value. Callers handle `undefined` themselves.
-pub(crate) fn js_string(v: &Value) -> String {
-    match v {
-        Value::Null => "null".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => match n.as_f64() {
-            Some(f) if n.is_f64() && f.fract() == 0.0 && f.abs() < 1e21 => (f as i128).to_string(),
-            Some(f) if n.is_f64() => f.to_string(),
-            _ => n.to_string(),
-        },
-        Value::String(s) => s.clone(),
-        Value::Array(items) => items
-            .iter()
-            .map(|i| {
-                if i.is_null() {
-                    String::new()
-                } else {
-                    js_string(i)
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(","),
-        Value::Object(_) => "[object Object]".to_string(),
-    }
-}
-
-/// JS truthiness of a JSON value.
-pub(crate) fn js_truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
-        Value::String(s) => !s.is_empty(),
-        _ => true,
-    }
-}
-
-/// JS `trim()` whitespace: Unicode Zs plus tab, line feeds, and U+FEFF. Rust's `trim` also strips U+0085.
-fn is_js_space(c: char) -> bool {
+/// Whitespace as the browser's `trim()` sees it, so text is trimmed as the client trims it: Unicode
+/// white space and U+FEFF, but not U+0085, which Rust's `trim` also strips.
+fn is_space(c: char) -> bool {
     c == '\u{feff}' || (c.is_whitespace() && c != '\u{85}')
 }
 
-fn js_trim(s: &str) -> &str {
-    s.trim_matches(is_js_space)
+fn trim(s: &str) -> &str {
+    s.trim_matches(is_space)
 }
 
-/// The longest prefix of `s` within `max` UTF-16 code units, as JS `slice(0, max)` cuts.
+/// The longest prefix of `s` within `max` UTF-16 code units, the units the client counts.
 fn utf16_prefix(s: &str, max: usize) -> &str {
     let mut units = 0;
     for (i, c) in s.char_indices() {
@@ -107,7 +71,7 @@ fn clean_text(raw: &str, max: usize) -> Option<String> {
         .chars()
         .filter(|&c| c > '\u{1f}' && c != '\u{7f}')
         .collect();
-    let out = utf16_prefix(js_trim(&stripped), max);
+    let out = utf16_prefix(trim(&stripped), max);
     (!out.is_empty()).then(|| out.to_string())
 }
 
@@ -193,21 +157,12 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// JS `Number(v)` as used for pane rectangles: anything that isn't a number becomes NaN.
-fn num(v: Option<&Value>) -> f64 {
-    v.and_then(Value::as_f64).unwrap_or(f64::NAN)
-}
-
-/// The value at `path`, or None where JS would read `undefined` (a missing key or a null parent).
-fn field(v: &Value, path: &[&str]) -> Option<Value> {
-    path.iter().try_fold(v, |cur, k| cur.get(*k)).cloned()
-}
-
-/// Sets `key` only when the value is defined, as JSON.stringify drops `undefined` keys.
-fn put(map: &mut Map<String, Value>, key: &str, value: Option<Value>) {
-    if let Some(v) = value {
-        map.insert(key.to_string(), v);
-    }
+/// The ID at `pointer` in Herdr's answer (`/pane/pane_id`), if there is one.
+fn id_at(answer: &Value, pointer: &str) -> Option<String> {
+    answer
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .map(String::from)
 }
 
 /// `POST /api/workspaces`: a workspace in a folder (the home folder when none is given), optionally named.
@@ -240,6 +195,175 @@ pub struct NewStream {
     /// Handed to the agent as an argument when it starts, never typed into its terminal.
     #[serde(default)]
     pub prompt: Option<String>,
+}
+
+/// `POST /api/workspaces`: the new workspace, its project and its first stream.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedWorkspace {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_id: Option<String>,
+    /// Whether the host's focused pane is still the one it was.
+    pub focus_unchanged: bool,
+}
+
+/// `POST /api/projects`: the new project and its first stream.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedProject {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_id: Option<String>,
+    pub focus_unchanged: bool,
+}
+
+/// `POST /api/streams`: the new stream, and what to tell the person when its agent didn't start as asked.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedStream {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_id: Option<String>,
+    pub note: Option<String>,
+    pub focus_unchanged: bool,
+}
+
+/// `POST /api/streams/:id/seen`: whether every Herdr client shares what was seen (the Herdr app's
+/// `herdr.seen` label), or only this client keeps it (Herdr TUI).
+#[derive(Debug, Serialize)]
+pub struct Seen {
+    pub shared: bool,
+}
+
+/// `GET /api/streams/:id/history`: the stream's last lines as text.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct History {
+    pub text: String,
+    /// More lines exist than were read.
+    pub truncated: bool,
+    pub lines: u64,
+    pub as_of: u64,
+}
+
+/// `GET /api/streams/:id/info`: the stream, and what Herdr says about its agent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamInfo {
+    pub stream: Stream,
+    pub agent: Option<AgentInfo>,
+    pub as_of: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInfo {
+    pub name: Option<String>,
+    /// The agent's kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    pub state_change_seq: Option<u64>,
+    /// "present" when Herdr knows the agent's session, never the session itself.
+    pub session: Option<&'static str>,
+}
+
+/// What `agent.get` says about a pane's agent.
+#[derive(Deserialize)]
+struct HerdrAgent {
+    name: Option<String>,
+    agent: Option<String>,
+    agent_status: Option<String>,
+    state_change_seq: Option<u64>,
+    agent_session: Option<AgentSession>,
+}
+
+#[derive(Deserialize)]
+struct AgentSession {
+    value: Option<String>,
+}
+
+impl From<HerdrAgent> for AgentInfo {
+    fn from(a: HerdrAgent) -> Self {
+        let session = a.agent_session.and_then(|s| s.value);
+        AgentInfo {
+            name: a.name,
+            agent: a.agent,
+            status: a.agent_status,
+            state_change_seq: a.state_change_seq,
+            session: session.is_some_and(|s| !s.is_empty()).then_some("present"),
+        }
+    }
+}
+
+/// Where Herdr's focus is (`session.snapshot`): what Briardr's actions must leave where it was.
+#[derive(PartialEq, Deserialize)]
+struct Focus {
+    focused_workspace_id: Option<String>,
+    focused_tab_id: Option<String>,
+    focused_pane_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Snapshot {
+    snapshot: Focus,
+}
+
+/// What `pane.layout` says about the panes of a tab.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PaneLayout {
+    layout: LayoutPanes,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct LayoutPanes {
+    panes: Vec<PaneRect>,
+}
+
+#[derive(Deserialize)]
+struct PaneRect {
+    pane_id: Option<String>,
+    rect: Option<Rect>,
+}
+
+/// A pane's size, in cells.
+#[derive(Deserialize)]
+struct Rect {
+    width: f64,
+    height: f64,
+}
+
+/// The largest pane by area, and its size; a tie keeps the earlier pane.
+fn largest(panes: &[PaneRect]) -> Option<(&PaneRect, &Rect)> {
+    let area = |r: &Rect| r.width * r.height;
+    panes
+        .iter()
+        .filter_map(|p| Some((p, p.rect.as_ref()?)))
+        .fold(None, |best, (p, r)| match best {
+            Some((_, kept)) if area(kept) >= area(r) => best,
+            _ => Some((p, r)),
+        })
+}
+
+/// What `pane.read` returns.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct PaneRead {
+    read: ReadText,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct ReadText {
+    text: Option<String>,
+    truncated: bool,
 }
 
 /// `GET /api/agents`: what a new stream can start, and how long its prompt can be.
@@ -301,7 +425,7 @@ fn prompt_args(prompt: &str) -> Vec<String> {
 /// A prompt as it's handed over: trimmed, and None when empty. Refused for what takes none, when too
 /// long, and with control characters, which Herdr TUI refuses in arguments (a line break included).
 fn clean_prompt(kind: &str, prompt: Option<&str>) -> Result<Option<String>, ActionError> {
-    let Some(prompt) = prompt.map(js_trim).filter(|p| !p.is_empty()) else {
+    let Some(prompt) = prompt.map(trim).filter(|p| !p.is_empty()) else {
         return Ok(None);
     };
     if !takes_prompt(kind) {
@@ -442,27 +566,16 @@ impl Actions {
             .map_err(|e| from_herdr(&e, &self.host))
     }
 
-    async fn focus_ids(&self) -> Result<String, ActionError> {
+    async fn focus(&self) -> Result<Focus, ActionError> {
         let s = self.call("session.snapshot", json!({})).await?;
-        let snap = s
-            .get("snapshot")
-            .filter(|v| v.is_object())
-            .ok_or_else(|| self.internal())?;
-        let part = |k: &str| {
-            snap.get(k)
-                .map_or_else(|| "undefined".to_string(), js_string)
-        };
-        Ok(format!(
-            "{}|{}|{}",
-            part("focused_workspace_id"),
-            part("focused_tab_id"),
-            part("focused_pane_id")
-        ))
+        serde_json::from_value::<Snapshot>(s)
+            .map(|s| s.snapshot)
+            .map_err(|_| self.internal())
     }
 
     /// The name of a pane's shell once it waits at its prompt (alone in the foreground, as Herdr wants
     /// it for starting an agent), or None if it doesn't by the deadline.
-    async fn pane_shell(&self, pane_id: &Option<Value>, deadline: Instant) -> Option<String> {
+    async fn pane_shell(&self, pane_id: &Option<String>, deadline: Instant) -> Option<String> {
         loop {
             let info = self
                 .call("pane.process_info", json!({ "pane_id": pane_id }))
@@ -482,9 +595,12 @@ impl Actions {
         }
     }
 
-    pub async fn create_workspace(&self, req: NewWorkspace) -> Result<Value, ActionError> {
+    pub async fn create_workspace(
+        &self,
+        req: NewWorkspace,
+    ) -> Result<CreatedWorkspace, ActionError> {
         let label = clean_label(req.name.as_deref());
-        let typed = match req.folder.as_deref().map(js_trim) {
+        let typed = match req.folder.as_deref().map(trim) {
             None | Some("") => "~",
             Some(t) => t,
         };
@@ -509,28 +625,24 @@ impl Actions {
         if let Some(c) = self.core() {
             return self.core_create_workspace(&c, label, cwd).await;
         }
-        let before = self.focus_ids().await?;
+        let before = self.focus().await?;
         let r = self
             .call(
                 "workspace.create",
                 json!({ "label": label, "cwd": cwd, "focus": false }),
             )
             .await?;
-        let after = self.focus_ids().await?;
+        let after = self.focus().await?;
         self.refresh().await?;
-        let mut out = Map::new();
-        put(
-            &mut out,
-            "workspaceId",
-            field(&r, &["workspace", "workspace_id"]),
-        );
-        put(&mut out, "projectId", field(&r, &["tab", "tab_id"]));
-        put(&mut out, "streamId", field(&r, &["root_pane", "pane_id"]));
-        out.insert("focusUnchanged".to_string(), json!(before == after));
-        Ok(Value::Object(out))
+        Ok(CreatedWorkspace {
+            workspace_id: id_at(&r, "/workspace/workspace_id"),
+            project_id: id_at(&r, "/tab/tab_id"),
+            stream_id: id_at(&r, "/root_pane/pane_id"),
+            focus_unchanged: before == after,
+        })
     }
 
-    pub async fn create_project(&self, req: NewProject) -> Result<Value, ActionError> {
+    pub async fn create_project(&self, req: NewProject) -> Result<CreatedProject, ActionError> {
         let model = self.herdr.model();
         let ws = model
             .as_ref()
@@ -544,7 +656,7 @@ impl Actions {
         if let Some(c) = self.core() {
             return self.core_create_project(&c, ws, label).await;
         }
-        let before = self.focus_ids().await?;
+        let before = self.focus().await?;
         let cwd = ws.cwd.as_deref().filter(|c| !c.is_empty());
         let r = self
             .call(
@@ -557,13 +669,13 @@ impl Actions {
                 }),
             )
             .await?;
-        let after = self.focus_ids().await?;
+        let after = self.focus().await?;
         self.refresh().await?;
-        let mut out = Map::new();
-        put(&mut out, "projectId", field(&r, &["tab", "tab_id"]));
-        put(&mut out, "streamId", field(&r, &["root_pane", "pane_id"]));
-        out.insert("focusUnchanged".to_string(), json!(before == after));
-        Ok(Value::Object(out))
+        Ok(CreatedProject {
+            project_id: id_at(&r, "/tab/tab_id"),
+            stream_id: id_at(&r, "/root_pane/pane_id"),
+            focus_unchanged: before == after,
+        })
     }
 
     /// The agents a new stream can start: Herdr TUI's kinds, Claude and Codex first. herdr-core has no
@@ -580,7 +692,7 @@ impl Actions {
         }
     }
 
-    pub async fn create_stream(&self, req: NewStream) -> Result<Value, ActionError> {
+    pub async fn create_stream(&self, req: NewStream) -> Result<CreatedStream, ActionError> {
         let kind = req.kind;
         if kind != "shell" && !self.agents().await.agents.iter().any(|a| a.kind == kind) {
             return Err(err(
@@ -626,35 +738,16 @@ impl Actions {
         let layout = self
             .call("pane.layout", json!({ "pane_id": first }))
             .await?;
-        let rects: &[Value] = layout
-            .get("layout")
-            .and_then(|l| l.get("panes"))
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        // The largest pane by area. A tie keeps the earlier pane, and NaN areas lose to any pane.
-        let mut biggest: Option<(&Value, f64)> = None;
-        for pane in rects {
-            let area = num(pane.pointer("/rect/width")) * num(pane.pointer("/rect/height"));
-            biggest = match biggest {
-                Some((kept, kept_area)) if kept_area >= area => Some((kept, kept_area)),
-                _ => Some((pane, area)),
-            };
-        }
-        let biggest_pane = biggest.map(|(p, _)| p);
-        let target = biggest_pane
-            .and_then(|p| p.get("pane_id"))
-            .and_then(Value::as_str)
+        let panes = serde_json::from_value::<PaneLayout>(layout)
+            .unwrap_or_default()
+            .layout
+            .panes;
+        let biggest = largest(&panes);
+        let target = biggest
+            .and_then(|(p, _)| p.pane_id.clone())
             .filter(|s| !s.is_empty())
-            .map(str::to_string)
             .unwrap_or(first);
-        let (width, height) = match biggest_pane
-            .and_then(|p| p.get("rect"))
-            .filter(|r| js_truthy(r))
-        {
-            Some(rect) => (num(rect.get("width")), num(rect.get("height"))),
-            None => (80.0, 24.0),
-        };
+        let (width, height) = biggest.map_or((80.0, 24.0), |(_, r)| (r.width, r.height));
         // Terminal cells are about twice as tall as wide: split side by side only when there's room.
         let direction = if width >= height * 2.2 {
             "right"
@@ -667,14 +760,14 @@ impl Actions {
             .find(|s| s.id == target)
             .and_then(|s| s.cwd.clone())
             .filter(|c| !c.is_empty());
-        let before = self.focus_ids().await?;
+        let before = self.focus().await?;
         let r = self
             .call(
                 "pane.split",
                 json!({ "target_pane_id": target, "direction": direction, "focus": false, "cwd": cwd }),
             )
             .await?;
-        let pane_id = field(&r, &["pane", "pane_id"]);
+        let pane_id = id_at(&r, "/pane/pane_id");
         let label = clean_label(req.name.as_deref());
         if let Some(label) = &label {
             self.call("pane.rename", json!({ "pane_id": pane_id, "label": label }))
@@ -736,17 +829,17 @@ impl Actions {
                 break;
             }
         }
-        let after = self.focus_ids().await?;
+        let after = self.focus().await?;
         self.refresh().await?;
-        let mut out = Map::new();
-        put(&mut out, "streamId", pane_id);
-        out.insert("note".to_string(), json!(note));
-        out.insert("focusUnchanged".to_string(), json!(before == after));
-        Ok(Value::Object(out))
+        Ok(CreatedStream {
+            stream_id: pane_id,
+            note,
+            focus_unchanged: before == after,
+        })
     }
 
     /// A stream without a name (None or empty) falls back to its tool's.
-    pub async fn rename(&self, stream_id: &str, name: Option<&str>) -> Result<Value, ActionError> {
+    pub async fn rename(&self, stream_id: &str, name: Option<&str>) -> Result<(), ActionError> {
         let known = self
             .herdr
             .model()
@@ -766,15 +859,10 @@ impl Actions {
             json!({ "pane_id": stream_id, "label": clean_label(name) }),
         )
         .await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
-    pub async fn rename_workspace(
-        &self,
-        id: &str,
-        name: Option<&str>,
-    ) -> Result<Value, ActionError> {
+    pub async fn rename_workspace(&self, id: &str, name: Option<&str>) -> Result<(), ActionError> {
         if !self.has(|m| m.workspaces.iter().any(|w| w.id == id)) {
             return Err(err(
                 404,
@@ -791,11 +879,10 @@ impl Actions {
             json!({ "workspace_id": id, "label": label }),
         )
         .await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
-    pub async fn rename_project(&self, id: &str, name: Option<&str>) -> Result<Value, ActionError> {
+    pub async fn rename_project(&self, id: &str, name: Option<&str>) -> Result<(), ActionError> {
         if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
             return Err(err(404, "project_gone", "That project no longer exists."));
         }
@@ -805,13 +892,12 @@ impl Actions {
         }
         self.call("tab.rename", json!({ "tab_id": id, "label": label }))
             .await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
     /// Closing stops what runs inside on the host; the client confirms first. Linked worktree
     /// workspaces are never closed along with this one: Herdr refuses, and says so.
-    pub async fn close_workspace(&self, id: &str) -> Result<Value, ActionError> {
+    pub async fn close_workspace(&self, id: &str) -> Result<(), ActionError> {
         if !self.has(|m| m.workspaces.iter().any(|w| w.id == id)) {
             return Err(err(
                 404,
@@ -824,11 +910,10 @@ impl Actions {
         }
         self.call("workspace.close", json!({ "workspace_id": id }))
             .await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
-    pub async fn close_project(&self, id: &str) -> Result<Value, ActionError> {
+    pub async fn close_project(&self, id: &str) -> Result<(), ActionError> {
         if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
             return Err(err(404, "project_gone", "That project no longer exists."));
         }
@@ -836,11 +921,10 @@ impl Actions {
             return self.core_close(|s| s.project_id == id).await;
         }
         self.call("tab.close", json!({ "tab_id": id })).await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
-    pub async fn close_stream(&self, id: &str) -> Result<Value, ActionError> {
+    pub async fn close_stream(&self, id: &str) -> Result<(), ActionError> {
         if !self.has(|m| m.streams.iter().any(|s| s.id == id)) {
             return Err(err(404, "stream_gone", "That stream no longer exists."));
         }
@@ -848,8 +932,7 @@ impl Actions {
             return self.core_close(|s| s.id == id).await;
         }
         self.call("pane.close", json!({ "pane_id": id })).await?;
-        self.refresh().await?;
-        Ok(Value::Null)
+        self.refresh().await
     }
 
     fn has(&self, found: impl FnOnce(&Model) -> bool) -> bool {
@@ -857,7 +940,11 @@ impl Actions {
     }
 
     /// The last `lines` lines: 1000 when none are asked for (or 0), and from 100 to 20 000.
-    pub async fn history(&self, stream_id: &str, lines: Option<i64>) -> Result<Value, ActionError> {
+    pub async fn history(
+        &self,
+        stream_id: &str,
+        lines: Option<i64>,
+    ) -> Result<History, ActionError> {
         let n = match lines {
             None | Some(0) => 1000,
             Some(n) => n.clamp(100, 20_000) as u64,
@@ -869,11 +956,12 @@ impl Actions {
                     json!({ "terminal": stream_id, "lines": n }),
                 )
                 .await?;
-            let text = r.get("text").and_then(Value::as_str).unwrap_or("");
-            let truncated = r.get("complete").and_then(Value::as_bool) == Some(false);
-            return Ok(
-                json!({ "text": text, "truncated": truncated, "lines": n, "asOf": now_ms() }),
-            );
+            return Ok(History {
+                text: r.get("text").and_then(Value::as_str).unwrap_or("").into(),
+                truncated: r.get("complete").and_then(Value::as_bool) == Some(false),
+                lines: n,
+                as_of: now_ms(),
+            });
         }
         let r = self
             .call(
@@ -881,61 +969,37 @@ impl Actions {
                 json!({ "pane_id": stream_id, "source": "recent_unwrapped", "lines": n, "format": "text" }),
             )
             .await?;
-        let read = r.get("read");
-        let text = match read.and_then(|x| x.get("text")) {
-            Some(t) if js_truthy(t) => js_string(t),
-            _ => String::new(),
-        };
-        let truncated = read.and_then(|x| x.get("truncated")).is_some_and(js_truthy);
-        Ok(json!({ "text": text, "truncated": truncated, "lines": n, "asOf": now_ms() }))
+        let read = serde_json::from_value::<PaneRead>(r)
+            .unwrap_or_default()
+            .read;
+        Ok(History {
+            text: read.text.unwrap_or_default(),
+            truncated: read.truncated,
+            lines: n,
+            as_of: now_ms(),
+        })
     }
 
-    pub async fn info(&self, stream_id: &str) -> Result<Value, ActionError> {
-        let model = self.herdr.model();
-        let stream = model
-            .as_ref()
-            .and_then(|m| m.streams.iter().find(|s| s.id == stream_id))
+    pub async fn info(&self, stream_id: &str) -> Result<StreamInfo, ActionError> {
+        let stream = self
+            .herdr
+            .model()
+            .and_then(|m| m.streams.into_iter().find(|s| s.id == stream_id))
             .ok_or_else(|| err(404, "stream_gone", "That stream no longer exists."))?;
-        let mut agent: Option<Value> = None;
+        let mut agent = None;
         if let (StreamKind::Agent, Backend::Tui(h)) = (stream.kind, self.herdr.backend()) {
             agent = h
                 .request("agent.get", json!({ "target": stream_id }))
                 .await
                 .ok()
-                .and_then(|r| r.get("agent").cloned())
-                .filter(js_truthy);
+                .and_then(|mut r| serde_json::from_value::<HerdrAgent>(r["agent"].take()).ok())
+                .map(AgentInfo::from);
         }
-        let agent_json = match agent {
-            None => Value::Null,
-            Some(a) => {
-                let or_null = |key: &str| {
-                    a.get(key)
-                        .filter(|v| !v.is_null())
-                        .cloned()
-                        .unwrap_or(Value::Null)
-                };
-                let session = a
-                    .get("agent_session")
-                    .and_then(|s| s.get("value"))
-                    .is_some_and(js_truthy);
-                let mut out = Map::new();
-                out.insert("name".to_string(), or_null("name"));
-                put(&mut out, "agent", a.get("agent").cloned());
-                put(&mut out, "status", a.get("agent_status").cloned());
-                out.insert("stateChangeSeq".to_string(), or_null("state_change_seq"));
-                out.insert(
-                    "session".to_string(),
-                    if session {
-                        json!("present")
-                    } else {
-                        Value::Null
-                    },
-                );
-                Value::Object(out)
-            }
-        };
-        let stream_json = serde_json::to_value(stream).map_err(|_| self.internal())?;
-        Ok(json!({ "stream": stream_json, "agent": agent_json, "asOf": now_ms() }))
+        Ok(StreamInfo {
+            stream,
+            agent,
+            as_of: now_ms(),
+        })
     }
 }
 
@@ -1024,6 +1088,58 @@ mod tests {
         assert_eq!((p.workspace_id, p.name), (None, None));
         assert!(serde_json::from_value::<NewWorkspace>(json!({"folder": 42})).is_err());
         assert!(serde_json::from_value::<NewProject>(json!({"workspaceId": 1})).is_err());
+    }
+
+    #[test]
+    fn a_new_stream_splits_the_largest_pane() {
+        let layout: PaneLayout = serde_json::from_value(json!({"layout": {"panes": [
+            {"pane_id": "a", "rect": {"x": 0, "y": 0, "width": 80, "height": 24}},
+            {"pane_id": "b", "rect": {"x": 80, "y": 0, "width": 120, "height": 40}},
+            {"pane_id": "c", "rect": {"x": 0, "y": 24, "width": 160, "height": 30}},
+            {"pane_id": "d"},
+        ]}}))
+        .unwrap();
+        let (pane, rect) = largest(&layout.layout.panes).unwrap();
+        assert_eq!(
+            (pane.pane_id.as_deref(), rect.width, rect.height),
+            (Some("b"), 120.0, 40.0),
+            "a tie (b and c) keeps the earlier pane"
+        );
+        assert!(largest(&[]).is_none());
+    }
+
+    #[test]
+    fn answers_keep_the_fields_the_client_reads() {
+        let created = CreatedWorkspace {
+            workspace_id: Some("w1".into()),
+            project_id: Some("w1:t1".into()),
+            stream_id: None,
+            focus_unchanged: true,
+        };
+        assert_eq!(
+            json!(created),
+            json!({"workspaceId": "w1", "projectId": "w1:t1", "focusUnchanged": true})
+        );
+        let herdr: HerdrAgent = serde_json::from_value(json!({
+            "name": "fix-login", "agent": "claude", "agent_status": "working", "state_change_seq": 4,
+            "agent_session": {"value": "c0ffee"}, "pane_id": "w1:p1",
+        }))
+        .unwrap();
+        assert_eq!(
+            json!(AgentInfo::from(herdr)),
+            json!({"name": "fix-login", "agent": "claude", "status": "working", "stateChangeSeq": 4, "session": "present"})
+        );
+        let bare: HerdrAgent = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(
+            json!(AgentInfo::from(bare)),
+            json!({"name": null, "stateChangeSeq": null, "session": null})
+        );
+        let read: PaneRead =
+            serde_json::from_value(json!({"read": {"text": "$ ls", "truncated": true}})).unwrap();
+        assert_eq!(
+            (read.read.text.as_deref(), read.read.truncated),
+            (Some("$ ls"), true)
+        );
     }
 
     #[test]

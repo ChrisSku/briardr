@@ -519,7 +519,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
     let p = power.clone();
     let first = blocking(move || lock(&p).start(keep_awake, now_ms())).await?;
     app.power_events(&first.events);
-    app.broadcast(&json!({"t": "mac", "mac": first.summary, "host": crate::app::caps_json(&caps)}));
+    app.broadcast(&json!({"t": "mac", "mac": first.summary, "host": caps}));
     if lock(&power).supported() {
         let a = app.clone();
         timers.push(tokio::spawn(async move {
