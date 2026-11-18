@@ -1,14 +1,15 @@
 <!-- Installing Briardr as an app (web/src/install.ts), and whether it opens offline (web/src/offline.ts). -->
 <script lang="ts">
+  import { isIOS, platform } from '../../device.ts';
   import { theHost } from '../../host.ts';
-  import { installPrompt, installSteps, justInstalled, launchHint, platform, promptInstall, standalone } from '../../install.ts';
+  import { installPrompt, installSteps, justInstalled, launchHint, promptInstall, standalone } from '../../install.ts';
   import { offline } from '../../offline.ts';
   import { navigate } from '../../router.ts';
   import { Icon } from '../../ui/icons/index.ts';
   import Section from './Section.svelte';
 
   const p = platform();
-  const apple = p === 'iphone' || p === 'ipad';
+  const apple = isIOS(p);
 </script>
 
 <Section id="install" title="Install app">

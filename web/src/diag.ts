@@ -68,7 +68,7 @@ export function exportClientLog(): string {
 }
 
 export function networkKind(): string {
-  const c = (navigator as any).connection;
+  const c = (navigator as { connection?: { type?: string; effectiveType?: string } }).connection;
   if (!c) return navigator.onLine ? 'online' : 'offline';
   return String(c.type || c.effectiveType || (navigator.onLine ? 'online' : 'offline')).toLowerCase().replace(/[^a-z0-9_-]/g, '');
 }

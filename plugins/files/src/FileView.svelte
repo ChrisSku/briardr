@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, Empty, Icon, type PluginContext, type Stream } from '@briardr/sdk';
+  import { Empty, errorMessage, Icon, type PluginContext, type Stream } from '@briardr/sdk';
   import { filesView, formatSize, HTML_EXT, IMAGE_EXT, languageLabel, languageOf, PDF_EXT, type FileText } from './files.ts';
   import FileIcon from './FileIcon.svelte';
   import PdfView from './PdfView.svelte';
@@ -99,7 +99,7 @@
       if (!keepScroll) requestAnimationFrame(() => scroller?.scrollTo(0, 0));
       else if (top) requestAnimationFrame(() => scroller && (scroller.scrollTop = top));
     } catch (e) {
-      if (p === path) error = e instanceof ApiError ? e.message : 'Couldn’t open this file.';
+      if (p === path) error = errorMessage(e, 'Couldn’t open this file.');
     }
   }
 

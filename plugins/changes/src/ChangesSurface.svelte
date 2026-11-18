@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
+  import { AsOf, Empty, errorMessage, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
   import { LETTER, markKey, reviewed, type ChangedFile, type Report, type Since } from './changes.ts';
   import Diff from './Diff.svelte';
   import { reviewOf } from './review.ts';
@@ -30,7 +30,7 @@
       if (!r.base) since = 'head';
       report = r;
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Couldn’t load changes.';
+      error = errorMessage(e, 'Couldn’t load changes.');
     } finally {
       loading = false;
     }

@@ -22,6 +22,7 @@ nothing else from Briardr: `{{briardr}}/plugins/<id>/`. They're the best example
 | `longPress(fn)` | Touch-and-hold (or right-click) handlers: `const lp = longPress(({ x, y }) => …)`, then `<div {...lp.handlers}>`. |
 | `ago(elapsedMs)`, `duration(ms)` | "just now", "5 min ago"; "2 h 5 min". |
 | `ApiError` | What failed requests throw: `message` (ready to show), `status`, `code`, `category` (`network`, `timeout`, `auth`, …), `data`. |
+| `errorMessage(e, fallback)` | What to show for something thrown: an `ApiError`'s `message`, or `fallback` for anything else. |
 | `persisted(key, initial)` | Reactive state kept on this device (`localStorage`): `.value`, read and assign. Prefix keys with your plugin ID. |
 | `state(initial)`, `derived(fn)` | Reactive state shared between modules (`.value`), for plain `.ts` files. |
 | `keyboardInset()` | `.current` is the on-screen keyboard's height (0 when hidden); CSS has it as `var(--kb)`. A `Sheet` and a scrolling surface already stay above the keyboard, and a focused field scrolls into view; use it for a layout that fills the screen, such as an editor. |
@@ -85,9 +86,11 @@ interface StreamContext extends PluginContext {
 }
 ```
 
-Failed requests throw an `ApiError` whose `message` is ready to show (`briardr.toast(e.message)`); it
-also has `status`, `code`, `category` and `data` (the response body). Show "Can't reach
-${briardr.host().the}" style messages for `network` and `timeout`, and keep showing the last data.
+Failed requests throw an `ApiError` whose `message` is ready to show
+(`briardr.toast(errorMessage(e, 'Couldn’t save.'))`); it also has `status`, `code`, `category` and `data`
+(the response body). Show "Can't reach ${briardr.host().the}" style messages for `network` and
+`timeout`, and keep showing the last data. Aborting `opts.signal` cancels a request (code `cancelled`), at
+once if it was aborted before the call; one signal can serve any number of requests.
 
 `terminal.send` returns false (and sends nothing) when this device doesn't control the terminal, the
 text is over `maxBytes` (128 KB), or, with `generation`, the terminal reconnected since you read it. Read

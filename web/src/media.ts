@@ -64,7 +64,7 @@ export class Recorder {
 
   async start(): Promise<void> {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-    const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+    const Ctx = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     this.ctx = new Ctx();
     this.rate = this.ctx.sampleRate;
     const src = this.ctx.createMediaStreamSource(this.stream);

@@ -1,7 +1,7 @@
 // Dictation: holding the key bar's Enter records speech until released, where the host transcribes it (a
 // Mac with its on-device speech helper). The text goes into the input line as one paste, never submitted,
 // and only on the connection the recording started on.
-import { api, ApiError } from '../../../api.ts';
+import { api, errorMessage } from '../../../api.ts';
 import { record } from '../../../diag.ts';
 import { Recorder } from '../../../media.ts';
 import { toast } from '../../../store.ts';
@@ -54,7 +54,7 @@ export class Dictation {
       record('dictation_done', { ms: Math.round(performance.now() - t0) });
       if (this.#ctl.paste(res.text, true, this.#generation)) toast('Dictation inserted. Edit, then press Enter.');
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Dictation failed.', 5000);
+      toast(errorMessage(e, 'Dictation failed.'), 5000);
     }
   };
 }

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { caps, theHost } from '../../host.ts';
   import { onMount } from 'svelte';
-  import { api, ApiError } from '../../api.ts';
-  import { standalone } from '../../install.ts';
+  import { api, errorMessage } from '../../api.ts';
+  import { isIOS } from '../../device.ts';
+  import { iosBrowserTab, standalone } from '../../install.ts';
   import { alertPrefs, checkPush, disablePush, enablePush, pushStatus, setAlertPrefs, type AlertChoice, type PushProblem } from '../../push.ts';
   import { minutesOf, timeOfDay } from '../../quiet-hours.ts';
   import { navigate } from '../../router.ts';
@@ -15,12 +16,12 @@
 
   let test = $state.raw<{ phase: string; detail?: string } | null>(null);
   let busy = $state(false);
-  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const ios = isIOS();
   const st = $derived(pushStatus.value);
   onMount(() => void checkPush());
 
   const PROBLEMS: Record<PushProblem, string> = {
-    blocked: isIOS ? 'Notifications are turned off for Briardr in Settings → Notifications on this device. Turn them on there; Briardr notices when you come back.' : 'Notifications are blocked for this site in the browser’s or system’s settings. Allow them there; Briardr notices when you come back.',
+    blocked: ios ? 'Notifications are turned off for Briardr in Settings → Notifications on this device. Turn them on there; Briardr notices when you come back.' : 'Notifications are blocked for this site in the browser’s or system’s settings. Allow them there; Briardr notices when you come back.',
     permission: 'This device no longer allows Briardr’s notifications. Allow them again to get alerts.',
     expired: 'This device’s notification subscription expired or was removed, so alerts can’t reach it.',
     key_changed: `Briardr on ${theHost()} has a new notification key, so this device’s subscription no longer works.`,
@@ -43,10 +44,20 @@
     if (!ok) toast(`Turned off on this device; ${theHost()} is told when it’s reachable.`);
   }
 
+  /** An alert sent to this device, as the host recorded it (`DeliveryRecord` in server/src/push.rs). */
+  interface Delivery {
+    id: string;
+    sentAt: number;
+    accepted: boolean | null;
+    statusCode: number | null;
+    deliveredAt: number | null;
+    error: string | null;
+  }
+
   async function sendTest() {
     test = { phase: 'Sending…' };
     try {
-      const r = await api<{ delivery: any }>('POST', '/api/notifications/test');
+      const r = await api<{ delivery: Delivery }>('POST', '/api/notifications/test');
       const d = r.delivery;
       if (!d.accepted) {
         void checkPush();
@@ -55,12 +66,12 @@
       test = { phase: 'Accepted by the push service', detail: 'Waiting for this device to confirm it arrived…' };
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 1000));
-        const q = await api<{ delivery: any }>('GET', `/api/notifications/deliveries/${d.id}`);
+        const q = await api<{ delivery: Delivery | null }>('GET', `/api/notifications/deliveries/${d.id}`);
         if (q.delivery?.deliveredAt) return (test = { phase: 'Delivered to this device', detail: `Confirmed ${((q.delivery.deliveredAt - q.delivery.sentAt) / 1000).toFixed(1)} s after sending.` });
       }
       test = { phase: 'Accepted, not confirmed', detail: 'The push service accepted it, but this device hasn’t confirmed receiving it. Briardr won’t claim it was delivered.' };
     } catch (e) {
-      test = { phase: 'Not sent', detail: e instanceof ApiError ? e.message : `Couldn’t reach ${theHost()}.` };
+      test = { phase: 'Not sent', detail: errorMessage(e, `Couldn’t reach ${theHost()}.`) };
     }
   }
 
@@ -79,7 +90,7 @@
     try {
       await setAlertPrefs(patch);
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Couldn’t save.');
+      toast(errorMessage(e, 'Couldn’t save.'));
     }
   }
   /** Quiet hours as first turned on: the night. */
@@ -88,9 +99,9 @@
 
 <Section id="notifications" title="Notifications">
   <ol class="steps">
-    <li class={standalone || !isIOS ? 'done' : ''}>
+    <li class={iosBrowserTab ? '' : 'done'}>
       <strong>Add Briardr to the Home Screen.</strong>
-      {#if !isIOS}
+      {#if !ios}
         Not required on this device.
       {:else if standalone}
         Done.
