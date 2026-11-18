@@ -64,7 +64,9 @@ description = "Check the dependencies for known advisories: the server's crates 
 run = """
 status=0
 cargo deny --manifest-path server/Cargo.toml --locked check advisories || status=1
-bun audit || status=1
+# GHSA-fc5q-39xc-vjpf: picomatch <=4.0.7 (ReDoS in extglobs), no fixed version yet. Only dev tooling uses it
+# (@changesets/cli, svelte-check's fdir), with globs from this repository, and nothing of it ships.
+bun audit --ignore GHSA-fc5q-39xc-vjpf || status=1
 exit $status
 """
 
