@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    action_err, caps_json, json_body, json_body_as, ok, response, send, str_or_empty, ApiError,
-    App, Ctx, Routes, VERSION,
+    action_err, caps_json, json_body_as, ok, response, send, ApiError, App, Ctx, RenameBody,
+    Routes, VERSION,
 };
 use crate::auth::{device_name, PairError};
 use crate::qr;
@@ -22,16 +22,6 @@ where
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|_| ApiError::Internal)
-}
-
-/// The error category the pairing API and diagnostics use (`PairResult.error`).
-fn pair_error_code(error: &PairError) -> &'static str {
-    match error {
-        PairError::NoCode => "no_code",
-        PairError::Expired => "expired",
-        PairError::Invalid => "invalid",
-        PairError::Locked => "locked",
-    }
 }
 
 /// What the pairing screen says for a refused code; `host` is "the Mac" or "the server".
@@ -51,9 +41,10 @@ fn device_gone() -> ApiError {
     action_err(404, "device_gone", "That device is no longer signed in.")
 }
 
-/// `POST /api/devices/:id/rename`; a missing or `null` name is refused like an empty one.
+/// `POST /api/pair`: the code shown on the host or another device, and the new device's name.
 #[derive(Deserialize)]
-struct RenameBody {
+struct PairBody {
+    code: Option<String>,
     name: Option<String>,
 }
 
@@ -119,16 +110,15 @@ pub(super) fn register(r: &mut Routes) {
                 &[],
             ));
         }
-        let b = json_body(&mut ctx, 4096).await?;
-        let code = str_or_empty(b.get("code"));
-        let name = str_or_empty(b.get("name"));
+        let b: PairBody = json_body_as(&mut ctx, 4096).await?;
+        let (code, name) = (b.code.unwrap_or_default(), b.name.unwrap_or_default());
         let auth = app.d.auth.clone();
         let result = blocking(move || auth.pair(&code, &name, &client)).await?;
         app.event(
             "pair_attempt",
             json!({
                 "ok": result.is_ok(),
-                "error": result.as_ref().err().map(pair_error_code),
+                "error": result.as_ref().err().map(PairError::code),
             }),
         );
         match result {
@@ -143,7 +133,7 @@ pub(super) fn register(r: &mut Routes) {
                 }
                 Ok(send(
                     400,
-                    &json!({"error": pair_error_code(&error), "message": pair_message(&error, &app.host())}),
+                    &json!({"error": error.code(), "message": pair_message(&error, &app.host())}),
                     &[],
                 ))
             }
@@ -222,6 +212,7 @@ pub(super) fn register(r: &mut Routes) {
         "/api/devices/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
+            // A missing or `null` name is refused like an empty one.
             let body: RenameBody = json_body_as(&mut ctx, 4096).await?;
             let Some(name) = body.name.as_deref().and_then(device_name) else {
                 return Err(action_err(400, "invalid_name", "Enter a name."));
@@ -306,11 +297,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pair_errors_map_to_ts_codes_and_messages() {
-        assert_eq!(pair_error_code(&PairError::NoCode), "no_code");
-        assert_eq!(pair_error_code(&PairError::Expired), "expired");
-        assert_eq!(pair_error_code(&PairError::Invalid), "invalid");
-        assert_eq!(pair_error_code(&PairError::Locked), "locked");
+    fn pair_errors_have_the_codes_and_messages_the_client_shows() {
+        assert_eq!(PairError::NoCode.code(), "no_code");
+        assert_eq!(PairError::Expired.code(), "expired");
+        assert_eq!(PairError::Invalid.code(), "invalid");
+        assert_eq!(PairError::Locked.code(), "locked");
         assert_eq!(
             pair_message(&PairError::NoCode, "the Mac"),
             "There’s no active pairing code. Create one on the Mac or from a signed-in device."

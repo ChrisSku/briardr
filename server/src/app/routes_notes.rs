@@ -2,16 +2,36 @@
 use std::sync::Arc;
 
 use axum::http::Method;
-use serde_json::{json, Value};
+use serde::Deserialize;
+use serde_json::json;
 
 use super::{
-    action_err, json_body, ok, response, send, stream_gone, upload_body, ApiError, App, Ctx, Resp,
-    Routes,
+    action_err, json_body_as, ok, response, send, stream_gone, upload_body, ApiError, App, Ctx,
+    Resp, Routes,
 };
 use crate::notes::{NotesError, SaveResult, MAX_NOTES};
 use crate::uploads::{UploadError, UploadKind};
 
 const NOTE_BODY_LIMIT: usize = 512 * 1024;
+
+/// `PUT /api/streams/:id/notes/:note`: the note's text, saved only over the revision it was edited from
+/// (0 for a new note).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteSave {
+    text: Option<String>,
+    base_revision: Option<u64>,
+}
+
+/// `POST /api/streams/:id/notes/paste`: the text to paste, a note or part of one.
+#[derive(Deserialize)]
+struct NotePaste {
+    text: Option<String>,
+}
+
+fn invalid_note() -> ApiError {
+    action_err(400, "invalid", "Invalid note")
+}
 
 /// `NOTE_ID`: 16 lowercase hex characters.
 fn note_id(id: &str) -> Result<String, ApiError> {
@@ -88,19 +108,10 @@ pub(super) fn register(r: &mut Routes) {
             let stream = ctx.param("id").to_string();
             require_stream(&app, &stream)?;
             let nid = note_id(ctx.param("note"))?;
-            let b = json_body(&mut ctx, NOTE_BODY_LIMIT).await?;
-            let invalid = || action_err(400, "invalid", "Invalid note");
-            let text = b
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or_else(invalid)?
-                .to_string();
-            // Number.isInteger(b.baseRevision) && b.baseRevision >= 0
-            let base = b
-                .get("baseRevision")
-                .and_then(Value::as_f64)
-                .filter(|n| n.fract() == 0.0 && *n >= 0.0 && n.is_finite())
-                .ok_or_else(invalid)? as u64;
+            let b: NoteSave = json_body_as(&mut ctx, NOTE_BODY_LIMIT).await?;
+            let (Some(text), Some(base)) = (b.text, b.base_revision) else {
+                return Err(invalid_note());
+            };
             let notes = app.d.notes.clone();
             let (s, n) = (stream.clone(), nid.clone());
             let result = blocking(move || notes.save(&s, Some(&n), &text, Some(base)))
@@ -162,12 +173,8 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, mut ctx: Ctx| async move {
             let stream = ctx.param("id").to_string();
             require_stream(&app, &stream)?;
-            let b = json_body(&mut ctx, NOTE_BODY_LIMIT).await?;
-            let text = b
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or_else(|| action_err(400, "invalid", "Invalid note"))?
-                .to_string();
+            let b: NotePaste = json_body_as(&mut ctx, NOTE_BODY_LIMIT).await?;
+            let text = b.text.ok_or_else(invalid_note)?;
             let notes = app.d.notes.clone();
             let pasted = blocking(move || notes.for_terminal(&stream, &text))
                 .await?
@@ -234,7 +241,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn note_ids_match_ts_pattern() {
+    fn a_saved_note_names_the_revision_it_was_edited_from() {
+        let b: NoteSave = serde_json::from_value(json!({"text": "hi", "baseRevision": 2})).unwrap();
+        assert_eq!((b.text.as_deref(), b.base_revision), (Some("hi"), Some(2)));
+        let b: NoteSave = serde_json::from_value(json!({"text": "hi"})).unwrap();
+        assert_eq!(b.base_revision, None, "refused as an invalid note");
+        for base in [json!(-1), json!(1.5), json!("2")] {
+            assert!(serde_json::from_value::<NoteSave>(
+                json!({"text": "hi", "baseRevision": base})
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn note_ids_are_16_lowercase_hex_characters() {
         assert!(note_id("0123456789abcdef").is_ok());
         assert!(note_id("0123456789ABCDEF").is_err());
         assert!(note_id("0123456789abcde").is_err());

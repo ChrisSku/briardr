@@ -63,6 +63,18 @@ pub enum PairError {
     Locked,
 }
 
+impl PairError {
+    /// The error the pairing API and diagnostics name it with.
+    pub fn code(&self) -> &'static str {
+        match self {
+            PairError::NoCode => "no_code",
+            PairError::Expired => "expired",
+            PairError::Invalid => "invalid",
+            PairError::Locked => "locked",
+        }
+    }
+}
+
 /// The devices file is the truth: `briardr revoke` changes it from another process while Briardr runs.
 /// Every Auth reads it again when it changed, and changes it only as it is on disk.
 #[derive(Debug)]

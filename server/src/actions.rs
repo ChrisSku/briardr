@@ -102,14 +102,6 @@ fn utf16_prefix(s: &str, max: usize) -> &str {
 }
 
 /// Label text: control characters removed, trimmed, cut to `max` UTF-16 code units, empty becomes None.
-fn clean_label(v: &Value, max: usize) -> Option<String> {
-    if v.is_null() {
-        return None;
-    }
-    clean_text(&js_string(v), max)
-}
-
-/// `clean_label` for text.
 fn clean_text(raw: &str, max: usize) -> Option<String> {
     let stripped: String = raw
         .chars()
@@ -119,9 +111,14 @@ fn clean_text(raw: &str, max: usize) -> Option<String> {
     (!out.is_empty()).then(|| out.to_string())
 }
 
+/// A label as Herdr takes it: at most 60 UTF-16 code units, None when there's none.
+fn clean_label(name: Option<&str>) -> Option<String> {
+    name.and_then(|n| clean_text(n, 60))
+}
+
 /// Herdr has no way to clear a workspace's or tab's label, so these need a name.
-fn required_label(v: &Value) -> Result<String, ActionError> {
-    clean_label(v, 60).ok_or_else(|| err(400, "invalid_name", "Enter a name."))
+fn required_label(name: Option<&str>) -> Result<String, ActionError> {
+    clean_label(name).ok_or_else(|| err(400, "invalid_name", "Enter a name."))
 }
 
 /// Node's `path.normalize` for POSIX paths: collapses separators, `.` and `..`, and keeps a trailing slash.
@@ -211,6 +208,23 @@ fn put(map: &mut Map<String, Value>, key: &str, value: Option<Value>) {
     if let Some(v) = value {
         map.insert(key.to_string(), v);
     }
+}
+
+/// `POST /api/workspaces`: a workspace in a folder (the home folder when none is given), optionally named.
+#[derive(Debug, Deserialize)]
+pub struct NewWorkspace {
+    pub name: Option<String>,
+    /// A path on the host; `~` and `~/…` are the home folder.
+    pub folder: Option<String>,
+}
+
+/// `POST /api/projects`: a project (Herdr's tab) in a workspace, optionally named.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewProject {
+    /// None, or one that doesn't exist, is `workspace_gone`.
+    pub workspace_id: Option<String>,
+    pub name: Option<String>,
 }
 
 /// `POST /api/streams`: a shell or an agent in a project, optionally named (Herdr TUI), and an agent's
@@ -468,20 +482,11 @@ impl Actions {
         }
     }
 
-    pub async fn create_workspace(
-        &self,
-        label_in: &Value,
-        cwd_in: &Value,
-    ) -> Result<Value, ActionError> {
-        let label = clean_label(label_in, 60);
-        let typed = if js_truthy(cwd_in) {
-            js_string(cwd_in)
-        } else {
-            String::new()
-        };
-        let typed = match js_trim(&typed) {
-            "" => "~",
-            t => t,
+    pub async fn create_workspace(&self, req: NewWorkspace) -> Result<Value, ActionError> {
+        let label = clean_label(req.name.as_deref());
+        let typed = match req.folder.as_deref().map(js_trim) {
+            None | Some("") => "~",
+            Some(t) => t,
         };
         let cwd = resolve(&expand_home(typed, &home_dir()));
         match tokio::fs::metadata(&cwd).await {
@@ -525,24 +530,19 @@ impl Actions {
         Ok(Value::Object(out))
     }
 
-    pub async fn create_project(
-        &self,
-        workspace_id: &Value,
-        label_in: &Value,
-    ) -> Result<Value, ActionError> {
+    pub async fn create_project(&self, req: NewProject) -> Result<Value, ActionError> {
         let model = self.herdr.model();
         let ws = model
             .as_ref()
             .and_then(|m| {
                 m.workspaces
                     .iter()
-                    .find(|w| workspace_id.as_str() == Some(w.id.as_str()))
+                    .find(|w| req.workspace_id.as_deref() == Some(w.id.as_str()))
             })
             .ok_or_else(|| err(404, "workspace_gone", "That workspace no longer exists."))?;
+        let label = clean_label(req.name.as_deref());
         if let Some(c) = self.core() {
-            return self
-                .core_create_project(&c, ws, clean_label(label_in, 60))
-                .await;
+            return self.core_create_project(&c, ws, label).await;
         }
         let before = self.focus_ids().await?;
         let cwd = ws.cwd.as_deref().filter(|c| !c.is_empty());
@@ -551,7 +551,7 @@ impl Actions {
                 "tab.create",
                 json!({
                     "workspace_id": ws.id,
-                    "label": clean_label(label_in, 60),
+                    "label": label,
                     "focus": false,
                     "cwd": cwd,
                 }),
@@ -675,7 +675,7 @@ impl Actions {
             )
             .await?;
         let pane_id = field(&r, &["pane", "pane_id"]);
-        let label = req.name.as_deref().and_then(|n| clean_text(n, 60));
+        let label = clean_label(req.name.as_deref());
         if let Some(label) = &label {
             self.call("pane.rename", json!({ "pane_id": pane_id, "label": label }))
                 .await?;
@@ -745,7 +745,8 @@ impl Actions {
         Ok(Value::Object(out))
     }
 
-    pub async fn rename(&self, stream_id: &str, label_in: &Value) -> Result<Value, ActionError> {
+    /// A stream without a name (None or empty) falls back to its tool's.
+    pub async fn rename(&self, stream_id: &str, name: Option<&str>) -> Result<Value, ActionError> {
         let known = self
             .herdr
             .model()
@@ -762,14 +763,18 @@ impl Actions {
         }
         self.call(
             "pane.rename",
-            json!({ "pane_id": stream_id, "label": clean_label(label_in, 60) }),
+            json!({ "pane_id": stream_id, "label": clean_label(name) }),
         )
         .await?;
         self.refresh().await?;
         Ok(Value::Null)
     }
 
-    pub async fn rename_workspace(&self, id: &str, label_in: &Value) -> Result<Value, ActionError> {
+    pub async fn rename_workspace(
+        &self,
+        id: &str,
+        name: Option<&str>,
+    ) -> Result<Value, ActionError> {
         if !self.has(|m| m.workspaces.iter().any(|w| w.id == id)) {
             return Err(err(
                 404,
@@ -777,7 +782,7 @@ impl Actions {
                 "That workspace no longer exists.",
             ));
         }
-        let label = required_label(label_in)?;
+        let label = required_label(name)?;
         if let Some(c) = self.core() {
             return self.core_rename(&c, id, &label).await;
         }
@@ -790,11 +795,11 @@ impl Actions {
         Ok(Value::Null)
     }
 
-    pub async fn rename_project(&self, id: &str, label_in: &Value) -> Result<Value, ActionError> {
+    pub async fn rename_project(&self, id: &str, name: Option<&str>) -> Result<Value, ActionError> {
         if !self.has(|m| m.projects.iter().any(|p| p.id == id)) {
             return Err(err(404, "project_gone", "That project no longer exists."));
         }
-        let label = required_label(label_in)?;
+        let label = required_label(name)?;
         if let Some(c) = self.core() {
             return self.core_rename(&c, id, &label).await;
         }
@@ -851,14 +856,11 @@ impl Actions {
         self.herdr.model().is_some_and(|m| found(&m))
     }
 
-    /// `lines` is the JS number from the request (NaN when missing or not a number).
-    pub async fn history(&self, stream_id: &str, lines: f64) -> Result<Value, ActionError> {
-        // Math.max(100, Math.min(20000, Math.round(lines) || 1000)); JS rounds .5 up.
-        let rounded = (lines + 0.5).floor();
-        let n = if rounded.is_nan() || rounded == 0.0 {
-            1000
-        } else {
-            rounded.clamp(100.0, 20000.0) as u64
+    /// The last `lines` lines: 1000 when none are asked for (or 0), and from 100 to 20 000.
+    pub async fn history(&self, stream_id: &str, lines: Option<i64>) -> Result<Value, ActionError> {
+        let n = match lines {
+            None | Some(0) => 1000,
+            Some(n) => n.clamp(100, 20_000) as u64,
         };
         if let Backend::Core(_) = self.herdr.backend() {
             let r = self
@@ -988,43 +990,40 @@ mod tests {
     }
 
     #[test]
-    fn clean_label_strips_controls_trims_and_caps() {
+    fn labels_lose_control_characters_are_trimmed_and_capped() {
         assert_eq!(
-            clean_label(&json!("  Hi\tthere\n"), 60),
+            clean_label(Some("  Hi\tthere\n")),
             Some("Hithere".to_string())
         );
-        assert_eq!(clean_label(&Value::Null, 60), None);
-        assert_eq!(clean_label(&json!(""), 60), None);
-        assert_eq!(clean_label(&json!("   "), 60), None);
-        assert_eq!(clean_label(&json!("\u{1}\u{7f}"), 60), None);
+        assert_eq!(clean_label(None), None);
+        assert_eq!(clean_label(Some("")), None);
+        assert_eq!(clean_label(Some("   ")), None);
+        assert_eq!(clean_label(Some("\u{1}\u{7f}")), None);
+        assert_eq!(clean_label(Some("\u{a0}x\u{feff}")), Some("x".to_string()));
+        // U+0085 is not whitespace to the browser, so it survives trimming.
+        assert_eq!(clean_label(Some("\u{85}x")), Some("\u{85}x".to_string()));
+        assert_eq!(clean_text("abcdef", 3), Some("abc".to_string()));
+        assert_eq!(clean_text("😀abc", 2), Some("😀".to_string()));
+        assert_eq!(clean_text("😀abc", 3), Some("😀a".to_string()));
+        assert_eq!(clean_label(Some(&"x".repeat(61))), Some("x".repeat(60)));
         assert_eq!(
-            clean_label(&json!("\u{a0}x\u{feff}"), 60),
-            Some("x".to_string())
+            required_label(Some(" \u{7} ")).unwrap_err().code,
+            "invalid_name"
         );
-        // U+0085 is not JS whitespace, so it survives trimming.
-        assert_eq!(
-            clean_label(&json!("\u{85}x"), 60),
-            Some("\u{85}x".to_string())
-        );
-        assert_eq!(clean_label(&json!("abcdef"), 3), Some("abc".to_string()));
-        assert_eq!(clean_label(&json!("😀abc"), 2), Some("😀".to_string()));
-        assert_eq!(clean_label(&json!("😀abc"), 3), Some("😀a".to_string()));
     }
 
     #[test]
-    fn clean_label_stringifies_like_js() {
-        assert_eq!(clean_label(&json!(42), 60), Some("42".to_string()));
-        assert_eq!(clean_label(&json!(1.0), 60), Some("1".to_string()));
-        assert_eq!(clean_label(&json!(1.5), 60), Some("1.5".to_string()));
-        assert_eq!(clean_label(&json!(true), 60), Some("true".to_string()));
+    fn workspace_and_project_requests_are_typed() {
+        let w: NewWorkspace =
+            serde_json::from_value(json!({"name": "api", "folder": "~/src"})).unwrap();
         assert_eq!(
-            clean_label(&json!(["a", null, 2]), 60),
-            Some("a,,2".to_string())
+            (w.name.as_deref(), w.folder.as_deref()),
+            (Some("api"), Some("~/src"))
         );
-        assert_eq!(
-            clean_label(&json!({}), 60),
-            Some("[object Object]".to_string())
-        );
+        let p: NewProject = serde_json::from_value(json!({"workspaceId": null})).unwrap();
+        assert_eq!((p.workspace_id, p.name), (None, None));
+        assert!(serde_json::from_value::<NewWorkspace>(json!({"folder": 42})).is_err());
+        assert!(serde_json::from_value::<NewProject>(json!({"workspaceId": 1})).is_err());
     }
 
     #[test]
@@ -1214,7 +1213,10 @@ mod tests {
             "/no-such-folder-for-actions-test"
         );
         let e = actions
-            .create_workspace(&json!("Work"), &json!(missing))
+            .create_workspace(NewWorkspace {
+                name: Some("Work".into()),
+                folder: Some(missing.into()),
+            })
             .await
             .unwrap_err();
         assert_eq!(e.status, 400);
@@ -1227,7 +1229,10 @@ mod tests {
         let (actions, _scratch) = offline("the Mac");
         let file = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
         let e = actions
-            .create_workspace(&Value::Null, &json!(file))
+            .create_workspace(NewWorkspace {
+                name: None,
+                folder: Some(file.into()),
+            })
             .await
             .unwrap_err();
         assert_eq!(e.status, 400);
@@ -1239,7 +1244,10 @@ mod tests {
     async fn lookups_fail_as_gone_before_herdr() {
         let (actions, _scratch) = offline("the server");
         let e = actions
-            .create_project(&json!("ws-1"), &Value::Null)
+            .create_project(NewProject {
+                workspace_id: Some("ws-1".into()),
+                name: None,
+            })
             .await
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
@@ -1253,19 +1261,16 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (400, "invalid_kind"));
-        let e = actions.rename("pane-1", &json!("x")).await.unwrap_err();
+        let e = actions.rename("pane-1", Some("x")).await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "stream_gone"));
         let e = actions.info("pane-1").await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "stream_gone"));
         let e = actions
-            .rename_workspace("w-1", &json!("x"))
+            .rename_workspace("w-1", Some("x"))
             .await
             .unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
-        let e = actions
-            .rename_project("p-1", &json!("x"))
-            .await
-            .unwrap_err();
+        let e = actions.rename_project("p-1", Some("x")).await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "project_gone"));
         let e = actions.close_workspace("w-1").await.unwrap_err();
         assert_eq!((e.status, e.code.as_str()), (404, "workspace_gone"));
