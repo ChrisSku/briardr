@@ -5,41 +5,25 @@
   above it, so a full-screen program (an agent with its input box at the bottom) lays itself out to
   fit. Until the new size arrives, the screen stays aligned to the bottom, keeping the input in view.
   If the Mac's screen is shorter than the view (watching), it's aligned to the bottom too.
+  Its parts are in surface/: fingers, the mouse and the wheel (pointer.ts), files dropped on it
+  (drop.svelte.ts), dictation (dictation.svelte.ts), who has control (OwnershipBanner.svelte), and the
+  sheets over it (Sheets.svelte), most opened from the + menu or a paste (insert-menu.ts).
 -->
-<script module lang="ts">
-  import { record } from '../../diag.ts';
-  import type { TerminalController } from '../../terminal/controller.ts';
-  import { confirmDialog } from '../../ui/kit.ts';
-
-  /** Takes control from another client after confirming; it switches to watching. */
-  export async function confirmTakeOver(ctl: TerminalController) {
-    const ok = await confirmDialog('Take over this stream?', takeOverBody, 'Take Over', true);
-    if (ok) {
-      record('term_takeover_confirmed', {});
-      ctl.connect('control', true);
-    }
-  }
-</script>
-
 <script lang="ts">
-  import { theHost } from '../../host.ts';
   import { onMount } from 'svelte';
-  import { api, errorMessage } from '../../api.ts';
-  import { Recorder } from '../../media.ts';
-  import { hardwareKeyboard, prefs, toast, topOverlay } from '../../store.ts';
+  import { keyboardInset } from '../../keyboard.svelte.ts';
+  import { hardwareKeyboard } from '../../store.ts';
   import { appOf } from '../../terminal/barkeys.ts';
-  import { logicalLineAt, wordAround } from '../../terminal/links.ts';
+  import type { TerminalController } from '../../terminal/controller.ts';
   import type { Outgoing } from '../../terminal/keys.ts';
   import type { Stream } from '../../types.ts';
-  import { Icon } from '../../ui/icons/index.ts';
-  import { openMenu, type MenuItem } from '../../ui/kit.ts';
-  import ComposeSheet from './ComposeSheet.svelte';
-  import { acceptsImages, droppedFiles, uploadItems, type UploadItem } from './insert.ts';
   import KeyBar from './keybar/KeyBar.svelte';
-  import { keyboardInset } from '../../keyboard.svelte.ts';
-  import PasteSheet from './PasteSheet.svelte';
-  import SelectTextSheet from './SelectTextSheet.svelte';
-  import UploadSheet from './UploadSheet.svelte';
+  import { Dictation } from './surface/dictation.svelte.ts';
+  import { FileDrop } from './surface/drop.svelte.ts';
+  import { insertMenu, pasted } from './surface/insert-menu.ts';
+  import OwnershipBanner from './surface/OwnershipBanner.svelte';
+  import { terminalPointer } from './surface/pointer.ts';
+  import Sheets, { type SurfaceSheet } from './surface/Sheets.svelte';
 
   interface Props {
     ctl: TerminalController;
@@ -61,14 +45,19 @@
     const safeBottom = wrap ? parseFloat(getComputedStyle(wrap).paddingBottom) || 0 : 0;
     return Math.max(0, kb.current - safeBottom);
   });
-  let sheet = $state.raw<null | { k: 'compose' } | { k: 'paste'; text: string } | { k: 'upload'; items: UploadItem[] } | { k: 'select'; text: string; start: number; end: number }>(null);
-  let dictating = $state(false);
-  let level = $state(0);
-  let rec: Recorder | null = null;
-  let dictGen = 0;
+  let sheet = $state.raw<SurfaceSheet | null>(null);
+  const open = (s: SurfaceSheet) => (sheet = s);
   const st = $derived(ctl.status.value);
   const controlling = $derived(st.ownership === 'controlling');
   let resized = $state(0); // bumped when the terminal takes a new size (e.g. the Mac's, while watching)
+
+  // The controller is this stream's for the surface's whole life (StreamScreen is keyed by stream).
+  // svelte-ignore state_referenced_locally
+  const pointer = terminalPointer(ctl, { keyBar: () => showKeyBar, open });
+  // svelte-ignore state_referenced_locally
+  const drop = new FileDrop(ctl, () => stream, (items) => open({ k: 'upload', items }));
+  // svelte-ignore state_referenced_locally
+  const dictation = new Dictation(ctl);
 
   // The on-screen keyboard showing means the touch screen is in use again, so the key bar comes back.
   $effect(() => {
@@ -78,12 +67,7 @@
   onMount(() => {
     ctl.mount(host, screen);
     const sizes = ctl.term.onResize(() => resized++);
-    // Paste from a hardware keyboard / context menu goes through review for files, directly for text.
-    ctl.onPaste = (p) => {
-      if ('file' in p) sheet = { k: 'upload', items: uploadItems([p.file]) };
-      else if (p.text.length > 2000 || p.text.includes('\n')) sheet = { k: 'paste', text: p.text };
-      else ctl.paste(p.text, prefs.value.bracketedPaste);
-    };
+    ctl.onPaste = (p) => pasted(ctl, p, open);
     // Physical keyboard detection on touch devices: a keydown while no on-screen keyboard is showing.
     const onKey = () => {
       if ('ontouchstart' in window && kb.current === 0 && document.activeElement === ctl.term.textarea) hardwareKeyboard.value = true;
@@ -93,7 +77,7 @@
       sizes.dispose();
       ctl.onPaste = null;
       window.removeEventListener('keydown', onKey, true);
-      endPress?.();
+      pointer.dispose();
     };
   });
 
@@ -106,355 +90,13 @@
     shift.style.transform = scale < 1 ? `scale(${scale})` : '';
   });
 
-  // ---------- gestures ----------
-  let g: { id: number; x: number; y: number; lastY: number; acc: number; cell: { col: number; row: number }; moved: boolean; t: number; long: number | null } | null = null;
-
-  const linkMenu = (url: string): MenuItem[] => [
-    { label: 'Open Link', icon: 'link', onSelect: () => openLink(url) },
-    { label: 'Copy Link', icon: 'copy', onSelect: () => copy(url, 'Link copied') },
-  ];
-
-  const textMenu = (row: number, col: number): MenuItem[] => {
-    const abs = ctl.term.buffer.active.viewportY + row;
-    return [
-      { label: 'Copy Line', icon: 'copy', onSelect: () => copy(logicalLineAt(ctl.term, abs).text.trimEnd(), 'Line copied') },
-      { label: 'Select Text…', icon: 'clipboard', onSelect: () => openSelect(row, col) },
-    ];
-  };
-
-  function openSelect(row: number, col: number) {
-    // A frozen copy of the screen: later output doesn't move the selection.
-    const buf = ctl.term.buffer.active;
-    const lines: string[] = [];
-    let offset = 0;
-    for (let r = 0; r < ctl.term.rows; r++) {
-      const line = buf.getLine(buf.viewportY + r);
-      const s = line ? line.translateToString(true) : '';
-      if (r === row) offset = lines.join('\n').length + (r ? 1 : 0) + Math.min(col, s.length);
-      lines.push(s);
-    }
-    const text = lines.join('\n');
-    const w = wordAround(text, offset);
-    sheet = { k: 'select', text, start: w.start, end: w.end };
-  }
-
-  const openLink = (url: string) => ctl.opts.onLink(url);
-
-  const copy = (text: string, msg: string) =>
-    navigator.clipboard.writeText(text).then(
-      () => toast(msg),
-      () => toast('Copying isn’t allowed here.'),
-    );
-
-  // ---------- mouse ----------
-  // As in a real terminal: a program that asked for the mouse gets clicks, drags and movement (Herdr drops
-  // them for one that didn't, so a shell never sees them), Shift keeps a drag from reaching the program,
-  // and the right button opens the menu, as it does in Herdr. Herdr doesn't say which programs asked, so
-  // the terminal's own selection is always there, and what it selects is copied on release, as in Herdr.
-  const modifiers = (e: MouseEvent) => (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0);
-  let endPress: (() => void) | null = null;
-  let hover = { col: -1, row: -1 };
-
-  function mousePress(e: PointerEvent) {
-    // On a Mac, Control-click is the right button.
-    const button = e.button === 0 && !(e.ctrlKey && navigator.platform.startsWith('Mac')) ? 'left' : e.button === 1 ? 'middle' : null;
-    if (!button) return;
-    endPress?.();
-    const send = !e.shiftKey;
-    let last = ctl.cellAt(e.clientX, e.clientY);
-    if (send) ctl.mouse('down', button, last.col, last.row, modifiers(e));
-    const move = (m: PointerEvent) => {
-      const c = ctl.cellAt(m.clientX, m.clientY);
-      if (c.col === last.col && c.row === last.row) return;
-      last = c;
-      if (send) ctl.mouse('drag', button, c.col, c.row, modifiers(m));
-    };
-    // On the window, so a drag that ends outside the terminal counts, and after xterm's own handler,
-    // so its selection is final. Copying has to happen in this event: Safari only allows it in one.
-    const up = (m: MouseEvent) => {
-      if (m.button !== e.button) return;
-      release(modifiers(m));
-      const sel = button === 'left' && ctl.term.getSelection();
-      if (sel) copy(sel, 'Copied');
-    };
-    const release = (mods: number) => {
-      endPress = null;
-      hover = last;
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('mouseup', up);
-      window.removeEventListener('blur', lost);
-      if (send) ctl.mouse('up', button, last.col, last.row, mods);
-    };
-    const lost = () => release(0); // the release will never come: don't leave the program mid-drag
-    endPress = lost;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('mouseup', up);
-    window.addEventListener('blur', lost);
-  }
-
-  function mouseMove(e: PointerEvent) {
-    if (endPress) return; // a drag, handled above
-    const c = ctl.cellAt(e.clientX, e.clientY);
-    if (c.col === hover.col && c.row === hover.row) return;
-    hover = c;
-    ctl.mouse('move', 'left', c.col, c.row, modifiers(e));
-  }
-
-  // On a touch screen the key bar's keyboard key opens and closes the on-screen keyboard: a tap opens a
-  // link and a swipe scrolls, both leaving the keyboard as it is. With the bar hidden for a hardware
-  // keyboard, where no on-screen one shows, a tap puts the focus in the terminal instead. iOS follows a
-  // tap with a mousedown, on which xterm would focus its input (opening the keyboard) or the page would
-  // take focus (closing it), so that mousedown stops here.
-  let lastPointer = 'mouse';
-  function onmousedowncapture(e: MouseEvent) {
-    if (lastPointer === 'mouse') return;
-    e.preventDefault();
-    e.stopPropagation();
-  }
-
-  function onpointerdown(e: PointerEvent) {
-    lastPointer = e.pointerType;
-    if (e.pointerType === 'mouse') return mousePress(e);
-    const cell = ctl.cellAt(e.clientX, e.clientY);
-    const long = window.setTimeout(() => {
-      const cur = g;
-      if (!cur || cur.moved) return;
-      cur.long = null;
-      g = null;
-      navigator.vibrate?.(10);
-      const link = ctl.linkAt(cell.col, cell.row);
-      openMenu(link ? linkMenu(link) : textMenu(cell.row, cell.col), { x: e.clientX, y: e.clientY }, link ? link : undefined);
-    }, 480);
-    g = { id: e.pointerId, x: e.clientX, y: e.clientY, lastY: e.clientY, acc: 0, cell, moved: false, t: Date.now(), long };
-  }
-
-  function onpointermove(e: PointerEvent) {
-    if (e.pointerType === 'mouse') return mouseMove(e);
-    const cur = g;
-    if (!cur || e.pointerId !== cur.id) return;
-    if (!cur.moved && Math.hypot(e.clientX - cur.x, e.clientY - cur.y) > 8) {
-      cur.moved = true;
-      if (cur.long) clearTimeout(cur.long);
-      cur.long = null;
-    }
-    if (!cur.moved) return;
-    const dy = e.clientY - cur.lastY;
-    cur.lastY = e.clientY;
-    cur.acc += dy;
-    const h = ctl.cell().h;
-    while (Math.abs(cur.acc) >= h) {
-      const dir = cur.acc > 0 ? 'up' : 'down'; // finger down → content scrolls up (wheel up)
-      cur.acc -= Math.sign(cur.acc) * h;
-      ctl.scroll(dir, cur.cell.col, cur.cell.row); // dropped (not queued) unless controlling
-    }
-  }
-
-  function onpointerup(e: PointerEvent) {
-    const cur = g;
-    g = null;
-    if (!cur || e.pointerId !== cur.id) return;
-    if (cur.long) clearTimeout(cur.long);
-    if (cur.moved) return;
-    const link = ctl.linkAt(cur.cell.col, cur.cell.row);
-    if (link) return openLink(link);
-    if (!showKeyBar) ctl.focus();
-  }
-
-  function onpointercancel() {
-    if (g?.long) clearTimeout(g.long);
-    g = null;
-  }
-
-  // Mouse / trackpad: wheel → one scroll event per row crossed, anchored at the pointer's cell.
-  // Captured before xterm sees it: with no scrollback, xterm would turn the wheel into arrow keys.
-  let wheelAcc = 0;
-  function onwheelcapture(e: WheelEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const h = ctl.cell().h;
-    wheelAcc += e.deltaMode === 1 ? e.deltaY * h : e.deltaY;
-    const cell = ctl.cellAt(e.clientX, e.clientY);
-    while (Math.abs(wheelAcc) >= h) {
-      const dir = wheelAcc < 0 ? 'up' : 'down';
-      wheelAcc -= Math.sign(wheelAcc) * h;
-      ctl.scroll(dir, cell.col, cell.row);
-    }
-  }
-
-  function oncontextmenu(e: MouseEvent) {
-    e.preventDefault();
-    const cell = ctl.cellAt(e.clientX, e.clientY);
-    const sel = ctl.term.getSelection();
-    const link = ctl.linkAt(cell.col, cell.row);
-    const items = link ? linkMenu(link) : textMenu(cell.row, cell.col);
-    if (sel) items.unshift({ label: 'Copy Selection', icon: 'copy', onSelect: () => copy(sel, 'Copied') });
-    openMenu(items, { x: e.clientX, y: e.clientY });
-  }
-
-  // ---------- + menu ----------
-  function pickFiles(accept: string, kind: 'image' | 'file') {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = accept;
-    input.multiple = true;
-    input.onchange = () => {
-      if (input.files?.length) sheet = { k: 'upload', items: Array.from(input.files, (file) => ({ file, kind })) };
-    };
-    input.click();
-  }
-
-  // ---------- files dropped on the terminal ----------
-  // Offered only to a terminal in your control: one you watch gets nothing, not even an upload.
-  let dropping = $state(false);
-  const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
-  function ondragover(e: DragEvent) {
-    if (!hasFiles(e)) return;
-    e.preventDefault(); // or the browser opens the file in place of Briardr
-    dropping = controlling && !stream.machine;
-  }
-  function ondragleave(e: DragEvent) {
-    // Moving onto the terminal's own parts leaves the host too.
-    if (!host.contains(e.relatedTarget as Node | null)) dropping = false;
-  }
-  function ondrop(e: DragEvent) {
-    if (!hasFiles(e)) return;
-    e.preventDefault();
-    dropping = false;
-    // An upload lands on this host, where a terminal on another machine can't open it.
-    if (stream.machine) return toast(`Files can’t be sent to a terminal on ${stream.machine}.`);
-    if (!controlling) return toast('Take control to send files.');
-    const { files, folders } = droppedFiles(e.dataTransfer!.items);
-    if (folders) toast('Folders can’t be sent, only files.');
-    if (files.length) sheet = { k: 'upload', items: uploadItems(files) };
-  }
-
-  async function pasteFromClipboard() {
-    try {
-      if ('read' in navigator.clipboard) {
-        const items = await navigator.clipboard.read();
-        for (const it of items) {
-          const img = it.types.find((t) => t.startsWith('image/'));
-          if (img) return (sheet = { k: 'upload', items: [{ file: await it.getType(img), kind: 'image' }] });
-        }
-      }
-      const text = await navigator.clipboard.readText();
-      sheet = { k: 'paste', text };
-    } catch {
-      sheet = { k: 'paste', text: '' };
-    }
-  }
-
-  function onPlus(anchor: HTMLElement) {
-    openMenu(
-      [
-        { label: 'Compose…', icon: 'pencil', onSelect: () => (sheet = { k: 'compose' }), hint: 'Write here, then insert' },
-        { label: 'Paste from clipboard', icon: 'clipboard', onSelect: pasteFromClipboard, hint: 'Text or image' },
-        { label: 'Paste text…', icon: 'clipboard', onSelect: () => (sheet = { k: 'paste', text: '' }) },
-        // An upload lands on this host, where a terminal on another machine can't open it.
-        ...(stream.machine
-          ? []
-          : [
-              { label: 'Select image…', icon: 'image' as const, onSelect: () => pickFiles('image/*', 'image'), hint: acceptsImages(stream) ? undefined : 'Inserts a path' },
-              { label: 'Select file…', icon: 'file' as const, onSelect: () => pickFiles('*/*', 'file') },
-            ]),
-      ],
-      anchor,
-      'Insert',
-    );
-  }
-
-  // ---------- dictation (hold Enter) ----------
-  async function dictateStart() {
-    if (!controlling) return toast('Take control to dictate.');
-    dictGen = ctl.generation.value;
-    const r = new Recorder();
-    rec = r;
-    try {
-      await r.start();
-      dictating = true;
-      const tick = () => {
-        if (rec !== r) return;
-        level = r.level;
-        requestAnimationFrame(tick);
-      };
-      tick();
-    } catch {
-      rec = null;
-      toast('Microphone access was denied. Allow it in Settings to dictate.');
-    }
-  }
-
-  async function dictateEnd(cancel: boolean) {
-    const r = rec;
-    rec = null;
-    dictating = false;
-    if (!r) return;
-    if (cancel) return r.cancel();
-    const wav = await r.stop();
-    const t0 = performance.now();
-    try {
-      const res = await api<{ text: string }>('POST', `/api/dictation?locale=${encodeURIComponent(navigator.language)}`, undefined, { raw: wav, headers: { 'content-type': 'audio/wav' }, timeout: 60_000 });
-      record('dictation_done', { ms: Math.round(performance.now() - t0) });
-      // One paste into the input line, never submitted, and only on the same connection.
-      if (ctl.paste(res.text, true, dictGen)) toast('Dictation inserted. Edit, then press Enter.');
-    } catch (e) {
-      toast(errorMessage(e, 'Dictation failed.'), 5000);
-    }
-  }
-
-  // ---------- ownership banners ----------
-  // Being in control is the normal case and isn't shown. Watching (another device has control) floats a
-  // banner under the header, with Take over; it can be dismissed until the state changes. Reconnecting and
-  // errors go in the overlay above the header (App shows it). Take control stays in the actions menu too.
-  const bannerKey = $derived(`${st.ownership}:${st.watchReason}`);
-  let dismissed = $state<string | null>(null);
-  $effect(() => {
-    if (!visible) return;
-    topOverlay.value = banner;
-    return () => {
-      if (topOverlay.value === banner) topOverlay.value = null;
-    };
-  });
-  const watching = $derived(st.ownership === 'watching' && dismissed !== bannerKey);
-  const contested = $derived(st.watchReason === 'busy' || st.watchReason === 'taken_over');
-  const watchText = $derived(
-    st.watchReason === 'busy'
-      ? 'Another window or device is in control'
-      : st.watchReason === 'taken_over'
-        ? 'Another window or device took control'
-        : st.watchReason === 'released'
-          ? `Handed back to ${theHost()}`
-          : 'Read-only until you take control',
-  );
-
   const isLive = $derived(controlling || st.ownership === 'watching');
   const showKeyBar = $derived(!hardwareKeyboard.value || compact);
 </script>
 
-{#snippet takeOverBody()}
-  <p>Another window or device is controlling this pane. Taking over moves control here and resizes the pane to fit. The other one will switch to watching.</p>
-{/snippet}
-
-{#snippet banner()}
-  {#if st.ownership === 'reconnecting'}
-    <div class="own-banner tone-warn" role="status">
-      <span>{st.message || 'Reconnecting…'} Showing the last screen.</span>
-      <button class="btn btn-small" onclick={() => ctl.retryNow()}>Retry now</button>
-    </div>
-  {:else if st.ownership === 'gone' || st.ownership === 'error'}
-    <div class="own-banner tone-error" role="alert">
-      <span>{st.message}</span>
-      {#if st.ownership === 'error'}
-        <button class="btn btn-small" onclick={() => location.reload()}>Reload</button>
-      {/if}
-    </div>
-  {/if}
-{/snippet}
-
 <div class={['term-surface', !visible && 'is-hidden']} aria-hidden={!visible} style:bottom={lift ? `${lift}px` : undefined}>
-  <!-- Pointer gestures on the terminal; the keyboard goes to xterm's own input. -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class={['term-host', !isLive && 'is-stale', dropping && 'is-drop']} bind:this={host} {ondragover} {ondragleave} {ondrop} {onpointerdown} {onpointermove} {onpointerup} {onpointercancel} {onmousedowncapture} {onwheelcapture} {oncontextmenu}>
+  <!-- Pointer gestures and drops on the terminal; the keyboard goes to xterm's own input. -->
+  <div class={['term-host', !isLive && 'is-stale', drop.over && 'is-drop']} bind:this={host} {...pointer.handlers} {...drop.handlers}>
     <div class="term-shift" bind:this={shift}>
       <div class="term-screen" bind:this={screen}></div>
     </div>
@@ -462,16 +104,7 @@
       <div class="stale-tag" role="status">Last seen screen · not live</div>
     {/if}
   </div>
-  {#if watching}
-    <div class="own-banner watch-banner" role="status">
-      <span class="watch-tile" aria-hidden="true"><Icon name="eye" size={18} /></span>
-      <span class="watch-text"><strong>Watching</strong><span>{watchText}</span></span>
-      <button class="btn btn-small btn-primary" onclick={() => (contested ? confirmTakeOver(ctl) : ctl.connect('control', false))}>{contested ? 'Take over' : 'Take control'}</button>
-      <button class="icon-btn" aria-label="Dismiss" onclick={() => (dismissed = bannerKey)}>
-        <Icon name="close" size={16} />
-      </button>
-    </div>
-  {/if}
+  <OwnershipBanner {ctl} {visible} />
   {#if showKeyBar}
     <div class={['keybar-wrap', kb.current && 'is-on-keyboard']} bind:this={wrap}>
       <KeyBar
@@ -480,16 +113,13 @@
         keyboardOpen={kb.current > 0}
         onKeyboard={() => (kb.current ? ctl.blur() : ctl.focus())}
         send={(o: Outgoing) => ctl.input(o)}
-        {onPlus}
-        onDictateStart={dictateStart}
-        onDictateEnd={dictateEnd}
-        {dictating}
-        {level}
+        onPlus={(anchor) => insertMenu(anchor, stream, open)}
+        onDictateStart={dictation.start}
+        onDictateEnd={dictation.end}
+        dictating={dictation.active}
+        level={dictation.level}
       />
     </div>
   {/if}
-  {#if sheet?.k === 'compose'}<ComposeSheet {ctl} {stream} onClose={() => (sheet = null)} />{/if}
-  {#if sheet?.k === 'paste'}<PasteSheet {ctl} {stream} initial={sheet.text} onClose={() => (sheet = null)} />{/if}
-  {#if sheet?.k === 'upload'}<UploadSheet {ctl} {stream} items={sheet.items} onClose={() => (sheet = null)} />{/if}
-  {#if sheet?.k === 'select'}<SelectTextSheet text={sheet.text} start={sheet.start} end={sheet.end} onClose={() => (sheet = null)} />{/if}
+  <Sheets {ctl} {stream} {sheet} onClose={() => (sheet = null)} />
 </div>

@@ -36,10 +36,10 @@ keeps its Cargo build outside the checkout and configures the service with the r
 
 | Rule | Implementation | Verification |
 | --- | --- | --- |
-| Never queue/replay terminal input while connecting or disconnected. | `server/src/terminal_hub.rs`, `web/src/terminal/controller.ts` | `test/terminal.test.ts`, `test-ui/interactions.test.ts` |
+| Never queue/replay terminal input while connecting or disconnected. | `server/src/terminal_hub.rs`, `web/src/terminal/controller.ts`, `web/src/socket.ts` | `test/terminal.test.ts`, `test/socket.test.ts`, `test-ui/interactions.test.ts` |
 | Never start a herdr-core (it would hand Briardr's environment to every terminal); change the Herdr app's layout only as the app does, over the version read. | `server/src/herdr/core/` | `test/core.test.ts`, Rust core tests |
 | A terminal on another machine never has its files looked for on this host. | `App::stream_with_folder`, `App::stream_here`, plugin tabs marked `local` | `test/core.test.ts` |
-| No silent takeover; Peek never resizes; leaving/backgrounding releases control. | Terminal hub, `server/src/herdr/stream.rs`, `StreamScreen.svelte` | Terminal and interaction suites |
+| No silent takeover; Peek never resizes; leaving/backgrounding releases control. | Terminal hub, `server/src/herdr/stream.rs`, `StreamScreen.svelte`, `stream/surface/OwnershipBanner.svelte` | Terminal and interaction suites |
 | Git review uses read-only commands and does not take an index lock. | `server/src/git.rs` | Rust Git unit tests, `test/surfaces.test.ts` |
 | Private APIs and WebSockets require a paired device; Host, Origin, and peer checks apply. | `server/src/app.rs`, `auth.rs`, `net.rs` | `test/auth.test.ts`, `test/linux.test.ts` |
 | Public proxy mode trusts configured proxies and isolates preview origins. | `server/src/app.rs`, `net.rs`, `preview.rs` | `test/linux.test.ts` |

@@ -13,7 +13,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use reqwest::header::{ACCEPT, USER_AGENT};
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::app::VERSION;
@@ -328,6 +329,31 @@ struct Known {
     error: Option<String>,
 }
 
+/// `GET /api/update`: this version, the latest release the last check found, and how to update to it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatus {
+    pub current: &'static str,
+    pub latest: Option<String>,
+    /// The latest is newer than this one.
+    pub available: bool,
+    pub checked_at: Option<u64>,
+    /// What went wrong at the last check.
+    pub error: Option<String>,
+    /// Whether Briardr checks once a day (`updates.check`).
+    pub check: bool,
+    /// A release installation, which can update itself.
+    pub can_install: bool,
+    pub how: Option<String>,
+    /// The command that updates another kind of installation.
+    pub command: Option<String>,
+    /// Whether a service manager starts Briardr again after an update.
+    pub restarts: bool,
+    pub installing: bool,
+    /// The release notes of the newer version.
+    pub notes: Option<String>,
+}
+
 /// The server's side: the last check, an install in progress, and the restart that follows one.
 pub struct Updates {
     source: Source,
@@ -377,7 +403,7 @@ impl Updates {
     }
 
     /// The status Settings → About shows; `check` is the `updates.check` setting.
-    pub fn status(&self, check: bool) -> Value {
+    pub fn status(&self, check: bool) -> UpdateStatus {
         let known = self.known();
         let latest = known.latest.clone();
         let available = latest.as_deref().is_some_and(|l| is_newer(l, VERSION));
@@ -386,20 +412,20 @@ impl Updates {
             .filter(|_| available)
             .and_then(|l| how_to_update(&this_installation(), l));
         let (how, command) = how.map_or((None, None), |(how, command)| (Some(how), Some(command)));
-        json!({
-            "current": VERSION,
-            "latest": latest,
-            "available": available,
-            "checkedAt": known.checked_at,
-            "error": known.error,
-            "check": check,
-            "canInstall": matches!(this_installation(), Installation::Release(_)),
-            "how": how,
-            "command": command,
-            "restarts": self.supervisor.is_some(),
-            "installing": self.installing.load(Ordering::SeqCst),
-            "notes": latest.as_deref().filter(|_| available).map(notes_url),
-        })
+        UpdateStatus {
+            current: VERSION,
+            notes: latest.as_deref().filter(|_| available).map(notes_url),
+            latest,
+            available,
+            checked_at: known.checked_at,
+            error: known.error.clone(),
+            check,
+            can_install: matches!(this_installation(), Installation::Release(_)),
+            how,
+            command,
+            restarts: self.supervisor.is_some(),
+            installing: self.installing.load(Ordering::SeqCst),
+        }
     }
 
     /// Installs `version`, which must be the newer release the last check found. True when Briardr will

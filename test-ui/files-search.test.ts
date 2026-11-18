@@ -53,6 +53,9 @@ for (const profile of ['iphone', 'mac'] as const) {
       const src = page.getByRole('button', { name: 'src, folder', exact: true });
       await src.click();
       await page.getByRole('button', { name: 'needle.ts', exact: true }).waitFor();
+      // The plugin's own <style> rules apply, although its code is a chunk loaded on demand: the icon
+      // keeps its size in a narrow row (flex: none).
+      assert.equal(await src.locator('.file-icon').evaluate((e) => getComputedStyle(e).flexShrink), '0');
       const input = page.getByRole('searchbox', { name: 'Search files by filename' });
       await input.fill('NEEDLE');
       await page.getByRole('status').filter({ hasText: '3 files found' }).waitFor();

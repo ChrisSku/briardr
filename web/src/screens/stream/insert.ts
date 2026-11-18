@@ -15,6 +15,19 @@ export interface UploadItem {
 }
 export const uploadItems = (files: Iterable<File>): UploadItem[] => Array.from(files, (file) => ({ file, kind: file.type.startsWith('image/') ? 'image' : 'file' }));
 
+/** A paste from the keyboard or the context menu is reviewed first when it's long or has line breaks; a
+ *  short line goes in as it is. */
+export const reviewsPaste = (text: string) => text.length > 2000 || text.includes('\n');
+
+/** Why files dropped on a stream's terminal aren't offered for sending, or null when they are. An upload
+ *  lands on this host, where a terminal on another machine can't open it, and a terminal you watch gets
+ *  nothing, not even an upload. */
+export function dropRefusal(s: Pick<Stream, 'machine'>, controlling: boolean): string | null {
+  if (s.machine) return `Files can’t be sent to a terminal on ${s.machine}.`;
+  if (!controlling) return 'Take control to send files.';
+  return null;
+}
+
 /** The files in a drop, and how many folders it had: a folder comes as a file the browser can't read. */
 export function droppedFiles(items: Iterable<Pick<DataTransferItem, 'kind' | 'getAsFile' | 'webkitGetAsEntry'>>): { files: File[]; folders: number } {
   const files: File[] = [];

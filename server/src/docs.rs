@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use serde::Serialize;
 use thiserror::Error;
 
 pub const MAX_DOCS: usize = 200;
@@ -72,7 +73,7 @@ impl DocsError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocEntry {
     pub path: String,
     pub name: String,
@@ -88,7 +89,7 @@ pub struct DocList {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocText {
     pub path: String,
     pub text: String,
@@ -107,8 +108,8 @@ pub fn resolve_inside(folder: &Path, rel: &str) -> Result<PathBuf, DocsError> {
         return Err(DocsError::Outside("Invalid path"));
     }
     let root = fs::canonicalize(folder)?;
-    // Lexical normalization first, as Node's path.resolve does, so `link/../x` resolves the same
-    // way the docs API resolves it.
+    // Lexical normalization first, so `link/../x` is the folder's `x` wherever the link points, as the
+    // docs API has always resolved it.
     let candidate = normalize_lexically(&root.join(rel));
     let real = fs::canonicalize(&candidate).map_err(|_| DocsError::NotFound("File not found"))?;
     if !real.starts_with(&root) {
@@ -265,8 +266,8 @@ pub(crate) fn locale_compare(a: &str, b: &str) -> Ordering {
         .then_with(|| a.cmp(b))
 }
 
-/// Mirrors Node's path.resolve normalization: `.` is dropped and `..` pops a segment.
-fn normalize_lexically(path: &Path) -> PathBuf {
+/// The path with `.` dropped and each `..` popping a segment, without the disk: a link isn't followed.
+pub fn normalize_lexically(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
@@ -303,6 +304,18 @@ fn image_type(rel: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+
+    #[test]
+    fn paths_are_normalized_without_the_disk() {
+        assert_eq!(
+            normalize_lexically(&Path::new("/repo").join("src/../docs/./a.md")),
+            PathBuf::from("/repo/docs/a.md")
+        );
+        assert_eq!(
+            normalize_lexically(Path::new("/w/dist/./../../../x")),
+            PathBuf::from("/x")
+        );
+    }
 
     fn write(path: &Path, bytes: &[u8]) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -388,9 +401,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn resolve_matches_node_lexical_dotdot_through_a_symlink() {
-        // Node's path.resolve turns `linkdir/../a.md` into `root/a.md` before realpath, so the
-        // docs API accepts it. The kernel would resolve `linkdir/..` to the link's parent instead.
+    fn dot_dot_after_a_link_is_resolved_lexically() {
+        // `linkdir/../a.md` is `root/a.md` before the link is followed, so the docs API accepts it. The kernel would resolve `linkdir/..` to the link's parent instead.
         let (base, root) = layout();
         write(&root.join("a.md"), b"x");
         std::os::unix::fs::symlink(base.path(), root.join("linkdir")).unwrap();

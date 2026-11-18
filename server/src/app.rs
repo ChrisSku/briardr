@@ -23,7 +23,8 @@ use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Number, Value};
 use tokio::sync::mpsc;
 
 use crate::actions::{from_herdr, ActionError, Actions};
@@ -32,17 +33,20 @@ use crate::config::{
     lock_for, preview_origins, read_config, save_config, BriardrConfig, ConfigError, Paths,
 };
 use crate::diag::Diagnostics;
+use crate::docs::normalize_lexically;
 use crate::herdr::backend::Herdr;
+use crate::herdr::model::Model;
 use crate::herdr::rpc::HerdrError;
-use crate::herdr::state::{HerdrEvent, HerdrReader};
+use crate::herdr::state::{HerdrEvent, HerdrHealth, HerdrReader, Transition};
 use crate::net::{forwarded_client, is_allowed_peer, is_trusted_proxy};
 use crate::notes::Notes;
 use crate::platform::{HostCapabilities, HostPlatform};
+use crate::plugins::PluginInfo;
 use crate::power::{MacSummary, Power, PowerEvent};
 use crate::preview::Previews;
 use crate::push::Push;
-use crate::static_files::static_file;
-use crate::terminal_hub::{TerminalHub, PROTOCOL};
+use crate::static_files::{extname, static_file};
+use crate::terminal_hub::{speaks_protocol, TerminalHub};
 use crate::usage::Usage;
 
 mod routes_misc;
@@ -52,7 +56,7 @@ mod routes_session;
 mod routes_streams;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Bun's maxPayloadLength for WebSocket messages.
+/// The largest WebSocket message a client may send (an input or a paste is at most 128K characters).
 pub const MAX_WS_MESSAGE: usize = 512 * 1024;
 /// Default limit for JSON request bodies.
 pub const JSON_LIMIT: usize = 1024 * 1024;
@@ -73,24 +77,6 @@ pub fn the_host(caps: &HostCapabilities) -> String {
     } else {
         "the server".to_string()
     }
-}
-
-/// The capabilities object the client sees (`host` in /api/session, /api/mac, settings, live `mac`).
-pub fn caps_json(caps: &HostCapabilities) -> Value {
-    let platform = match caps.platform {
-        HostPlatform::Macos => "macos",
-        HostPlatform::Linux => "linux",
-        HostPlatform::Other => "other",
-    };
-    json!({
-        "platform": platform,
-        "noun": caps.noun,
-        "battery": caps.battery,
-        "keepAwake": caps.keep_awake,
-        "sleep": caps.sleep,
-        "dictation": caps.dictation,
-        "claudeKeychain": caps.claude_keychain,
-    })
 }
 
 // ---------- errors ----------
@@ -160,8 +146,8 @@ pub fn response(status: u16, body: impl Into<Body>, headers: &[(&str, String)]) 
     res
 }
 
-/// `this.send`: JSON with `no-store`, plus extra headers.
-pub fn send(status: u16, body: &Value, extra: &[(&str, String)]) -> Resp {
+/// `body` as JSON with `no-store`, plus extra headers.
+pub fn send(status: u16, body: &impl Serialize, extra: &[(&str, String)]) -> Resp {
     let mut headers = vec![
         (
             "content-type",
@@ -170,14 +156,68 @@ pub fn send(status: u16, body: &Value, extra: &[(&str, String)]) -> Resp {
         ("cache-control", "no-store".to_string()),
     ];
     headers.extend(extra.iter().cloned());
-    response(status, body.to_string(), &headers)
+    match serde_json::to_vec(body) {
+        Ok(json) => response(status, json, &headers),
+        // Only a map whose keys aren't text fails, and the API's types have none.
+        Err(_) => response(500, Body::empty(), &[]),
+    }
 }
 
-pub fn ok(body: Value) -> Result<Resp, ApiError> {
+pub fn ok(body: impl Serialize) -> Result<Resp, ApiError> {
     Ok(send(200, &body, &[]))
 }
 
-/// The response Bun's `error` handler gives for an exception outside the route try/catch.
+/// `{ok}`: whether it was done, from a route that has nothing else to say.
+#[derive(Serialize)]
+pub struct Done {
+    pub ok: bool,
+}
+
+pub fn done() -> Result<Resp, ApiError> {
+    ok(Done { ok: true })
+}
+
+/// What a refused request says: its code and, for people, what went wrong.
+#[derive(Serialize)]
+pub struct ErrorBody<'a> {
+    pub error: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<&'a str>,
+}
+
+/// A refusal with its code and message.
+pub fn refuse(status: u16, error: &str, message: &str) -> Resp {
+    send(
+        status,
+        &ErrorBody {
+            error,
+            message: Some(message),
+        },
+        &[],
+    )
+}
+
+/// A refusal with only its code.
+pub fn refuse_code(status: u16, error: &str) -> Resp {
+    send(
+        status,
+        &ErrorBody {
+            error,
+            message: None,
+        },
+        &[],
+    )
+}
+
+/// `GET /api/…` of a built-in plugin that is off.
+#[derive(Serialize)]
+struct PluginDisabled<'a> {
+    error: &'static str,
+    plugin: &'a str,
+    message: &'static str,
+}
+
+/// The plain-text 500 for a request that fails before it reaches a route.
 fn server_error(host: &str) -> Resp {
     response(
         500,
@@ -242,7 +282,7 @@ pub fn security_headers(
     ]
 }
 
-/// `s.replace(/:\d+$/, '')`.
+/// A host without its port (`:` and digits at the end).
 fn strip_port(host: &str) -> &str {
     match host.rfind(':') {
         Some(i) if i + 1 < host.len() && host[i + 1..].bytes().all(|b| b.is_ascii_digit()) => {
@@ -256,7 +296,7 @@ fn strip_port(host: &str) -> &str {
 fn host_name(host: &str) -> String {
     let host = host.to_lowercase();
     if let Some(rest) = host.strip_prefix('[') {
-        // host.slice(1, host.indexOf(']')); a missing ']' gives slice(1, -1).
+        // `[::1]:7443` is `::1`; without the `]`, the last character is dropped all the same.
         match rest.find(']') {
             Some(i) => rest[..i].to_string(),
             None => {
@@ -284,7 +324,7 @@ fn is_loopback_name(name: &str) -> bool {
 /// Read a request body, refusing it as soon as it grows past the limit (413 `too_large`).
 pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<Vec<u8>, ApiError> {
     let too_large = || action_err(413, "too_large", "Request too large");
-    if js_number(header_str(headers, "content-length").unwrap_or("0")) > limit as f64 {
+    if declared_length(headers) > limit as u64 {
         return Err(too_large());
     }
     let mut body = body;
@@ -299,11 +339,6 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
         }
     }
     Ok(out)
-}
-
-/// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
-pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
-    json_body_as(ctx, limit).await
 }
 
 /// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
@@ -328,14 +363,14 @@ pub async fn upload_body(
 ) -> Result<Vec<u8>, crate::uploads::UploadError> {
     use crate::uploads::UploadError;
     let max = UploadError::max_bytes(kind);
-    let declared = js_number(header_str(&ctx.headers, "content-length").unwrap_or("0"));
-    if declared > max as f64 {
+    let declared = declared_length(&ctx.headers);
+    if declared > max {
         return Err(UploadError::DeclaredTooLarge(kind));
     }
     let mut body = std::mem::replace(&mut ctx.body, Body::empty());
     let mut out = Vec::new();
     while let Some(frame) = body.frame().await {
-        // Bun reports a dropped client as an aborted request; hyper as a body error.
+        // A client that went away shows as a body error.
         let frame = frame.map_err(|_| UploadError::Cancelled)?;
         if let Ok(data) = frame.into_data() {
             if (out.len() + data.len()) as u64 > max {
@@ -344,7 +379,7 @@ pub async fn upload_body(
             out.extend_from_slice(&data);
         }
     }
-    if declared > 0.0 && (out.len() as f64) < declared {
+    if declared > 0 && (out.len() as u64) < declared {
         return Err(UploadError::Cancelled);
     }
     Ok(out)
@@ -354,54 +389,49 @@ pub fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
 
-/// JS `Number(s)` for header and query values: trimmed decimal, empty = 0, anything else NaN.
-pub fn js_number(s: &str) -> f64 {
-    let t = s.trim();
-    if t.is_empty() {
-        return 0.0;
-    }
-    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        return u64::from_str_radix(hex, 16).map_or(f64::NAN, |n| n as f64);
-    }
-    match t {
-        "Infinity" | "+Infinity" => f64::INFINITY,
-        "-Infinity" => f64::NEG_INFINITY,
-        _ if t
-            .bytes()
-            .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-')) =>
-        {
-            t.parse::<f64>().unwrap_or(f64::NAN)
-        }
-        _ => f64::NAN,
-    }
+/// The body size a request declares, 0 when it declares none (hyper refuses a Content-Length that
+/// isn't a number).
+fn declared_length(headers: &HeaderMap) -> u64 {
+    header_str(headers, "content-length")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0)
 }
 
-/// `decodeURIComponent`; None where it would throw.
-pub fn decode_uri_component(s: &str) -> Option<String> {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' {
-            let hex = s.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(b[i]);
-            i += 1;
-        }
+/// A percent-encoded path, decoded; None when a `%` isn't followed by two hex digits or the bytes
+/// aren't UTF-8.
+pub fn percent_decode(s: &str) -> Option<String> {
+    let hex = |b: Option<u8>| char::from(b?).to_digit(16);
+    let mut bytes = s.bytes();
+    let mut out = Vec::with_capacity(s.len());
+    while let Some(b) = bytes.next() {
+        out.push(match b {
+            b'%' => (hex(bytes.next())? * 16 + hex(bytes.next())?) as u8,
+            b => b,
+        });
     }
     String::from_utf8(out).ok()
 }
 
-pub(crate) use crate::actions::{js_string, js_truthy};
+/// A device as answers name it.
+#[derive(Serialize)]
+pub struct DeviceRef<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+}
 
-/// `String(x || '')` for a JSON body field.
-pub fn str_or_empty(v: Option<&Value>) -> String {
-    match v {
-        Some(v) if js_truthy(v) => js_string(v),
-        _ => String::new(),
+impl<'a> From<&'a Device> for DeviceRef<'a> {
+    fn from(d: &'a Device) -> Self {
+        DeviceRef {
+            id: &d.id,
+            name: &d.name,
+        }
     }
+}
+
+/// The new name of a device, workspace, project or stream (`POST /api/…/:id/rename`).
+#[derive(Deserialize)]
+pub struct RenameBody {
+    pub name: Option<String>,
 }
 
 /// URL query values as `URLSearchParams.get` returns them (first match, form-decoded).
@@ -458,18 +488,85 @@ type Handler = Box<dyn Fn(Arc<App>, Ctx) -> HandlerFuture + Send + Sync>;
 
 struct Route {
     method: Method,
-    pattern: String,
-    keys: Vec<String>,
+    segments: Vec<Segment>,
     public: bool,
     /// The built-in plugin the route belongs to; refused while that plugin is off.
     plugin: Option<&'static str>,
     h: Handler,
 }
 
+/// One part of a route's path, between slashes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Segment {
+    Literal(String),
+    /// `:key`: any one segment that isn't empty.
+    Param(String),
+    /// A final `*`: the rest of the path, at least one character, as the parameter `rest`.
+    Rest,
+}
+
+impl Segment {
+    fn parse_pattern(pattern: &str) -> Vec<Segment> {
+        let parts: Vec<&str> = pattern.trim_start_matches('/').split('/').collect();
+        let last = parts.len() - 1;
+        parts
+            .iter()
+            .enumerate()
+            .map(|(i, part)| match part.strip_prefix(':') {
+                Some(key) => Segment::Param(key.to_string()),
+                None if *part == "*" && i == last => Segment::Rest,
+                None => Segment::Literal(part.to_string()),
+            })
+            .collect()
+    }
+}
+
+/// The parameters of `path` (still percent-encoded) when it matches the route's segments, in order.
+fn captures<'p>(segments: &[Segment], path: &'p str) -> Option<Vec<&'p str>> {
+    let mut rest = path.strip_prefix('/')?;
+    let mut caps = Vec::new();
+    for (i, segment) in segments.iter().enumerate() {
+        if *segment == Segment::Rest {
+            return (!rest.is_empty()).then(|| {
+                caps.push(rest);
+                caps
+            });
+        }
+        let last = i + 1 == segments.len();
+        let (part, tail) = match rest.split_once('/') {
+            Some((part, tail)) if !last => (part, tail),
+            None if last => (rest, ""),
+            // More of the path than the route has, or less.
+            _ => return None,
+        };
+        match segment {
+            Segment::Literal(literal) if literal == part => {}
+            Segment::Param(_) if !part.is_empty() => caps.push(part),
+            _ => return None,
+        }
+        rest = tail;
+    }
+    Some(caps)
+}
+
+/// The route as a regular expression (`:key` is `([^/]+)`, `*` is `(.+)`), as `/__test/routes` lists it
+/// for the authentication test, which turns it back into a path.
+fn pattern_regex(segments: &[Segment]) -> String {
+    let parts: String = segments
+        .iter()
+        .map(|segment| match segment {
+            Segment::Literal(literal) => format!("\\/{literal}"),
+            Segment::Param(_) => "\\/([^/]+)".to_string(),
+            Segment::Rest => "\\/(.+)".to_string(),
+        })
+        .collect();
+    format!("^{parts}$")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RouteInfo {
     pub method: String,
-    /// The route pattern as JS `RegExp.source` writes it.
+    /// The route as `pattern_regex` writes it.
     pub pattern: String,
     pub public: bool,
 }
@@ -483,96 +580,14 @@ impl Routes {
         F: Fn(Arc<App>, Ctx) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Resp, ApiError>> + Send + 'static,
     {
-        let keys = pattern
-            .split('/')
-            .filter_map(|s| {
-                if s == "*" {
-                    Some("rest")
-                } else {
-                    s.strip_prefix(':')
-                }
-            })
-            .map(str::to_string)
-            .collect();
         self.0.push(Route {
             method,
-            pattern: pattern.to_string(),
-            keys,
+            segments: Segment::parse_pattern(pattern),
             public,
             plugin: crate::plugins::route_owner(pattern),
             h: Box::new(move |app, ctx| Box::pin(f(app, ctx))),
         });
     }
-}
-
-/// Matches `path` against a route pattern, compiled to a regex: `:key` is `([^/]+)`, every other
-/// character is a regex atom (so `.` matches any character), anchored at both ends.
-fn match_route(pattern: &str, path: &str) -> Option<Vec<String>> {
-    fn go(p: &[u8], s: &[u8], caps: &mut Vec<String>, src: &str, pi: usize, si: usize) -> bool {
-        if pi == p.len() {
-            return si == s.len();
-        }
-        // A final `*` takes the rest of the path, at least one character (`/api/plugins/:id/*`).
-        if p[pi] == b'*' && pi + 1 == p.len() {
-            if si < s.len() {
-                caps.push(src[si..].to_string());
-                return true;
-            }
-            return false;
-        }
-        if p[pi] == b':' {
-            let mut end = pi + 1;
-            while end < p.len() && p[end].is_ascii_alphabetic() {
-                end += 1;
-            }
-            if end > pi + 1 {
-                let mut j = si;
-                while j < s.len() && s[j] != b'/' {
-                    j += 1;
-                }
-                // Greedy with backtracking, like the regex engine.
-                while j > si {
-                    caps.push(src[si..j].to_string());
-                    if go(p, s, caps, src, end, j) {
-                        return true;
-                    }
-                    caps.pop();
-                    j -= 1;
-                }
-                return false;
-            }
-        }
-        if si < s.len() && (p[pi] == b'.' || p[pi] == s[si]) {
-            return go(p, s, caps, src, pi + 1, si + 1);
-        }
-        false
-    }
-    let mut caps = Vec::new();
-    // Character-wise matching on bytes is safe: patterns are ASCII and captures end at '/' or a literal.
-    go(pattern.as_bytes(), path.as_bytes(), &mut caps, path, 0, 0).then_some(caps)
-}
-
-/// `new RegExp('^' + pattern.replace(/:([a-zA-Z]+)/g, '([^/]+)') + '$').source`.
-fn regex_source(pattern: &str) -> String {
-    let mut out = String::from("^");
-    let mut chars = pattern.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == ':' && chars.peek().is_some_and(|n| n.is_ascii_alphabetic()) {
-            while chars.peek().is_some_and(|n| n.is_ascii_alphabetic()) {
-                chars.next();
-            }
-            // JS escapes `/` in `source`, but not inside a character class.
-            out.push_str("([^/]+)");
-        } else if c == '*' && chars.peek().is_none() {
-            out.push_str("(.+)");
-        } else if c == '/' {
-            out.push_str("\\/");
-        } else {
-            out.push(c);
-        }
-    }
-    out.push('$');
-    out
 }
 
 // ---------- the app ----------
@@ -657,6 +672,69 @@ enum Out {
     Close(u16, &'static str),
 }
 
+/// What Briardr sends on /ws/live, by its `t`.
+#[derive(Serialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+pub enum LiveMessage<'a> {
+    /// The first message: `instance_id` changes on every server start, so a client can refresh after
+    /// reconnecting to a new one.
+    #[serde(rename_all = "camelCase")]
+    Hello { instance_id: &'a str },
+    /// The streams and Herdr's health (also `GET /api/state`).
+    Model(ModelState),
+    /// The power state, and what the host can do.
+    Mac {
+        mac: &'a MacSummary,
+        host: &'a HostCapabilities,
+    },
+    /// The battery fell to the low level (`sleeping`: the Mac goes to sleep).
+    Battery {
+        level: Option<u32>,
+        percent: Option<u32>,
+        sleeping: bool,
+    },
+    /// An agent's state changed.
+    Transition(&'a Transition),
+    /// The plugins changed on the host.
+    Plugins { plugins: &'a [PluginInfo] },
+    /// What a plugin's backend pushed for its client.
+    PluginEvent {
+        plugin: &'a str,
+        topic: &'a str,
+        data: &'a Value,
+    },
+    /// A stream's note changed (`revision` 0: it was deleted).
+    #[serde(rename_all = "camelCase")]
+    Notes {
+        stream_id: &'a str,
+        note_id: &'a str,
+        revision: u64,
+    },
+    /// The answer to the client's `ping`, with the host's time.
+    Pong {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<Number>,
+        now: u64,
+    },
+}
+
+/// The streams and Herdr's health, with the host's time and Briardr's version.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelState {
+    model: Option<Model>,
+    herdr: HerdrHealth,
+    server_now: u64,
+    version: &'static str,
+}
+
+/// What a client sends on /ws/live: only `ping`; anything else is ignored.
+#[derive(Deserialize)]
+#[serde(tag = "t", rename_all = "snake_case")]
+enum LiveRequest {
+    Ping { id: Option<Number> },
+}
+
 pub struct App {
     pub d: AppDeps,
     /// Changes on every server start, so connected clients can refresh after reconnecting.
@@ -722,9 +800,11 @@ impl App {
         tokio::spawn(async move {
             while let Some((plugin, topic, data)) = events.recv().await {
                 let Some(app) = weak.upgrade() else { return };
-                app.broadcast(
-                    &json!({"t": "plugin_event", "plugin": plugin, "topic": topic, "data": data}),
-                );
+                app.broadcast(&LiveMessage::PluginEvent {
+                    plugin: &plugin,
+                    topic: &topic,
+                    data: &data,
+                });
             }
         });
     }
@@ -757,17 +837,15 @@ impl App {
                     }
                 }
                 if last.is_some() && now != last {
-                    if let Ok(list) = routes_plugins::plugin_list(&app).await {
+                    if let Ok(plugins) = routes_plugins::plugin_list(&app).await {
                         // Backends of plugins turned off (or changed) on the host stop.
-                        let active: Vec<String> = list
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter(|p| p["enabled"] == json!(true))
-                            .filter_map(|p| p["id"].as_str().map(str::to_string))
+                        let active: Vec<String> = plugins
+                            .iter()
+                            .filter(|p| p.enabled)
+                            .map(|p| p.id.clone())
                             .collect();
                         app.backends.retain(&active);
-                        app.broadcast(&json!({"t": "plugins", "plugins": list}));
+                        app.broadcast(&LiveMessage::Plugins { plugins: &plugins });
                     }
                 }
                 drop(app);
@@ -790,16 +868,7 @@ impl App {
                 let Some(app) = weak.upgrade() else { return };
                 match ev {
                     HerdrEvent::Model(_) | HerdrEvent::Health(_) => app.broadcast_model(),
-                    HerdrEvent::Transition(t) => {
-                        let mut msg = serde_json::to_value(&t).unwrap_or_else(|_| json!({}));
-                        if let Value::Object(map) = &mut msg {
-                            let mut out = serde_json::Map::new();
-                            out.insert("t".into(), json!("transition"));
-                            out.extend(std::mem::take(map));
-                            msg = Value::Object(out);
-                        }
-                        app.broadcast(&msg);
-                    }
+                    HerdrEvent::Transition(t) => app.broadcast(&LiveMessage::Transition(&t)),
                 }
             }
         });
@@ -838,7 +907,7 @@ impl App {
             .iter()
             .map(|r| RouteInfo {
                 method: r.method.to_string(),
-                pattern: regex_source(&r.pattern),
+                pattern: pattern_regex(&r.segments),
                 public: r.public,
             })
             .collect()
@@ -946,7 +1015,7 @@ impl App {
             .to_string();
         let mut res = self.clone().dispatch(req, peer).await;
         if res.status() == StatusCode::SWITCHING_PROTOCOLS {
-            return res; // an upgraded socket: Bun returns nothing, so no headers are added
+            return res; // an upgraded socket: its handshake answer gets no headers
         }
         let cfg = self.cfg();
         let previews = (cfg.tls.mode == "proxy").then(|| preview_origins(&cfg).unwrap_or_default());
@@ -1003,7 +1072,10 @@ impl App {
         let rate_limited = || {
             send(
                 429,
-                &json!({"error": "rate_limited", "message": "Too many requests. Wait a minute."}),
+                &ErrorBody {
+                    error: "rate_limited",
+                    message: Some("Too many requests. Wait a minute."),
+                },
                 &[("retry-after", "60".to_string())],
             )
         };
@@ -1011,44 +1083,50 @@ impl App {
             if r.method != method {
                 continue;
             }
-            let Some(caps) = match_route(&r.pattern, &path) else {
+            let Some(caps) = captures(&r.segments, &path) else {
                 continue;
             };
+            let keys = r.segments.iter().filter_map(|segment| match segment {
+                Segment::Literal(_) => None,
+                Segment::Param(key) => Some(key.as_str()),
+                Segment::Rest => Some("rest"),
+            });
             let mut params = BTreeMap::new();
-            for (k, v) in r.keys.iter().zip(caps) {
-                let Some(v) = decode_uri_component(&v) else {
+            for (k, v) in keys.zip(caps) {
+                let Some(v) = percent_decode(v) else {
                     return server_error(&self.host());
                 };
-                params.insert(k.clone(), v);
+                params.insert(k.to_string(), v);
             }
             let device = self.authenticate(&parts.headers);
             if device.is_none() && !self.anon_allowed(&client) {
                 return rate_limited();
             }
             if !r.public && device.is_none() {
-                return send(
+                return refuse(
                     401,
-                    &json!({"error": "unauthenticated", "message": "This device isn’t signed in to Briardr."}),
-                    &[],
+                    "unauthenticated",
+                    "This device isn’t signed in to Briardr.",
                 );
             }
             let site = header_str(&parts.headers, "sec-fetch-site");
             if site.is_some_and(|s| s != "same-origin" && s != "none") {
-                return send(403, &json!({"error": "cross_site"}), &[]);
+                return refuse_code(403, "cross_site");
             }
             if method != Method::GET
                 && method != Method::HEAD
                 && !self.origin_allowed(&parts.headers)
             {
-                return send(403, &json!({"error": "bad_origin"}), &[]);
+                return refuse_code(403, "bad_origin");
             }
             if let Some(plugin) = self.routes.0[idx].plugin {
                 if !self.plugins.get().is_enabled(plugin) {
-                    return send(
-                        404,
-                        &json!({"error": "plugin_disabled", "plugin": plugin, "message": "This plugin is turned off. Turn it on in Settings → Plugins."}),
-                        &[],
-                    );
+                    let body = PluginDisabled {
+                        error: "plugin_disabled",
+                        plugin,
+                        message: "This plugin is turned off. Turn it on in Settings → Plugins.",
+                    };
+                    return send(404, &body, &[]);
                 }
             }
             let ctx = Ctx {
@@ -1065,36 +1143,25 @@ impl App {
             let fut = (self.routes.0[idx].h)(self.clone(), ctx);
             return match fut.await {
                 Ok(res) => res,
-                Err(ApiError::Action(e)) => send(
-                    e.status,
-                    &json!({"error": e.code, "message": e.message}),
-                    &[],
-                ),
+                Err(ApiError::Action(e)) => refuse(e.status, &e.code, &e.message),
                 Err(ApiError::Herdr(e)) => {
                     let e = from_herdr(&e, &self.host());
-                    send(
-                        e.status,
-                        &json!({"error": e.code, "message": e.message}),
-                        &[],
-                    )
+                    refuse(e.status, &e.code, &e.message)
                 }
                 Err(ApiError::Internal) => {
                     self.event(
                         "api_error",
                         json!({"method": method.as_str().to_lowercase(), "category": "exception"}),
                     );
-                    send(
-                        500,
-                        &json!({"error": "internal", "message": format!("Something went wrong on {}.", self.host())}),
-                        &[],
-                    )
+                    let message = format!("Something went wrong on {}.", self.host());
+                    refuse(500, "internal", &message)
                 }
             };
         }
         if self.authenticate(&parts.headers).is_none() && !self.anon_allowed(&client) {
             return rate_limited();
         }
-        send(404, &json!({"error": "not_found"}), &[])
+        refuse_code(404, "not_found")
     }
 
     /// An installed plugin's client build (`/plugins/<id>/<file>`): signed-in devices only, active plugins
@@ -1110,7 +1177,7 @@ impl App {
         if self.authenticate(headers).is_none() {
             return response(401, Body::empty(), &[]);
         }
-        let Some(rest) = decode_uri_component(rest) else {
+        let Some(rest) = percent_decode(rest) else {
             return not_found();
         };
         let Some((id, file)) = rest
@@ -1155,10 +1222,10 @@ impl App {
     /// The Content-Security-Policy for the page: the usual one, with its inline scripts (the import map and
     /// the theme) allowed by the hashes the build writes next to it (`index.html.csp`, scripts/build.ts).
     /// None without that file.
-    async fn page_csp(&self, headers: &HeaderMap, file: &str) -> Option<String> {
-        let listed = tokio::fs::read_to_string(format!("{file}.csp"))
-            .await
-            .ok()?;
+    async fn page_csp(&self, headers: &HeaderMap, file: &Path) -> Option<String> {
+        let mut listing = file.as_os_str().to_owned();
+        listing.push(".csp");
+        let listed = tokio::fs::read_to_string(listing).await.ok()?;
         let hashes: Vec<&str> = listed
             .split_whitespace()
             .filter(|h| is_script_hash(h))
@@ -1180,15 +1247,16 @@ impl App {
     }
 
     async fn serve_static(&self, req: Request<Body>, pathname: &str) -> Resp {
-        let Some(mut rel) = decode_uri_component(pathname) else {
+        let Some(mut rel) = percent_decode(pathname) else {
             return server_error(&self.host());
         };
         if rel == "/" || extname(&rel).is_empty() {
             rel = "/index.html".to_string(); // client-side routes
         }
-        let root = lexical_resolve(&self.d.web_dir, "");
-        let file = lexical_resolve(&self.d.web_dir, &format!(".{rel}"));
-        if !file.starts_with(&format!("{root}/")) {
+        let root = normalize_lexically(&self.d.web_dir);
+        // Relative to the root, as `rel` is absolute; `..` can't leave it.
+        let file = normalize_lexically(&root.join(format!(".{rel}")));
+        if !file.starts_with(&root) || file == root {
             return response(404, Body::empty(), &[]);
         }
         // Home-screen installs fetch these outside the page; record whether they arrive and how.
@@ -1233,7 +1301,7 @@ impl App {
             extra.push(("cross-origin-resource-policy".into(), "cross-origin".into()));
         }
         let accept = header_str(headers, "accept-encoding").map(str::to_string);
-        let file_path = PathBuf::from(&file);
+        let file_path = file.clone();
         let sf = match tokio::task::spawn_blocking(move || {
             static_file(&file_path, &meta, &rel, accept.as_deref(), &extra)
         })
@@ -1307,7 +1375,7 @@ impl App {
     }
 
     async fn on_live(self: Arc<Self>, mut ws: WebSocket, device: Device, q: Query) {
-        if js_number(q.get("v").unwrap_or("null")) != f64::from(PROTOCOL) {
+        if !speaks_protocol(&q) {
             let _ = ws
                 .send(Message::Close(Some(CloseFrame {
                     code: 4400,
@@ -1325,15 +1393,21 @@ impl App {
         });
         let anon = self.d.diag.anon(&device.id);
         self.event("live_open", json!({ "device": anon }));
-        let _ = tx.send(Out::Text(
-            json!({"t": "hello", "instanceId": self.instance_id}).to_string(),
-        ));
-        let _ = tx.send(Out::Text(self.model_message().to_string()));
+        let hello = LiveMessage::Hello {
+            instance_id: &self.instance_id,
+        };
+        let mut first = vec![hello, LiveMessage::Model(self.model_state())];
         let summary = lock(&self.d.power).summary().cloned();
-        if let Some(mac) = summary {
-            let _ = tx.send(Out::Text(
-                json!({"t": "mac", "mac": mac, "host": caps_json(&self.d.caps)}).to_string(),
-            ));
+        if let Some(mac) = &summary {
+            first.push(LiveMessage::Mac {
+                mac,
+                host: &self.d.caps,
+            });
+        }
+        for m in &first {
+            if let Ok(text) = serde_json::to_string(m) {
+                let _ = tx.send(Out::Text(text));
+            }
         }
         // Briardr sends its own pings and drops sockets that stop answering them.
         let mut alive = true;
@@ -1346,17 +1420,11 @@ impl App {
                 msg = ws.recv() => match msg {
                     Some(Ok(Message::Text(text))) => {
                         alive = true;
-                        if let Ok(m) = serde_json::from_str::<Value>(text.as_str()) {
-                            if m.get("t").and_then(Value::as_str) == Some("ping") {
-                                let mut pong = serde_json::Map::new();
-                                pong.insert("t".into(), json!("pong"));
-                                if let Some(id) = m.get("id") {
-                                    pong.insert("id".into(), id.clone());
-                                }
-                                pong.insert("now".into(), json!(now_ms()));
-                                if ws.send(Message::Text(Value::Object(pong).to_string().into())).await.is_err() {
-                                    break;
-                                }
+                        if let Ok(LiveRequest::Ping { id }) = serde_json::from_str(text.as_str()) {
+                            let pong = LiveMessage::Pong { id, now: now_ms() };
+                            let Ok(pong) = serde_json::to_string(&pong) else { continue };
+                            if ws.send(Message::Text(pong.into())).await.is_err() {
+                                break;
                             }
                         }
                     }
@@ -1398,9 +1466,10 @@ impl App {
             .await
             .map_err(|_| ApiError::Internal)?;
         self.power_events(&report.events);
-        self.broadcast(
-            &json!({"t": "mac", "mac": report.summary, "host": caps_json(&self.d.caps)}),
-        );
+        self.broadcast(&LiveMessage::Mac {
+            mac: &report.summary,
+            host: &self.d.caps,
+        });
         Ok(report.summary)
     }
 
@@ -1412,7 +1481,11 @@ impl App {
             let PowerEvent::LowBattery(b) = ev else {
                 continue;
             };
-            self.broadcast(&json!({"t": "battery", "level": b.level, "percent": b.percent, "sleeping": b.sleeping}));
+            self.broadcast(&LiveMessage::Battery {
+                level: b.level,
+                percent: b.percent,
+                sleeping: b.sleeping,
+            });
             if !self.d.caps.battery || !self.d.push.wanted("battery") {
                 continue;
             }
@@ -1437,14 +1510,13 @@ impl App {
         }
     }
 
-    pub fn model_message(&self) -> Value {
-        json!({
-            "t": "model",
-            "model": self.d.herdr.model(),
-            "herdr": self.d.herdr.health(),
-            "serverNow": now_ms(),
-            "version": VERSION,
-        })
+    pub fn model_state(&self) -> ModelState {
+        ModelState {
+            model: self.d.herdr.model(),
+            herdr: self.d.herdr.health(),
+            server_now: now_ms(),
+            version: VERSION,
+        }
     }
 
     /// Coalesces model broadcasts for 80 ms.
@@ -1457,15 +1529,16 @@ impl App {
             tokio::time::sleep(Duration::from_millis(80)).await;
             if let Some(app) = weak.upgrade() {
                 app.model_pending.store(false, Ordering::SeqCst);
-                let msg = app.model_message();
-                app.broadcast(&msg);
+                app.broadcast(&LiveMessage::Model(app.model_state()));
             }
         });
     }
 
     /// Sends a message to every open live socket.
-    pub fn broadcast(&self, msg: &Value) {
-        let data = msg.to_string();
+    pub fn broadcast(&self, msg: &LiveMessage) {
+        let Ok(data) = serde_json::to_string(msg) else {
+            return;
+        };
         for s in lock(&self.live).iter() {
             let _ = s.tx.send(Out::Text(data.clone()));
         }
@@ -1523,7 +1596,7 @@ impl App {
     }
 }
 
-/// `new URL(req.url).pathname`: WHATWG path normalization of the request target.
+/// The request's path, normalized as a browser's URL parser does (WHATWG: `.` and `..` segments).
 fn pathname(req: &Request<Body>) -> Option<String> {
     let target = req.uri().path_and_query().map_or("/", |p| p.as_str());
     url::Url::parse(&format!("http://h{target}"))
@@ -1531,33 +1604,8 @@ fn pathname(req: &Request<Body>) -> Option<String> {
         .map(|u| u.path().to_string())
 }
 
-/// `path.extname`.
-fn extname(p: &str) -> &str {
-    let base = p.rsplit('/').next().unwrap_or("");
-    match base.rfind('.') {
-        Some(0) | None => "",
-        Some(i) => &base[i..],
-    }
-}
-
-/// `path.resolve(root, rel)` for an absolute root: lexical, no symlinks, no trailing slash.
-fn lexical_resolve(root: &Path, rel: &str) -> String {
-    let joined = format!("{}/{}", root.to_string_lossy(), rel);
-    let mut parts: Vec<&str> = Vec::new();
-    for seg in joined.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            s => parts.push(s),
-        }
-    }
-    format!("/{}", parts.join("/"))
-}
-
-/// `/^\/(icons\/(apple-touch-icon|icon-192|icon-512|icon-maskable-512)|manifest)[.\w]*$/` group 2,
-/// or "manifest" for /manifest.webmanifest.
+/// Which home-screen icon (or the manifest) a path is: `/icons/<name>` followed only by letters, digits,
+/// `_` and dots (`/icons/icon-192.png`), or `/manifest.webmanifest`.
 fn icon_kind(rel: &str) -> Option<&'static str> {
     let rest_ok = |s: &str| {
         s.bytes()
@@ -1615,33 +1663,67 @@ mod tests {
         assert!(!cell.get().updates.check);
     }
 
+    fn route_captures(pattern: &str, path: &str) -> Option<Vec<String>> {
+        let segments = Segment::parse_pattern(pattern);
+        captures(&segments, path).map(|c| c.into_iter().map(String::from).collect())
+    }
+
     #[test]
-    fn routes_match_like_the_ts_regex() {
-        assert_eq!(match_route("/api/session", "/api/session"), Some(vec![]));
-        assert_eq!(match_route("/api/session", "/api/session/"), None);
+    fn routes_match_whole_segments() {
+        assert_eq!(route_captures("/api/session", "/api/session"), Some(vec![]));
+        assert_eq!(route_captures("/api/session", "/api/session/"), None);
+        assert_eq!(route_captures("/api/session", "/api/sessions"), None);
+        assert_eq!(route_captures("/api/session", "/api"), None);
         assert_eq!(
-            match_route(
+            route_captures(
                 "/api/streams/:id/notes/:note",
                 "/api/streams/w1%3Ap1/notes/abc"
             ),
             Some(vec!["w1%3Ap1".to_string(), "abc".to_string()])
         );
         assert_eq!(
-            match_route("/api/streams/:id/info", "/api/streams//info"),
+            route_captures("/api/streams/:id/info", "/api/streams//info"),
             None
         );
-        // `.` is a regex wildcard in the pattern.
-        assert!(match_route("/api/ca.mobileconfig", "/api/caXmobileconfig").is_some());
         assert_eq!(
-            match_route("/api/plugins/:id/*", "/api/plugins/ci/runs/42"),
+            route_captures(
+                "/api/streams/:id/notes/:note",
+                "/api/streams/a/notes/images/x"
+            ),
+            None,
+            "a parameter is one segment"
+        );
+        assert!(route_captures("/api/ca.mobileconfig", "/api/ca.mobileconfig").is_some());
+        assert_eq!(
+            route_captures("/api/ca.mobileconfig", "/api/caXmobileconfig"),
+            None
+        );
+        assert_eq!(
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci/runs/42"),
             Some(vec!["ci".to_string(), "runs/42".to_string()])
         );
-        assert_eq!(match_route("/api/plugins/:id/*", "/api/plugins/ci/"), None);
-        assert_eq!(match_route("/api/plugins/:id/*", "/api/plugins/ci"), None);
         assert_eq!(
-            regex_source("/api/streams/:id/info"),
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci/"),
+            None
+        );
+        assert_eq!(
+            route_captures("/api/plugins/:id/*", "/api/plugins/ci"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_route_list_writes_patterns_as_regular_expressions() {
+        let regex = |pattern: &str| pattern_regex(&Segment::parse_pattern(pattern));
+        assert_eq!(
+            regex("/api/streams/:id/info"),
             "^\\/api\\/streams\\/([^/]+)\\/info$"
         );
+        assert_eq!(
+            regex("/api/plugins/:id/*"),
+            "^\\/api\\/plugins\\/([^/]+)\\/(.+)$"
+        );
+        assert_eq!(regex("/api/ca.mobileconfig"), "^\\/api\\/ca.mobileconfig$");
     }
 
     #[test]
@@ -1657,24 +1739,64 @@ mod tests {
                 && is_loopback_name("::1")
         );
         assert!(!is_loopback_name("10.8.0.1") && !is_loopback_name("mac.tail1.ts.net"));
-        assert_eq!(decode_uri_component("w1%3Ap1").as_deref(), Some("w1:p1"));
-        assert_eq!(decode_uri_component("%E0%A4%A"), None);
-        assert_eq!(decode_uri_component("%FF"), None);
-        assert_eq!(js_number(""), 0.0);
-        assert_eq!(js_number(" 12 "), 12.0);
-        assert!(js_number("12abc").is_nan());
-        assert_eq!(extname("/a/b.js"), ".js");
-        assert_eq!(extname("/a/.hidden"), "");
-        assert_eq!(extname("/streams/x"), "");
-        assert_eq!(lexical_resolve(Path::new("/w/dist"), "./../x"), "/w/x");
-        assert_eq!(
-            lexical_resolve(Path::new("/w/dist"), "./index.html"),
-            "/w/dist/index.html"
-        );
+        assert_eq!(percent_decode("w1%3Ap1").as_deref(), Some("w1:p1"));
+        assert_eq!(percent_decode("caf%C3%A9+x").as_deref(), Some("café+x"));
+        assert_eq!(percent_decode("%E0%A4%A"), None);
+        assert_eq!(percent_decode("%FF"), None);
+        assert_eq!(percent_decode("%+1"), None);
         assert_eq!(icon_kind("/icons/icon-192.png"), Some("icon-192"));
         assert_eq!(icon_kind("/icons/icon-192-x.png"), None);
         assert_eq!(icon_kind("/manifest.webmanifest"), Some("manifest"));
         assert_eq!(icon_kind("/app.js"), None);
+    }
+
+    #[test]
+    fn live_messages_are_tagged_by_t() {
+        let json = |m: LiveMessage| serde_json::to_value(m).unwrap();
+        assert_eq!(
+            json(LiveMessage::Hello { instance_id: "ab" }),
+            json!({"t": "hello", "instanceId": "ab"})
+        );
+        assert_eq!(
+            json(LiveMessage::Notes {
+                stream_id: "w1:p1",
+                note_id: "0123456789abcdef",
+                revision: 0
+            }),
+            json!({"t": "notes", "streamId": "w1:p1", "noteId": "0123456789abcdef", "revision": 0})
+        );
+        assert_eq!(
+            json(LiveMessage::PluginEvent {
+                plugin: "ci",
+                topic: "run",
+                data: &json!({"n": 1})
+            }),
+            json!({"t": "plugin_event", "plugin": "ci", "topic": "run", "data": {"n": 1}})
+        );
+        assert_eq!(
+            json(LiveMessage::Pong { id: None, now: 5 }),
+            json!({"t": "pong", "now": 5})
+        );
+        let transition = Transition {
+            stream_id: "w1:p1".into(),
+            terminal_id: "t1".into(),
+            from: None,
+            to: None,
+            kind: crate::herdr::model::StreamKind::Agent,
+            tool: "claude".into(),
+            state_change_seq: Some(2),
+            at: 9,
+        };
+        let text = serde_json::to_string(&LiveMessage::Transition(&transition)).unwrap();
+        assert!(
+            text.starts_with(r#"{"t":"transition","streamId":"w1:p1","#),
+            "{text}"
+        );
+        assert!(matches!(
+            serde_json::from_value(json!({"t": "ping", "id": 3})),
+            Ok(LiveRequest::Ping { id: Some(_) })
+        ));
+        assert!(serde_json::from_value::<LiveRequest>(json!({"t": "hello"})).is_err());
     }
 
     #[test]

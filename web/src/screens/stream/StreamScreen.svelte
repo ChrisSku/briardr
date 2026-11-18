@@ -25,7 +25,8 @@
   import HistorySheet from './HistorySheet.svelte';
   import InfoSheet from './InfoSheet.svelte';
   import StreamHeader from './StreamHeader.svelte';
-  import TerminalSurface, { confirmTakeOver } from './TerminalSurface.svelte';
+  import { takeControl } from './surface/OwnershipBanner.svelte';
+  import TerminalSurface from './TerminalSurface.svelte';
 
   let { id, surface, compact }: { id: string; surface: Surface; compact: boolean } = $props();
 
@@ -129,9 +130,6 @@
     return [TOOL[s.tool.toLowerCase()] ?? s.tool, place, time].filter(Boolean).join(' · ');
   });
 
-  // Also offered by the watching banner, which can be dismissed.
-  const takeControl = () => (st.watchReason === 'busy' || st.watchReason === 'taken_over' ? confirmTakeOver(ctl) : ctl.connect('control', false));
-
   const actions = (el: HTMLElement) =>
     openMenu(
       [
@@ -140,8 +138,9 @@
         { label: 'Jump to stream…', hint: '⌘K', onSelect: () => openJump() },
         { label: 'Full screen', hint: '⇧⌘↩', onSelect: () => (fullScreen.value = true) },
         ...(canOpenWindows ? [{ label: 'New Window', hint: '⌥⌘N', onSelect: () => openWindow() }] : []),
+        // Take control is also offered by the watching banner, which can be dismissed.
         st.ownership === 'watching'
-          ? { label: 'Take control', onSelect: () => void takeControl() }
+          ? { label: 'Take control', onSelect: () => void takeControl(ctl) }
           : { label: `Hand back to ${isMac() ? 'Mac' : theHost()}`, hint: 'Release control', disabled: st.ownership !== 'controlling', onSelect: () => ctl.handBack() },
         ...streamItems(s!),
       ],

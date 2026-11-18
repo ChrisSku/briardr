@@ -33,8 +33,9 @@ pub struct StaticFile {
     pub headers: Vec<(String, String)>,
 }
 
-/// `path.extname`: the last dot and what follows it, or "" when there is no dot or only leading dots.
-fn extname(name: &str) -> &str {
+/// A file name's extension, with its dot: the last dot in the last segment and what follows it, or ""
+/// when there is no dot or only leading dots (`.hidden`).
+pub fn extname(name: &str) -> &str {
     let base = name.rsplit('/').next().unwrap_or(name);
     let Some(dot) = base.rfind('.') else {
         return "";
@@ -53,9 +54,8 @@ pub fn mime_for(name: &str) -> &'static str {
         .map_or(DEFAULT_MIME, |(_, mime)| *mime)
 }
 
-/// JS `Number(value) > 0` for a q value. Rust `parse` also takes "inf" and "infinity", which JS reads
-/// as NaN (the header is already lowercased, so JS never sees "Infinity"), so any letter other than
-/// an exponent marker counts as 0.
+/// Whether a q value is above 0. It's a decimal number: any letter other than an exponent marker makes it
+/// 0, since Rust's `parse` would also take "inf" and "infinity".
 fn q_is_positive(value: &str) -> bool {
     let v = value.trim();
     if v.bytes()
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn extname_follows_path_extname() {
+    fn extensions_are_the_last_dot_and_what_follows() {
         assert_eq!(extname("x.tar.gz"), ".gz");
         assert_eq!(extname("dir.v2/file"), "");
         assert_eq!(extname("a.b/.html"), "");

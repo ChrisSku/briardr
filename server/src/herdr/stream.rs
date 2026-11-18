@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -154,7 +155,9 @@ pub fn clamp_dim(n: i64, min: i64, max: i64) -> u16 {
     n.clamp(min, max) as u16
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which way a scroll goes (lowercase in the client's messages, as in Herdr's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Direction {
     Up,
     Down,
@@ -169,7 +172,9 @@ impl Direction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a mouse event is (lowercase in the client's messages, as in Herdr's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MouseAction {
     Down,
     Up,
@@ -188,7 +193,9 @@ impl MouseAction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The mouse button of an event (lowercase in the client's messages, as in Herdr's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MouseButton {
     Left,
     Right,

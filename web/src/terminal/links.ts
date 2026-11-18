@@ -1,5 +1,6 @@
 // Link handling for terminal text: soft-wrapped URLs are joined, OSC 8 hyperlinks keep their real
-// destination, localhost links open in Preview, other web links open in the system browser.
+// destination, localhost links open in Preview, other web links open in the system browser. Select Text
+// picks a link, or the word, at the cell touched.
 import type { Terminal } from '@xterm/xterm';
 
 const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}]/g;
@@ -121,6 +122,22 @@ export function wordAround(text: string, offset: number): { start: number; end: 
   while (s > 0 && isWord(text[s - 1])) s--;
   while (e < text.length && isWord(text[e])) e++;
   return { start: s, end: Math.max(e, s) };
+}
+
+/** A frozen copy of the screen as text, for Select Text, with the word (or URL) at a visible cell selected:
+ *  later output doesn't move the selection. */
+export function screenSelection(term: Pick<Terminal, 'rows' | 'buffer'>, row: number, col: number): { text: string; start: number; end: number } {
+  const buf = term.buffer.active;
+  const lines: string[] = [];
+  let offset = 0;
+  for (let r = 0; r < term.rows; r++) {
+    const line = buf.getLine(buf.viewportY + r);
+    const s = line ? line.translateToString(true) : '';
+    if (r === row) offset = lines.join('\n').length + (r ? 1 : 0) + Math.min(col, s.length);
+    lines.push(s);
+  }
+  const text = lines.join('\n');
+  return { text, ...wordAround(text, offset) };
 }
 
 /** Register a link provider so wrapped URLs are underlined on hover and clickable with a pointer. */

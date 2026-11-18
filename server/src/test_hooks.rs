@@ -5,7 +5,7 @@
 //   POST /__test/auth/flush                   → {ok}, the devices saved as the minute's last-seen flush does
 //   POST /__test/herdr/refresh                → {ok}
 //   GET  /__test/routes                       → [{method, pattern, public}]
-//   GET  /__test/hub/sent                     → [{conn, method}] (only the length is meaningful)
+//   GET  /__test/hub/sent                     → [{}, …], one per input call made to Herdr (only the length counts)
 //   POST /__test/push/capture {status}        → pushes are recorded instead of sent, answered with `status`
 //   GET  /__test/push/sent                    → [plaintext payload JSON, …]
 //   GET  /__test/push/subject                 → the VAPID subject
@@ -16,13 +16,19 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::body::Body;
 use axum::http::{Method, Request};
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::app::{read_body, send, App, Resp};
 use crate::power::fake::{batt, world, FakeHost, Shared};
 use crate::power::Host;
 use crate::push::{PushSub, SendFuture, SendOpts, Sender};
+
+/// A hook's body; one that is missing or doesn't fit is the defaults.
+fn parse<T: Default + DeserializeOwned>(body: &[u8]) -> T {
+    serde_json::from_slice(body).unwrap_or_default()
+}
 
 pub fn enabled() -> bool {
     std::env::var("BRIARDR_TEST_HOOKS")
@@ -48,6 +54,43 @@ fn power() -> &'static Shared {
 /// (a low battery once sent a test's new subscription an extra alert), and none changes them.
 pub fn power_host() -> Option<Box<dyn Host>> {
     enabled().then(|| Box::new(FakeHost(power().clone())) as Box<dyn Host>)
+}
+
+/// `POST /__test/auth/pair`: `auth.pair` for a device at `ip` (default `local`).
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct Pair {
+    code: String,
+    name: String,
+    ip: Option<String>,
+}
+
+/// `POST /__test/auth/revoke`.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct Revoke {
+    id: String,
+}
+
+/// `POST /__test/push/capture`: the status the push service answers with (default 201).
+#[derive(Deserialize)]
+#[serde(default)]
+struct Capture {
+    status: u16,
+}
+
+impl Default for Capture {
+    fn default() -> Self {
+        Capture { status: 201 }
+    }
+}
+
+/// `POST /__test/previews/open`: `previews.open` for a device; a port of 0 is refused.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct OpenPreview {
+    device: String,
+    port: u16,
 }
 
 /// `POST /__test/power`.
@@ -78,46 +121,27 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
     let method = req.method().clone();
     let path = req.uri().path().trim_start_matches("/__test").to_string();
     let (parts, body) = req.into_parts();
-    let body: Value = match read_body(&parts.headers, body, 64 * 1024).await {
-        Ok(b) if !b.is_empty() => serde_json::from_slice(&b).unwrap_or(Value::Null),
-        _ => Value::Null,
-    };
-    let s = |k: &str| {
-        body.get(k)
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string()
-    };
+    let body = read_body(&parts.headers, body, 64 * 1024)
+        .await
+        .unwrap_or_default();
     let out = match (method, path.as_str()) {
         (Method::POST, "/auth/pair") => {
-            let (code, name) = (s("code"), s("name"));
-            let client = body
-                .get("ip")
-                .and_then(Value::as_str)
-                .unwrap_or("local")
-                .to_string();
+            let b: Pair = parse(&body);
+            let client = b.ip.unwrap_or_else(|| "local".to_string());
             let auth = app.d.auth.clone();
-            let r = tokio::task::spawn_blocking(move || auth.pair(&code, &name, &client))
+            let r = tokio::task::spawn_blocking(move || auth.pair(&b.code, &b.name, &client))
                 .await
                 .ok();
             match r {
                 Some(Ok((device, cookie))) => {
                     json!({"ok": true, "device": device, "cookie": cookie})
                 }
-                Some(Err(e)) => {
-                    let error = match e {
-                        crate::auth::PairError::NoCode => "no_code",
-                        crate::auth::PairError::Expired => "expired",
-                        crate::auth::PairError::Invalid => "invalid",
-                        crate::auth::PairError::Locked => "locked",
-                    };
-                    json!({"ok": false, "error": error})
-                }
+                Some(Err(e)) => json!({"ok": false, "error": e.code()}),
                 None => json!({"ok": false, "error": "invalid"}),
             }
         }
         (Method::POST, "/auth/revoke") => {
-            let (auth, id) = (app.d.auth.clone(), s("id"));
+            let (auth, Revoke { id }) = (app.d.auth.clone(), parse(&body));
             json!(tokio::task::spawn_blocking(move || auth.revoke(&id))
                 .await
                 .ok()
@@ -137,7 +161,7 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
                 .collect::<Vec<_>>())
         }
         (Method::POST, "/push/capture") => {
-            let status = body.get("status").and_then(Value::as_u64).unwrap_or(201) as u16;
+            let Capture { status } = parse(&body);
             let sender: Sender = Arc::new(
                 move |_sub: PushSub, plaintext: String, _opts: SendOpts| -> SendFuture {
                     PUSHED
@@ -160,16 +184,17 @@ pub async fn handle(app: &Arc<App>, req: Request<Body>) -> Resp {
         (Method::GET, "/push/subject") => json!(app.d.push.subject()),
         (Method::POST, "/previews/open") => {
             // The `previews.open` result: {ok: true, preview} | {ok: false, error}.
-            let port = body.get("port").and_then(Value::as_u64).unwrap_or(0);
-            match u16::try_from(port) {
-                Ok(port) if port > 0 => match app.d.previews.open(&s("device"), port).await {
-                    Ok(preview) => json!({"ok": true, "preview": preview}),
-                    Err(e) => json!({"ok": false, "error": e.code()}),
-                },
+            match parse(&body) {
+                OpenPreview { device, port } if port > 0 => {
+                    match app.d.previews.open(&device, port).await {
+                        Ok(preview) => json!({"ok": true, "preview": preview}),
+                        Err(e) => json!({"ok": false, "error": e.code()}),
+                    }
+                }
                 _ => json!({"ok": false, "error": "invalid_port"}),
             }
         }
-        (Method::POST, "/power") => match serde_json::from_value::<SetBattery>(body) {
+        (Method::POST, "/power") => match serde_json::from_slice::<SetBattery>(&body) {
             Ok(b) => {
                 power().lock().unwrap_or_else(|e| e.into_inner()).batt = batt(b.percent, b.ac);
                 json!({"ok": true})

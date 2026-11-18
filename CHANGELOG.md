@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.29
+
+- **Changes can show everything since the branch the work started from, not only what isn't committed yet.** When a stream's branch has commits of its own, Changes offers "Since main" beside "Uncommitted": the branch's commits and its uncommitted work as one set of changes, compared with the newest commit the branch shares with the repository's main branch (the one `origin/HEAD` names, else `main` or `master`). Work an agent has already committed no longer drops out of review. Reviewed marks, and the lines comments mark, are kept apart for the two views. ([#54](https://github.com/ChrisSku/briardr/pull/54))
+
 ## 0.3.28
 
 - **A setting changed in the app no longer undoes what `briardr configure` saved before the restart.** Briardr used to save its whole running configuration on any change in Settings, so a `briardr configure` change waiting for the restart (such as `--allowed-networks`) was lost. Now a change from the app is made to `config.json` as it is on disk, and only to its own setting; the two take turns with a lock (`config.lock` in the data directory), and the restart applies both. Briardr also no longer writes its `BRIARDR_*` environment overrides into `config.json`, and won't save over a `config.json` it can't read. Plugins turned on or off with `briardr plugin enable|disable` are now noticed even when Linux gives the file the same modification time as the server's last save, and a devices file that can't be read at startup no longer makes Briardr forget every device's alert choices. ([#57](https://github.com/ChrisSku/briardr/pull/57))

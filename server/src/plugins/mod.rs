@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::config::{read_json, write_file_atomic, ConfigError, Paths, Stamp};
@@ -455,36 +455,63 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
     serde_json::from_str(&text).map_err(|e| format!("{MANIFEST} isn’t valid: {e}"))
 }
 
-/// The plugin list the client and `briardr plugin list` show.
-pub fn info_json(p: &Plugin, state: &PluginState, runtime: Option<&str>) -> Value {
-    let m = p.manifest.as_ref();
-    let backend = m.and_then(|m| m.backend.as_ref()).map(|b| {
-        let hash = backend_hash(b);
-        json!({
-            "command": b.command,
-            "approved": state.approved.get(&p.id) == Some(&hash),
-            "hash": hash,
-        })
-    });
-    json!({
-        "id": p.id,
-        "name": m.map_or(p.id.as_str(), |m| m.name.as_str()),
-        "description": m.map_or("", |m| m.description.as_str()),
-        "version": m.map_or("", |m| m.version.as_str()),
-        "builtin": p.builtin,
-        "enabled": p.active(state),
-        "contributes": m.map(|m| serde_json::to_value(&m.contributes).unwrap_or(Value::Null)),
-        "backend": backend,
-        "client": p.active(state).then(|| p.client_url(runtime)).flatten(),
-        "build": p.build_status(runtime),
-        "problem": p.problem,
-    })
+/// A plugin as the client lists it (`GET /api/plugins`, the session, the live `plugins` message).
+#[derive(Debug, Serialize)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub builtin: bool,
+    pub enabled: bool,
+    pub contributes: Option<Contributes>,
+    pub backend: Option<BackendInfo>,
+    /// The client's URL, while the plugin is on and its build is ready.
+    pub client: Option<String>,
+    pub build: &'static str,
+    pub problem: Option<String>,
+}
+
+/// A plugin's backend command, and whether the user approved this one (its hash) to run.
+#[derive(Debug, Serialize)]
+pub struct BackendInfo {
+    pub command: Vec<String>,
+    pub approved: bool,
+    pub hash: String,
+}
+
+impl PluginInfo {
+    pub fn of(p: &Plugin, state: &PluginState, runtime: Option<&str>) -> Self {
+        let m = p.manifest.as_ref();
+        let backend = m.and_then(|m| m.backend.as_ref()).map(|b| {
+            let hash = backend_hash(b);
+            BackendInfo {
+                command: b.command.clone(),
+                approved: state.approved.get(&p.id) == Some(&hash),
+                hash,
+            }
+        });
+        PluginInfo {
+            id: p.id.clone(),
+            name: m.map_or(&p.id, |m| &m.name).clone(),
+            description: m.map(|m| m.description.clone()).unwrap_or_default(),
+            version: m.map(|m| m.version.clone()).unwrap_or_default(),
+            builtin: p.builtin,
+            enabled: p.active(state),
+            contributes: m.map(|m| m.contributes.clone()),
+            backend,
+            client: p.active(state).then(|| p.client_url(runtime)).flatten(),
+            build: p.build_status(runtime),
+            problem: p.problem.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scratch::Scratch;
+    use serde_json::json;
 
     fn manifest(v: Value) -> Manifest {
         serde_json::from_value(v).unwrap()

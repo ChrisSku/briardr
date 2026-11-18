@@ -1,7 +1,10 @@
 // Bun.build plugin for Svelte 5: compiles .svelte components and .svelte.ts/.svelte.js rune modules
-// with the official compiler. Component styles (if any) become CSS modules that Bun bundles into the
-// entry's stylesheet. Bun's source maps point at the compiled JavaScript (it doesn't chain a plugin's
-// input source maps); composeSourceMap() maps them on into the components' own source.
+// with the official compiler. A component's <style> stays in its JavaScript, which adds it to the page
+// when the component is first mounted, so it arrives with the code wherever that is: the app's entry, a
+// chunk loaded on demand (a built-in plugin) or an installed plugin. (As CSS, a chunk's styles would go
+// into a stylesheet of its own that nothing loads.) The Content-Security-Policy allows inline styles. Bun's
+// source maps point at the compiled JavaScript (it doesn't chain a plugin's input source maps);
+// composeSourceMap() maps them on into the components' own source.
 import fs from 'node:fs';
 import path from 'node:path';
 import remapping, { type SourceMapInput } from '@jridgewell/remapping';
@@ -9,7 +12,7 @@ import type { BunPlugin } from 'bun';
 import { compile, compileModule, type CompileOptions } from 'svelte/compiler';
 
 /** Compiled output by file, reused while the source is unchanged (watch rebuilds compile only edits). */
-const cache = new Map<string, { source: string; dev: boolean; cssMode?: string; code: string; map: SourceMapInput | null; css: string | null; warnings: SvelteWarning[] }>();
+const cache = new Map<string, { source: string; dev: boolean; code: string; map: SourceMapInput | null; warnings: SvelteWarning[] }>();
 
 export interface SvelteWarning {
   file: string;
@@ -18,21 +21,17 @@ export interface SvelteWarning {
   line?: number;
 }
 
-/**
- * `dev` turns on the compiler's development checks (ownership warnings, readable errors). `css: 'injected'`
- * keeps component styles in the JavaScript, which adds them to the page when mounted (plugins: one file).
- */
-export function sveltePlugin(opts: { dev: boolean; css?: 'external' | 'injected'; onWarning?: (w: SvelteWarning) => void }): BunPlugin {
+/** `dev` turns on the compiler's development checks (ownership warnings, readable errors). */
+export function sveltePlugin(opts: { dev: boolean; onWarning?: (w: SvelteWarning) => void }): BunPlugin {
   const ts = new Bun.Transpiler({ loader: 'ts', target: 'browser' });
-  const css = new Map<string, string>();
   const common = { generate: 'client', dev: opts.dev } as const;
   const toWarnings = (file: string, warnings: { code: string; message: string; start?: { line: number } }[]) =>
     warnings.map((w) => ({ file: path.relative(process.cwd(), file), code: w.code, message: w.message, line: w.start?.line }));
   /** Compile `file` unless the same source was compiled before with the same options. */
-  const cached = async (file: string, run: (source: string) => { code: string; map: SourceMapInput | null; css: string | null; warnings: SvelteWarning[] }) => {
+  const cached = async (file: string, run: (source: string) => { code: string; map: SourceMapInput | null; warnings: SvelteWarning[] }) => {
     const source = await Bun.file(file).text();
     let hit = cache.get(file);
-    if (!hit || hit.source !== source || hit.dev !== opts.dev || hit.cssMode !== opts.css) cache.set(file, (hit = { source, dev: opts.dev, cssMode: opts.css, ...run(source) }));
+    if (!hit || hit.source !== source || hit.dev !== opts.dev) cache.set(file, (hit = { source, dev: opts.dev, ...run(source) }));
     for (const w of hit.warnings) opts.onWarning?.(w);
     return hit;
   };
@@ -42,28 +41,21 @@ export function sveltePlugin(opts: { dev: boolean; css?: 'external' | 'injected'
       // Components: <script lang="ts"> is handled by the compiler itself (type syntax only).
       build.onLoad({ filter: /\.svelte$/ }, async ({ path: file }) => {
         const r = await cached(file, (source) => {
-          const options: CompileOptions = { ...common, filename: file, css: opts.css || 'external', runes: true, discloseVersion: false };
+          const options: CompileOptions = { ...common, filename: file, css: 'injected', runes: true, discloseVersion: false };
           const out = compile(source, options);
-          return { code: out.js.code, map: out.js.map as SourceMapInput, css: out.css?.code || null, warnings: toWarnings(file, out.warnings) };
+          return { code: out.js.code, map: out.js.map as SourceMapInput, warnings: toWarnings(file, out.warnings) };
         });
-        let code = r.code;
-        if (r.css) {
-          css.set(file, r.css);
-          code += `\nimport ${JSON.stringify('svelte-css:' + file)};`;
-        }
-        return { contents: code, loader: 'js' };
+        return { contents: r.code, loader: 'js' };
       });
       // Rune modules: strip TypeScript first, then let Svelte compile the runes. The TypeScript step has
       // no source map, so none is composed for these.
       build.onLoad({ filter: /\.svelte\.(ts|js)$/ }, async ({ path: file }) => {
         const r = await cached(file, (source) => {
           const out = compileModule(file.endsWith('.ts') ? ts.transformSync(source) : source, { ...common, filename: file });
-          return { code: out.js.code, map: null, css: null, warnings: toWarnings(file, out.warnings) };
+          return { code: out.js.code, map: null, warnings: toWarnings(file, out.warnings) };
         });
         return { contents: r.code, loader: 'js' };
       });
-      build.onResolve({ filter: /^svelte-css:/ }, ({ path: p }) => ({ path: p.slice('svelte-css:'.length), namespace: 'svelte-css' }));
-      build.onLoad({ filter: /.*/, namespace: 'svelte-css' }, ({ path: p }) => ({ contents: css.get(p) || '', loader: 'css' }));
     },
   };
 }

@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.1; Bun and Rust at the versions pinned in mise.toml
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8; Bun and Rust at the versions pinned in mise.toml
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2; the server's dependencies, built and saved on main
         with:
@@ -87,10 +87,19 @@ jobs:
           . deploy/versions.env # the Caddy version servers fall back to
           docker run --rm -v "$out:/etc/caddy:ro" "caddy:$CADDY_VERSION" caddy validate --config /etc/caddy/briardr.caddy --adapter caddyfile
 
-      - name: Browser checks (WebKit, with the system libraries it needs)
+      - name: WebKit and its system libraries
+        timeout-minutes: 10 # under a minute; a slow download fails here, by name, instead of using up the job's time
         run: |
+          # On AWS runners the image's mirror list starts with us-east-2.ec2.archive.ubuntu.com, which sends
+          # some downloads at 0.1 MB/s: WebKit's 125 MB of packages took 15 to 26 minutes there (2026-11-18),
+          # and the job ran out of time in the browser checks. Azure's mirror, first on Azure runners, was
+          # fast from both clouds.
+          sudo sed -i 's|^http://[^/]*\.ec2\.archive\.ubuntu\.com/|http://azure.archive.ubuntu.com/|' /etc/apt/apt-mirrors.txt
           bun --bun playwright install --with-deps webkit
-          mise run test:ui
+
+      - name: Browser checks (WebKit)
+        timeout-minutes: 15 # about 6 minutes
+        run: mise run test:ui
 
   package:
     if: github.actor != 'briardr-release[bot]'
@@ -104,7 +113,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
         with:
           install_args: bun
       - run: bun install --frozen-lockfile
