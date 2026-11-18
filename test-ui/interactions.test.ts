@@ -747,6 +747,17 @@ describe('ownership (two devices)', () => {
     assert.equal(await a.page.getByRole('button', { name: 'Resume' }).count(), 0);
     await a.ctx.close();
   });
+
+  test('Hand back gives control back to Herdr and keeps watching', async () => {
+    const a = await device('iphone', 'phone-hand-back');
+    await openTarget(a.page);
+    await a.page.getByRole('button', { name: 'Stream actions' }).click();
+    await a.page.getByRole('menuitem', { name: /^Hand back to/ }).click();
+    await a.page.waitForSelector('[data-ownership=watching]');
+    await a.page.locator('.watch-banner', { hasText: 'Handed back to' }).waitFor();
+    await waitUntil('control to go back', () => s.run.hub.controllers === 0);
+    await a.ctx.close();
+  });
 });
 
 describe('agents list, peek, banners and links', () => {

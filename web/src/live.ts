@@ -23,7 +23,7 @@ class Live {
     if (this.started) return this.retryNow(); // e.g. paired again after being signed out
     this.started = true;
     this.stopped = false;
-    onNetworkChange((kind) => record('network_change', { kind, net: networkKind() })); // the socket reconnects
+    onNetworkChange((kind) => record('network_change', { kind, net: networkKind() })); // the socket reconnects by itself
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && !this.stopped) {
         if (conn.value.state !== 'online') this.socket.retryNow();
