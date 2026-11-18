@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::http::Method;
-use serde::Serialize;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::{
-    action_err, js_number, json_body, json_body_as, now_ms, ok, raw_body, response, stream_gone,
-    upload_body, ApiError, App, Ctx, Routes, JSON_LIMIT,
+    action_err, done, json_body_as, now_ms, ok, raw_body, response, stream_gone, upload_body,
+    ApiError, App, Ctx, RenameBody, Routes, JSON_LIMIT,
 };
-use crate::actions::NewStream;
+use crate::actions::{NewProject, NewStream, NewWorkspace};
 use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
@@ -33,9 +33,10 @@ where
         .map_err(|_| ApiError::Internal)
 }
 
-/// A body field: a missing key is treated like null.
-fn field(body: &Value, key: &str) -> Value {
-    body.get(key).cloned().unwrap_or(Value::Null)
+/// `POST /api/streams/:id/seen`: whether the agent's turn has been seen; left out, it has.
+#[derive(Deserialize)]
+struct SeenBody {
+    seen: Option<bool>,
 }
 
 /// Node's `path.normalize` on an absolute or relative path, without touching the disk.
@@ -243,25 +244,67 @@ fn git_code(e: &GitError) -> &'static str {
     }
 }
 
-fn doc_entry_json(d: &DocEntry) -> Value {
-    json!({
-        "path": d.path,
-        "name": d.name,
-        "changed": d.changed,
-        "readme": d.readme,
-        "size": d.size,
-    })
+/// `GET /api/streams/:id/changes/diff`: one file's diff, with the signature it was made for.
+#[derive(Serialize)]
+struct DiffBody {
+    path: String,
+    text: String,
+    lines: usize,
+    truncated: bool,
+    binary: bool,
+    /// The file's change signature, which marks it reviewed as it is.
+    signature: String,
 }
 
-fn file_entry_json(e: &FileEntry) -> Value {
-    json!({
-        "name": e.name,
-        "path": e.path,
-        "dir": e.dir,
-        "size": e.size,
-        "link": e.link,
-        "changed": e.changed,
-    })
+/// `GET /api/streams/:id/docs`: the folder's Markdown documents.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DocsBody {
+    docs: Vec<DocEntry>,
+    total: usize,
+    truncated: bool,
+    folder: Option<String>,
+    as_of: u64,
+}
+
+/// `GET /api/streams/:id/files`: a folder's entries.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirBody {
+    path: String,
+    entries: Vec<FileEntry>,
+    total: usize,
+    truncated: bool,
+    as_of: u64,
+}
+
+/// `GET /api/streams/:id/files/file`: a file's text, or None for a binary file.
+#[derive(Serialize)]
+struct FileBody {
+    path: String,
+    text: Option<String>,
+    binary: bool,
+    size: u64,
+}
+
+/// `POST /api/streams/:id/files/site`: the token of a link that shows the stream's HTML files as pages.
+#[derive(Serialize)]
+struct SiteLink {
+    token: String,
+}
+
+/// `POST /api/streams/:id/uploads`: where the upload is on the host, as a path and quoted for a shell.
+#[derive(Serialize)]
+struct Uploaded {
+    path: String,
+    quoted: String,
+    bytes: usize,
+}
+
+/// `POST /api/dictation`: what was said.
+#[derive(Serialize)]
+struct Dictated {
+    text: String,
 }
 
 /// The status and code sent for a refused docs or files read.
@@ -288,12 +331,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/workspaces",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_workspace(&field(&b, "name"), &field(&b, "folder"))
-                .await?)
+            let req: NewWorkspace = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_workspace(req).await?)
         },
     );
 
@@ -302,12 +341,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/projects",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            ok(app
-                .d
-                .actions
-                .create_project(&field(&b, "workspaceId"), &field(&b, "name"))
-                .await?)
+            let req: NewProject = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            ok(app.d.actions.create_project(req).await?)
         },
     );
 
@@ -315,10 +350,7 @@ pub(super) fn register(r: &mut Routes) {
         Method::GET,
         "/api/agents",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move {
-            ok(serde_json::to_value(app.d.actions.agents().await)
-                .map_err(|_| ApiError::Internal)?)
-        },
+        |app: Arc<App>, _ctx: Ctx| async move { ok(app.d.actions.agents().await) },
     );
 
     r.add(
@@ -337,12 +369,12 @@ pub(super) fn register(r: &mut Routes) {
         "/api/workspaces/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename_workspace(ctx.param("id"), &field(&b, "name"))
+                .rename_workspace(ctx.param("id"), b.name.as_deref())
                 .await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -352,7 +384,7 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, ctx: Ctx| async move {
             app.d.actions.close_workspace(ctx.param("id")).await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -361,12 +393,12 @@ pub(super) fn register(r: &mut Routes) {
         "/api/projects/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename_project(ctx.param("id"), &field(&b, "name"))
+                .rename_project(ctx.param("id"), b.name.as_deref())
                 .await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -376,7 +408,7 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, ctx: Ctx| async move {
             app.d.actions.close_project(ctx.param("id")).await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -386,7 +418,7 @@ pub(super) fn register(r: &mut Routes) {
         false,
         |app: Arc<App>, ctx: Ctx| async move {
             app.d.actions.close_stream(ctx.param("id")).await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -396,12 +428,12 @@ pub(super) fn register(r: &mut Routes) {
         "/api/streams/:id/rename",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: RenameBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
             app.d
                 .actions
-                .rename(ctx.param("id"), &field(&b, "name"))
+                .rename(ctx.param("id"), b.name.as_deref())
                 .await?;
-            ok(json!({"ok": true}))
+            done()
         },
     );
 
@@ -410,8 +442,8 @@ pub(super) fn register(r: &mut Routes) {
         "/api/streams/:id/seen",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
-            let seen = field(&b, "seen") != json!(false);
+            let b: SeenBody = json_body_as(&mut ctx, JSON_LIMIT).await?;
+            let seen = b.seen.unwrap_or(true);
             ok(app.d.actions.mark_seen(ctx.param("id"), seen).await?)
         },
     );
@@ -432,12 +464,7 @@ pub(super) fn register(r: &mut Routes) {
             if !app.stream_exists(id) {
                 return Err(stream_gone());
             }
-            let lines = js_number(
-                ctx.query
-                    .get("lines")
-                    .filter(|v| !v.is_empty())
-                    .unwrap_or("1000"),
-            );
+            let lines = ctx.query.get("lines").and_then(|n| n.parse().ok());
             ok(app.d.actions.history(id, lines).await?)
         },
     );
@@ -452,7 +479,7 @@ pub(super) fn register(r: &mut Routes) {
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
             let since_base = since_base(&ctx);
             let report = blocking(move || changes_report(&cwd, since_base)).await?;
-            ok(serde_json::to_value(ChangesBody::from(&report)).map_err(|_| ApiError::Internal)?)
+            ok(ChangesBody::from(&report))
         },
     );
 
@@ -492,14 +519,14 @@ pub(super) fn register(r: &mut Routes) {
                 _ => head_tree(report.no_commits).to_string(),
             };
             match blocking(move || file_diff(&root, &file, &against, "git")).await? {
-                Ok(d) => ok(json!({
-                    "path": d.path,
-                    "text": d.text,
-                    "lines": d.lines,
-                    "truncated": d.truncated,
-                    "binary": d.binary,
-                    "signature": signature,
-                })),
+                Ok(d) => ok(DiffBody {
+                    path: d.path,
+                    text: d.text,
+                    lines: d.lines,
+                    truncated: d.truncated,
+                    binary: d.binary,
+                    signature,
+                }),
                 Err(e) => {
                     let status = match e {
                         GitError::Forbidden(_) => 403,
@@ -525,13 +552,13 @@ pub(super) fn register(r: &mut Routes) {
                 .await?
                 .map_err(|_| ApiError::Internal)?;
             match blocking(move || list_docs(&listing_cwd, &changed)).await? {
-                Ok(list) => ok(json!({
-                    "docs": list.docs.iter().map(doc_entry_json).collect::<Vec<_>>(),
-                    "total": list.total,
-                    "truncated": list.truncated,
-                    "folder": folder,
-                    "asOf": now_ms(),
-                })),
+                Ok(list) => ok(DocsBody {
+                    docs: list.docs,
+                    total: list.total,
+                    truncated: list.truncated,
+                    folder,
+                    as_of: now_ms(),
+                }),
                 Err(_) => Err(action_err(
                     404,
                     "folder_missing",
@@ -552,7 +579,7 @@ pub(super) fn register(r: &mut Routes) {
             let doc = blocking(move || read_doc(&cwd, &rel))
                 .await?
                 .map_err(docs_err)?;
-            ok(json!({"path": doc.path, "text": doc.text, "size": doc.size}))
+            ok(doc)
         },
     );
 
@@ -604,7 +631,7 @@ pub(super) fn register(r: &mut Routes) {
             blocking(move || delete_entry(&cwd, &rel))
                 .await?
                 .map_err(docs_err)?;
-            ok(json!({ "ok": true }))
+            done()
         },
     );
 
@@ -624,13 +651,13 @@ pub(super) fn register(r: &mut Routes) {
             let list = blocking(move || list_dir(&listing_cwd, &rel, &changed))
                 .await?
                 .map_err(docs_err)?;
-            ok(json!({
-                "path": list.path,
-                "entries": list.entries.iter().map(file_entry_json).collect::<Vec<_>>(),
-                "total": list.total,
-                "truncated": list.truncated,
-                "asOf": now_ms(),
-            }))
+            ok(DirBody {
+                path: list.path,
+                entries: list.entries,
+                total: list.total,
+                truncated: list.truncated,
+                as_of: now_ms(),
+            })
         },
     );
 
@@ -650,7 +677,7 @@ pub(super) fn register(r: &mut Routes) {
                 })
                 .await?
                 .map_err(docs_err)?;
-                return ok(serde_json::to_value(found).map_err(|_| ApiError::Internal)?);
+                return ok(found);
             }
             let result = blocking(move || {
                 let changed = changed_docs(&cwd).unwrap_or_default();
@@ -658,10 +685,7 @@ pub(super) fn register(r: &mut Routes) {
             })
             .await?
             .map_err(docs_err)?;
-            ok(json!({
-                "entries": result.entries.iter().map(file_entry_json).collect::<Vec<_>>(),
-                "truncated": result.truncated,
-            }))
+            ok(result)
         },
     );
 
@@ -676,12 +700,12 @@ pub(super) fn register(r: &mut Routes) {
             let f = blocking(move || read_file(&cwd, &rel))
                 .await?
                 .map_err(docs_err)?;
-            ok(json!({
-                "path": f.path,
-                "text": f.text,
-                "binary": f.text.is_none(),
-                "size": f.size,
-            }))
+            ok(FileBody {
+                binary: f.text.is_none(),
+                path: f.path,
+                text: f.text,
+                size: f.size,
+            })
         },
     );
 
@@ -693,7 +717,7 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let token = app.site_links.mint(&s.id, &ctx.device()?.id);
-            ok(json!({"token": token}))
+            ok(SiteLink { token })
         },
     );
 
@@ -728,11 +752,11 @@ pub(super) fn register(r: &mut Routes) {
             match stored {
                 Ok((path, bytes)) => {
                     app.event("upload_ok", json!({"kind": kind_name, "bytes": bytes}));
-                    ok(json!({
-                        "path": path.to_string_lossy().into_owned(),
-                        "quoted": quote_path(&path),
-                        "bytes": bytes,
-                    }))
+                    ok(Uploaded {
+                        path: path.to_string_lossy().into_owned(),
+                        quoted: quote_path(&path),
+                        bytes,
+                    })
                 }
                 Err(e) => {
                     app.event(
@@ -774,7 +798,7 @@ pub(super) fn register(r: &mut Routes) {
                 Ok(text) => {
                     let ms = started.elapsed().as_millis() as u64;
                     app.event("dictation_ok", json!({"ms": ms}));
-                    ok(json!({"text": text}))
+                    ok(Dictated { text })
                 }
                 Err(e) => {
                     let code = e.category.code();
@@ -794,6 +818,7 @@ pub(super) fn register(r: &mut Routes) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn relative_paths_match_node() {

@@ -1,19 +1,22 @@
 // Plugin routes: the list of plugins and turning them on or off for every device.
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
 use axum::http::Method;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use base64::prelude::{Engine, BASE64_STANDARD};
 
 use super::{
-    action_err, header_str, json_body, ok, raw_body, response, stream_gone, ApiError, App, Ctx,
-    Resp, Routes, JSON_LIMIT,
+    action_err, header_str, json_body_as, ok, raw_body, response, stream_gone, ApiError, App, Ctx,
+    DeviceRef, Resp, Routes, JSON_LIMIT,
 };
+use crate::herdr::model::Stream;
 use crate::herdr::state::HerdrReader;
-use crate::plugins::{backend_hash, discover, info_json, web_runtime};
+use crate::plugins::{backend_hash, discover, web_runtime, PluginInfo};
 
 /// Response headers a backend may set; everything else (security headers included) is Briardr's.
 const BACKEND_HEADERS: &[&str] = &[
@@ -35,22 +38,51 @@ where
         .map_err(|_| ApiError::Internal)
 }
 
+/// `PUT /api/plugins/:id`: on or off. A plugin with a backend runs a program on the host, so turning it
+/// on needs the hash of the command the user was shown (`backend.hash` in the list) in `approve`.
+#[derive(Deserialize)]
+struct PluginChange {
+    enabled: Option<bool>,
+    approve: Option<String>,
+}
+
+/// A request for a plugin's backend (`/api/plugins/<id>/<path>?stream=<stream id>&…`), to which
+/// `Backends::request` adds its `type` and `id`. A body that isn't JSON comes as `text`, or as `base64`
+/// when it isn't UTF-8.
+#[derive(Serialize)]
+struct BackendRequest<'a> {
+    method: &'a str,
+    path: String,
+    query: BTreeMap<&'a str, &'a str>,
+    stream: Option<Stream>,
+    device: DeviceRef<'a>,
+    body: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base64: Option<String>,
+}
+
 /// Changes one at a time, so two quick toggles can't each save over the other's config.
 static CHANGES: Mutex<()> = Mutex::const_new(());
 
+/// `GET /api/plugins` and `PUT /api/plugins/:id`: the plugins as they are now.
+#[derive(Serialize)]
+struct Plugins {
+    plugins: Vec<PluginInfo>,
+}
+
 /// Every plugin with whether it's on; built-ins first, in tab order.
-pub(super) async fn plugin_list(app: &Arc<App>) -> Result<Value, ApiError> {
+pub(super) async fn plugin_list(app: &Arc<App>) -> Result<Vec<PluginInfo>, ApiError> {
     let paths = app.d.cfg.paths().clone();
     let state = app.plugins.get();
     let web_dir = app.d.web_dir.clone();
     blocking(move || {
         let runtime = web_runtime(&web_dir);
-        Value::Array(
-            discover(&paths)
-                .iter()
-                .map(|p| info_json(p, &state, runtime.as_deref()))
-                .collect(),
-        )
+        discover(&paths)
+            .iter()
+            .map(|p| PluginInfo::of(p, &state, runtime.as_deref()))
+            .collect()
     })
     .await
 }
@@ -60,20 +92,22 @@ pub(super) fn register(r: &mut Routes) {
         Method::GET,
         "/api/plugins",
         false,
-        |app: Arc<App>, _ctx: Ctx| async move { ok(json!({"plugins": plugin_list(&app).await?})) },
+        |app: Arc<App>, _ctx: Ctx| async move {
+            ok(Plugins {
+                plugins: plugin_list(&app).await?,
+            })
+        },
     );
 
-    // {enabled, approve?}: a plugin with a backend runs a program on the host, so turning it on
-    // needs the hash of the command the user was shown (`backend.hash` in the list).
     r.add(
         Method::PUT,
         "/api/plugins/:id",
         false,
         |app: Arc<App>, mut ctx: Ctx| async move {
             let id = ctx.param("id").to_string();
-            let b = json_body(&mut ctx, JSON_LIMIT).await?;
+            let b: PluginChange = json_body_as(&mut ctx, JSON_LIMIT).await?;
             let _one_at_a_time = CHANGES.lock().await;
-            let Some(enabled) = b.get("enabled").and_then(Value::as_bool) else {
+            let Some(enabled) = b.enabled else {
                 return Err(action_err(400, "invalid", "Say whether the plugin should be on."));
             };
             let paths = app.d.cfg.paths().clone();
@@ -90,7 +124,7 @@ pub(super) fn register(r: &mut Routes) {
                 if let Some(spec) = backend {
                     let hash = backend_hash(spec);
                     let approved = state.approved.get(&id) == Some(&hash);
-                    if !approved && b.get("approve").and_then(Value::as_str) != Some(hash.as_str()) {
+                    if !approved && b.approve.as_deref() != Some(hash.as_str()) {
                         return Err(action_err(
                             409,
                             "approval_needed",
@@ -113,9 +147,9 @@ pub(super) fn register(r: &mut Routes) {
                 app.backends.stop(&id);
             }
             app.event("plugin_toggle", json!({"builtin": plugin.builtin, "enabled": enabled}));
-            let list = plugin_list(&app).await?;
-            app.broadcast(&json!({"t": "plugins", "plugins": list}));
-            ok(json!({"plugins": list}))
+            let plugins = plugin_list(&app).await?;
+            app.broadcast(&json!({"t": "plugins", "plugins": plugins}));
+            ok(Plugins { plugins })
         },
     );
 
@@ -158,39 +192,45 @@ async fn proxy(app: Arc<App>, mut ctx: Ctx) -> Result<Resp, ApiError> {
         ));
     }
     let stream = match ctx.query.get("stream") {
-        Some(sid) => {
-            let s = app
-                .d
+        Some(sid) => Some(
+            app.d
                 .herdr
                 .model()
                 .and_then(|m| m.streams.into_iter().find(|s| s.id == sid))
-                .ok_or_else(stream_gone)?;
-            serde_json::to_value(s).map_err(|_| ApiError::Internal)?
-        }
-        None => Value::Null,
+                .ok_or_else(stream_gone)?,
+        ),
+        None => None,
     };
-    let device = ctx.device()?;
-    let mut req = json!({
-        "method": ctx.method.as_str(),
-        "path": format!("/{}", ctx.param("rest")),
-        "query": ctx.query.pairs().iter().map(|(k, v)| (k.clone(), json!(v))).collect::<serde_json::Map<_, _>>(),
-        "stream": stream,
-        "device": {"id": device.id, "name": device.name},
-        "body": null,
-    });
     let json_type = header_str(&ctx.headers, "content-type").is_some_and(|t| t.contains("json"));
     let raw = raw_body(&mut ctx, JSON_LIMIT).await?;
+    let (mut body, mut text, mut base64) = (Value::Null, None, None);
     if !raw.is_empty() {
         if json_type {
-            req["body"] = serde_json::from_slice(&raw)
+            body = serde_json::from_slice(&raw)
                 .map_err(|_| action_err(400, "bad_json", "Invalid JSON"))?;
         } else {
             match String::from_utf8(raw) {
-                Ok(text) => req["text"] = json!(text),
-                Err(e) => req["base64"] = json!(BASE64_STANDARD.encode(e.into_bytes())),
+                Ok(t) => text = Some(t),
+                Err(e) => base64 = Some(BASE64_STANDARD.encode(e.into_bytes())),
             }
         }
     }
+    let req = BackendRequest {
+        method: ctx.method.as_str(),
+        path: format!("/{}", ctx.param("rest")),
+        query: ctx
+            .query
+            .pairs()
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect(),
+        stream,
+        device: ctx.device()?.into(),
+        body,
+        text,
+        base64,
+    };
+    let req = serde_json::to_value(req).map_err(|_| ApiError::Internal)?;
     let res = app.backends.request(&plugin, req).await.map_err(|e| {
         let (status, code, message) = e.status_code_message();
         action_err(status, code, message)
