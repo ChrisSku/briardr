@@ -870,6 +870,73 @@ describe('agents list, peek, banners and links', () => {
     assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
   });
 
+  test('files dropped where nothing takes them are refused, so the browser doesn’t open one in place of Briardr', async () => {
+    // WebKit gives the page synthetic drag events as it would a drag from Finder, but never opens a file
+    // for them, so what's checked is what decides that: whether the page cancelled the dragover and the
+    // drop. A listener on the element, where a plugin's would be, has each event first: `first` says
+    // nothing had cancelled it yet.
+    const drag = (target: Locator, what: 'image' | 'log' | 'text') =>
+      target.evaluate(async (el, what) => {
+        const dt = new DataTransfer();
+        if (what === 'text') dt.setData('text/plain', 'a few words');
+        else if (what === 'log') dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        else {
+          const c = document.createElement('canvas');
+          c.width = c.height = 40;
+          c.getContext('2d')!.fillRect(0, 0, 40, 40);
+          const png: Blob = await new Promise((r) => c.toBlob((b) => r(b!), 'image/png'));
+          dt.items.add(new File([png], 'shot.png', { type: 'image/png' }));
+        }
+        let first = true;
+        const look = (e: Event) => (first &&= !e.defaultPrevented);
+        el.addEventListener('dragover', look);
+        el.addEventListener('drop', look);
+        const over = new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true });
+        el.dispatchEvent(over);
+        const drop = new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true });
+        el.dispatchEvent(drop);
+        el.removeEventListener('dragover', look);
+        el.removeEventListener('drop', look);
+        return { over: over.defaultPrevented, drop: drop.defaultPrevented, first };
+      }, what);
+    const refused = { over: true, drop: true, first: true };
+    const a = await device('mac', 'mac-stray-drop');
+    onTestFinished(() => a.ctx.close().catch(() => {}));
+    await openTarget(a.page);
+    assert.deepEqual(await drag(a.page.locator('.stream-head'), 'log'), refused, 'the stream’s header');
+    assert.deepEqual(await drag(a.page.locator('.list-pane'), 'log'), refused, 'the list beside the stream');
+    assert.deepEqual(await drag(a.page.locator('.stream-head'), 'text'), { over: false, drop: false, first: true }, 'text is left to the browser');
+    // The terminal still takes files.
+    assert.deepEqual(await drag(a.page.locator('.term-surface .term-screen'), 'log'), refused);
+    await a.page.getByRole('dialog', { name: 'Send file' }).getByText('build.log').waitFor();
+    await a.page.keyboard.press('Escape');
+    await a.page.getByRole('dialog', { name: 'Send file' }).waitFor({ state: 'detached' });
+    // Peek's terminal and the sheet's scrim around it.
+    await a.page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Workspaces' }).click();
+    await a.page.locator('.list-pane').locator('.stream-row', { hasText: 'ui target' }).getByRole('button', { name: /More actions/ }).focus();
+    await a.page.keyboard.press('Enter');
+    await a.page.getByRole('menuitem', { name: /Peek/ }).click();
+    await a.page.getByText('Watching live · read-only').waitFor();
+    assert.deepEqual(await drag(a.page.locator('.peek-screen'), 'log'), refused, 'Peek');
+    assert.deepEqual(await drag(a.page.locator('.scrim'), 'log'), refused, 'the scrim');
+    await a.page.getByRole('button', { name: 'Close' }).click();
+    // A note takes images; another file dropped on it is refused, and the note is left as it was.
+    await a.page.getByRole('tab', { name: 'Notes' }).click();
+    await a.page.getByRole('button', { name: 'New note' }).click();
+    const area = a.page.getByLabel('Note for ui target');
+    assert.deepEqual(await drag(area, 'log'), refused);
+    assert.equal(await area.inputValue(), '');
+    assert.deepEqual(await drag(area, 'image'), refused);
+    await a.page.waitForFunction(() => /^!\[shot\]\(note:[a-f0-9]{24}\.png\)/.test((document.querySelector('.notes-area') as HTMLTextAreaElement).value));
+    await a.page.getByText(`Saved on the ${host.noun}`).waitFor();
+    // The key bar shows on touch screens (this one watches the terminal the Mac controls).
+    const b = await device('iphone', 'phone-stray-drop');
+    onTestFinished(() => b.ctx.close().catch(() => {}));
+    await b.page.goto(s.base + '/workspaces');
+    await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
+    assert.deepEqual(await drag(b.page.locator('.keybar'), 'log'), refused, 'the key bar');
+  });
+
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
     const a = await device('iphone', 'phone-swipe');
     const row = a.page.locator('.stream-row', { hasText: 'ui target' });
