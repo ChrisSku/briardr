@@ -1,12 +1,17 @@
 // What the host can do: Mac-only integrations are off elsewhere.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HostPlatform {
     Macos,
     Linux,
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the client sees as `host` (in /api/session, /api/mac, settings and the live `mac` message).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostCapabilities {
     pub platform: HostPlatform,
     /// "Mac" or "server".
@@ -53,6 +58,18 @@ mod tests {
         assert_eq!(host_platform("win32"), HostPlatform::Other);
         assert_eq!(host_platform("other"), HostPlatform::Other);
         assert_eq!(host_platform(""), HostPlatform::Other);
+    }
+
+    #[test]
+    fn the_client_sees_the_capabilities_in_camel_case() {
+        assert_eq!(
+            serde_json::to_value(capabilities(HostPlatform::Linux)).unwrap(),
+            serde_json::json!({
+                "platform": "linux", "noun": "server", "battery": false, "keepAwake": false,
+                "sleep": false, "dictation": false, "claudeKeychain": false,
+            })
+        );
+        assert_eq!(serde_json::to_value(HostPlatform::Macos).unwrap(), "macos");
     }
 
     #[test]

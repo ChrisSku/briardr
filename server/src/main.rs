@@ -44,7 +44,7 @@ use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::app::{caps_json, js_number};
+use crate::app::js_number;
 use crate::auth::Auth;
 use crate::config::{
     default_data_dir, load_config, lock_for, parse_public_origin, save_config, validate_config,
@@ -335,7 +335,6 @@ async fn status(ctx: &Ctx) -> CliResult {
         tailscale().await?
     };
     let caps = capabilities(host_platform(&host_platform_name(&ctx.env)));
-    let caps_value = caps_json(&caps);
     let public_origin = if problem.is_some() {
         None
     } else {
@@ -366,8 +365,8 @@ async fn status(ctx: &Ctx) -> CliResult {
         .is_ok();
     let doc = json!({
         "dataDir": ctx.paths.root.display().to_string(),
-        "platform": caps_value["platform"],
-        "capabilities": caps_value,
+        "platform": caps.platform,
+        "capabilities": caps,
         "mode": cfg.tls.mode,
         "publicOrigin": public_origin,
         "previewOrigins": preview_origins,

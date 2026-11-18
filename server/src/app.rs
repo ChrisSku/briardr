@@ -23,6 +23,7 @@ use axum::extract::FromRequestParts;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -73,24 +74,6 @@ pub fn the_host(caps: &HostCapabilities) -> String {
     } else {
         "the server".to_string()
     }
-}
-
-/// The capabilities object the client sees (`host` in /api/session, /api/mac, settings, live `mac`).
-pub fn caps_json(caps: &HostCapabilities) -> Value {
-    let platform = match caps.platform {
-        HostPlatform::Macos => "macos",
-        HostPlatform::Linux => "linux",
-        HostPlatform::Other => "other",
-    };
-    json!({
-        "platform": platform,
-        "noun": caps.noun,
-        "battery": caps.battery,
-        "keepAwake": caps.keep_awake,
-        "sleep": caps.sleep,
-        "dictation": caps.dictation,
-        "claudeKeychain": caps.claude_keychain,
-    })
 }
 
 // ---------- errors ----------
@@ -160,8 +143,8 @@ pub fn response(status: u16, body: impl Into<Body>, headers: &[(&str, String)]) 
     res
 }
 
-/// `this.send`: JSON with `no-store`, plus extra headers.
-pub fn send(status: u16, body: &Value, extra: &[(&str, String)]) -> Resp {
+/// `body` as JSON with `no-store`, plus extra headers.
+pub fn send(status: u16, body: &impl Serialize, extra: &[(&str, String)]) -> Resp {
     let mut headers = vec![
         (
             "content-type",
@@ -170,14 +153,68 @@ pub fn send(status: u16, body: &Value, extra: &[(&str, String)]) -> Resp {
         ("cache-control", "no-store".to_string()),
     ];
     headers.extend(extra.iter().cloned());
-    response(status, body.to_string(), &headers)
+    match serde_json::to_vec(body) {
+        Ok(json) => response(status, json, &headers),
+        // Only a map whose keys aren't text fails, and the API's types have none.
+        Err(_) => response(500, Body::empty(), &[]),
+    }
 }
 
-pub fn ok(body: Value) -> Result<Resp, ApiError> {
+pub fn ok(body: impl Serialize) -> Result<Resp, ApiError> {
     Ok(send(200, &body, &[]))
 }
 
-/// The response Bun's `error` handler gives for an exception outside the route try/catch.
+/// `{ok}`: whether it was done, from a route that has nothing else to say.
+#[derive(Serialize)]
+pub struct Done {
+    pub ok: bool,
+}
+
+pub fn done() -> Result<Resp, ApiError> {
+    ok(Done { ok: true })
+}
+
+/// What a refused request says: its code and, for people, what went wrong.
+#[derive(Serialize)]
+pub struct ErrorBody<'a> {
+    pub error: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<&'a str>,
+}
+
+/// A refusal with its code and message.
+pub fn refuse(status: u16, error: &str, message: &str) -> Resp {
+    send(
+        status,
+        &ErrorBody {
+            error,
+            message: Some(message),
+        },
+        &[],
+    )
+}
+
+/// A refusal with only its code.
+pub fn refuse_code(status: u16, error: &str) -> Resp {
+    send(
+        status,
+        &ErrorBody {
+            error,
+            message: None,
+        },
+        &[],
+    )
+}
+
+/// `GET /api/…` of a built-in plugin that is off.
+#[derive(Serialize)]
+struct PluginDisabled<'a> {
+    error: &'static str,
+    plugin: &'a str,
+    message: &'static str,
+}
+
+/// The plain-text 500 for a request that fails before it reaches a route.
 fn server_error(host: &str) -> Resp {
     response(
         500,
@@ -284,7 +321,7 @@ fn is_loopback_name(name: &str) -> bool {
 /// Read a request body, refusing it as soon as it grows past the limit (413 `too_large`).
 pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<Vec<u8>, ApiError> {
     let too_large = || action_err(413, "too_large", "Request too large");
-    if js_number(header_str(headers, "content-length").unwrap_or("0")) > limit as f64 {
+    if declared_length(headers) > limit as u64 {
         return Err(too_large());
     }
     let mut body = body;
@@ -299,11 +336,6 @@ pub async fn read_body(headers: &HeaderMap, body: Body, limit: usize) -> Result<
         }
     }
     Ok(out)
-}
-
-/// `this.body`: JSON body (empty = `{}`), 400 `bad_json` when it doesn't parse.
-pub async fn json_body(ctx: &mut Ctx, limit: usize) -> Result<Value, ApiError> {
-    json_body_as(ctx, limit).await
 }
 
 /// The JSON body as `T` (empty = `{}`), 400 `bad_json` when it doesn't parse or doesn't fit `T`.
@@ -328,8 +360,8 @@ pub async fn upload_body(
 ) -> Result<Vec<u8>, crate::uploads::UploadError> {
     use crate::uploads::UploadError;
     let max = UploadError::max_bytes(kind);
-    let declared = js_number(header_str(&ctx.headers, "content-length").unwrap_or("0"));
-    if declared > max as f64 {
+    let declared = declared_length(&ctx.headers);
+    if declared > max {
         return Err(UploadError::DeclaredTooLarge(kind));
     }
     let mut body = std::mem::replace(&mut ctx.body, Body::empty());
@@ -344,7 +376,7 @@ pub async fn upload_body(
             out.extend_from_slice(&data);
         }
     }
-    if declared > 0.0 && (out.len() as f64) < declared {
+    if declared > 0 && (out.len() as u64) < declared {
         return Err(UploadError::Cancelled);
     }
     Ok(out)
@@ -352,6 +384,14 @@ pub async fn upload_body(
 
 pub fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// The body size a request declares, 0 when it declares none (hyper refuses a Content-Length that
+/// isn't a number).
+fn declared_length(headers: &HeaderMap) -> u64 {
+    header_str(headers, "content-length")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// JS `Number(s)` for header and query values: trimmed decimal, empty = 0, anything else NaN.
@@ -394,14 +434,26 @@ pub fn decode_uri_component(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-pub(crate) use crate::actions::{js_string, js_truthy};
+/// A device as answers name it.
+#[derive(Serialize)]
+pub struct DeviceRef<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+}
 
-/// `String(x || '')` for a JSON body field.
-pub fn str_or_empty(v: Option<&Value>) -> String {
-    match v {
-        Some(v) if js_truthy(v) => js_string(v),
-        _ => String::new(),
+impl<'a> From<&'a Device> for DeviceRef<'a> {
+    fn from(d: &'a Device) -> Self {
+        DeviceRef {
+            id: &d.id,
+            name: &d.name,
+        }
     }
+}
+
+/// The new name of a device, workspace, project or stream (`POST /api/…/:id/rename`).
+#[derive(Deserialize)]
+pub struct RenameBody {
+    pub name: Option<String>,
 }
 
 /// URL query values as `URLSearchParams.get` returns them (first match, form-decoded).
@@ -757,17 +809,15 @@ impl App {
                     }
                 }
                 if last.is_some() && now != last {
-                    if let Ok(list) = routes_plugins::plugin_list(&app).await {
+                    if let Ok(plugins) = routes_plugins::plugin_list(&app).await {
                         // Backends of plugins turned off (or changed) on the host stop.
-                        let active: Vec<String> = list
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter(|p| p["enabled"] == json!(true))
-                            .filter_map(|p| p["id"].as_str().map(str::to_string))
+                        let active: Vec<String> = plugins
+                            .iter()
+                            .filter(|p| p.enabled)
+                            .map(|p| p.id.clone())
                             .collect();
                         app.backends.retain(&active);
-                        app.broadcast(&json!({"t": "plugins", "plugins": list}));
+                        app.broadcast(&json!({"t": "plugins", "plugins": plugins}));
                     }
                 }
                 drop(app);
@@ -1003,7 +1053,10 @@ impl App {
         let rate_limited = || {
             send(
                 429,
-                &json!({"error": "rate_limited", "message": "Too many requests. Wait a minute."}),
+                &ErrorBody {
+                    error: "rate_limited",
+                    message: Some("Too many requests. Wait a minute."),
+                },
                 &[("retry-after", "60".to_string())],
             )
         };
@@ -1026,29 +1079,30 @@ impl App {
                 return rate_limited();
             }
             if !r.public && device.is_none() {
-                return send(
+                return refuse(
                     401,
-                    &json!({"error": "unauthenticated", "message": "This device isn’t signed in to Briardr."}),
-                    &[],
+                    "unauthenticated",
+                    "This device isn’t signed in to Briardr.",
                 );
             }
             let site = header_str(&parts.headers, "sec-fetch-site");
             if site.is_some_and(|s| s != "same-origin" && s != "none") {
-                return send(403, &json!({"error": "cross_site"}), &[]);
+                return refuse_code(403, "cross_site");
             }
             if method != Method::GET
                 && method != Method::HEAD
                 && !self.origin_allowed(&parts.headers)
             {
-                return send(403, &json!({"error": "bad_origin"}), &[]);
+                return refuse_code(403, "bad_origin");
             }
             if let Some(plugin) = self.routes.0[idx].plugin {
                 if !self.plugins.get().is_enabled(plugin) {
-                    return send(
-                        404,
-                        &json!({"error": "plugin_disabled", "plugin": plugin, "message": "This plugin is turned off. Turn it on in Settings → Plugins."}),
-                        &[],
-                    );
+                    let body = PluginDisabled {
+                        error: "plugin_disabled",
+                        plugin,
+                        message: "This plugin is turned off. Turn it on in Settings → Plugins.",
+                    };
+                    return send(404, &body, &[]);
                 }
             }
             let ctx = Ctx {
@@ -1065,36 +1119,25 @@ impl App {
             let fut = (self.routes.0[idx].h)(self.clone(), ctx);
             return match fut.await {
                 Ok(res) => res,
-                Err(ApiError::Action(e)) => send(
-                    e.status,
-                    &json!({"error": e.code, "message": e.message}),
-                    &[],
-                ),
+                Err(ApiError::Action(e)) => refuse(e.status, &e.code, &e.message),
                 Err(ApiError::Herdr(e)) => {
                     let e = from_herdr(&e, &self.host());
-                    send(
-                        e.status,
-                        &json!({"error": e.code, "message": e.message}),
-                        &[],
-                    )
+                    refuse(e.status, &e.code, &e.message)
                 }
                 Err(ApiError::Internal) => {
                     self.event(
                         "api_error",
                         json!({"method": method.as_str().to_lowercase(), "category": "exception"}),
                     );
-                    send(
-                        500,
-                        &json!({"error": "internal", "message": format!("Something went wrong on {}.", self.host())}),
-                        &[],
-                    )
+                    let message = format!("Something went wrong on {}.", self.host());
+                    refuse(500, "internal", &message)
                 }
             };
         }
         if self.authenticate(&parts.headers).is_none() && !self.anon_allowed(&client) {
             return rate_limited();
         }
-        send(404, &json!({"error": "not_found"}), &[])
+        refuse_code(404, "not_found")
     }
 
     /// An installed plugin's client build (`/plugins/<id>/<file>`): signed-in devices only, active plugins
@@ -1332,7 +1375,7 @@ impl App {
         let summary = lock(&self.d.power).summary().cloned();
         if let Some(mac) = summary {
             let _ = tx.send(Out::Text(
-                json!({"t": "mac", "mac": mac, "host": caps_json(&self.d.caps)}).to_string(),
+                json!({"t": "mac", "mac": mac, "host": &self.d.caps}).to_string(),
             ));
         }
         // Briardr sends its own pings and drops sockets that stop answering them.
@@ -1398,9 +1441,7 @@ impl App {
             .await
             .map_err(|_| ApiError::Internal)?;
         self.power_events(&report.events);
-        self.broadcast(
-            &json!({"t": "mac", "mac": report.summary, "host": caps_json(&self.d.caps)}),
-        );
+        self.broadcast(&json!({"t": "mac", "mac": report.summary, "host": &self.d.caps}));
         Ok(report.summary)
     }
 
