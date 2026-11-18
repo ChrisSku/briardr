@@ -1,0 +1,42 @@
+# Known advisories in the dependencies (`mise run deps:audit`): the server's crates against RustSec's
+# database (cargo-deny, server/deny.toml), and the client's, the tests' and the scripts' packages against
+# npm's (bun audit). Their licenses and sources are checked with everything else (linux.yml).
+# An advisory can be published any day, about a dependency no pull request touched, so this workflow is
+# apart from the Linux checks: it isn't a required check, and its runs on main don't hold back a release.
+# A new advisory turns this check red on every pull request, and on main, without blocking a merge; it runs
+# every morning too, so one is noticed while nothing is being merged. The way forward is a pull request
+# that updates the dependency (`bun audit fix`, `cargo update -p <crate>`) or, while no fixed version
+# exists, ignores the advisory with the reason (server/deny.toml, or `--ignore` on bun audit in mise.toml).
+# Actions are pinned to commits; the comment names the release each one is.
+name: audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+
+# A newer run for the same pull request or branch cancels the one it replaces: it checks the newer commit
+# against the same advisories.
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  advisories:
+    # The "Version X.Y.Z" commits change no dependency.
+    if: github.actor != 'briardr-release[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          install_args: bun rust cargo-deny # cargo-deny reads the crate graph with cargo
+      - run: mise run deps:audit

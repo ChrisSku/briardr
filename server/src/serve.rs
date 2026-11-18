@@ -287,7 +287,7 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
         (None, Some(dns)) => format!("https://{dns}"),
         (None, None) => public_origin.clone(),
     };
-    let cell = Arc::new(ConfigCell::new(cfg.clone(), paths.clone()));
+    let cell = Arc::new(ConfigCell::new(cfg.clone(), paths.clone(), env.clone()));
     let push = {
         // Devices follow the host's alert settings where they didn't choose.
         let c = cell.clone();
@@ -303,9 +303,11 @@ pub async fn serve(paths: Paths, quiet: bool) -> Result<Running, ServeError> {
             .map_err(|e| ServeError::Other(e.to_string()))?,
         )
     };
-    // A device revoked while Briardr wasn't running (`briardr revoke`) gets no more alerts.
-    let paired: HashSet<String> = auth.list().into_iter().map(|d| d.id).collect();
-    let _ = push.forget_unpaired(&paired);
+    // A device revoked while Briardr wasn't running (`briardr revoke`) gets no more alerts. A devices file
+    // that can't be read says nothing about which devices are paired, so then no device's alerts go.
+    if let Ok(paired) = auth.paired() {
+        let _ = push.forget_unpaired(&paired);
+    }
     let tap = StatuslineTap::new(
         PathBuf::from(cfg.usage.claude_config_dir.clone().unwrap_or_default()),
         paths.state(),

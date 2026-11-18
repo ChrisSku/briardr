@@ -1,9 +1,8 @@
 // Device pairing and authentication (secrets/devices.json, secrets/pairing.json, and secrets/devices.lock,
 // which every Briardr process holds while it changes the other two).
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -15,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
-use crate::config::{read_json, write_file_atomic, ConfigError};
+use crate::config::{lock_for, read_json, write_file_atomic, ConfigError, Stamp};
 
 pub const COOKIE: &str = "__Host-briardr";
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTVWXYZ23456789"; // no 0/O/1/I/L/U
@@ -70,7 +69,6 @@ pub enum PairError {
 pub struct Auth {
     pub devices_file: PathBuf,
     pub pairing_file: PathBuf,
-    lock_file: PathBuf,
     /// Guards the devices and the pairing file, so attempt counts can't race.
     devices: Mutex<Devices>,
     last_seen_dirty: AtomicBool,
@@ -85,26 +83,6 @@ struct Devices {
     stamp: Option<Stamp>,
 }
 
-/// What tells one version of a file from another: a save (`write_file_atomic`) is a new file, so a new
-/// inode, and an edit in place changes its size or modification time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Stamp {
-    ino: u64,
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
-impl Stamp {
-    fn of(file: &Path) -> Option<Stamp> {
-        let m = fs::metadata(file).ok()?;
-        Some(Stamp {
-            ino: m.ino(),
-            len: m.len(),
-            modified: m.modified().ok(),
-        })
-    }
-}
-
 /// The devices and their files held for a change: this process's lock, then the lock file against
 /// other Briardr processes (`briardr pair`, `briardr revoke`).
 struct Held<'a> {
@@ -116,7 +94,6 @@ impl Auth {
     /// The devices file is read when they're first needed.
     pub fn new(devices_file: PathBuf, pairing_file: PathBuf) -> Self {
         Auth {
-            lock_file: devices_file.with_extension("lock"),
             devices_file,
             pairing_file,
             devices: Mutex::default(),
@@ -142,13 +119,7 @@ impl Auth {
     /// Holds the devices for a change. The lock file comes first, so a request waiting in `current`
     /// never waits for another process.
     fn hold(&self) -> Result<Held<'_>, ConfigError> {
-        let files = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .mode(0o600)
-            .open(&self.lock_file)?;
-        files.lock()?;
+        let files = lock_for(&self.devices_file)?;
         Ok(Held {
             devices: self.lock(),
             _files: files,
@@ -203,6 +174,14 @@ impl Auth {
                 last_seen_at: d.last_seen_at,
             })
             .collect()
+    }
+    /// The paired devices' IDs as the devices file says now. Unlike `list`, which answers with the devices
+    /// last read, a file that can't be read is an error: it says nothing about which devices are paired.
+    pub fn paired(&self) -> Result<HashSet<String>, ConfigError> {
+        Ok(read_devices(&self.devices_file)?
+            .into_iter()
+            .map(|d| d.id)
+            .collect())
     }
     /// Receives the id of each revoked device, so live connections can be closed.
     pub fn subscribe_revoked(&self) -> broadcast::Receiver<String> {
@@ -632,6 +611,7 @@ mod tests {
         assert_eq!(server.authenticate(Some(&header)), None);
         assert_eq!(revoked.try_recv().ok(), Some(lost.id.clone()));
         assert_eq!(server.list().len(), 1);
+        assert_eq!(server.paired().unwrap(), HashSet::from([kept.id.clone()]));
 
         // The server's later saves (last-seen times, a rename) don't bring it back.
         server.last_seen_dirty.store(true, Ordering::Relaxed);
@@ -681,6 +661,7 @@ mod tests {
 
         // Neither signed out on a guess nor saved over: it waits for a file it can read.
         assert!(server.authenticate(Some(&header)).is_some());
+        assert!(server.paired().is_err());
         assert!(server.revoke(&device.id).is_err());
         assert!(auth_in(&dir).revoke(&device.id).is_err());
         assert_eq!(
@@ -693,6 +674,7 @@ mod tests {
             None,
             "no file, no devices"
         );
+        assert!(server.paired().unwrap().is_empty());
     }
 
     #[test]

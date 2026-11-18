@@ -944,7 +944,7 @@ mod tests {
         ));
         let diag = Arc::new(Diagnostics::new(dir.join("diag"), dir.join("diag-salt"))?);
         let previews = Previews::new(
-            Arc::new(ConfigCell::new(cfg, paths)),
+            Arc::new(ConfigCell::new(cfg, paths, Default::default())),
             None,
             vec!["127.0.0.1".to_string()],
             auth,

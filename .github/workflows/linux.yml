@@ -1,4 +1,5 @@
-# Linux checks: typecheck, the Rust checks, the integration suite and the browser checks (each builds the client
+# Linux checks: typecheck, the Rust checks, the licenses and sources of the server's crates (cargo-deny; their
+# advisories are checked in audit.yml), the integration suite and the browser checks (each builds the client
 # and runs against its own Herdr session), the workflows (actionlint), the setup helper and the installer
 # (shellcheck), and the generated deployment files (systemd units, Caddy site). Every change runs all of them,
 # and packages the release archives for every platform, macOS ones on macOS (package.yml).
@@ -65,6 +66,8 @@ jobs:
           hc --version
 
       - run: mise run check
+      - name: Licenses and sources of the server's crates
+        run: mise run deps:check
       - run: mise run test
 
       - name: Workflows, setup helper and installer

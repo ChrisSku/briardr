@@ -99,3 +99,19 @@ test('a failed settings write leaves the effective configuration unchanged', asy
     fs.renameSync(backup, file);
   }
 });
+
+test('a settings change in the app keeps what `briardr configure` saved for the restart', async () => {
+  const disk = () => JSON.parse(fs.readFileSync(path.join(s.dataDir, 'config.json'), 'utf8'));
+  const { ready } = (await request(s, 'GET', '/api/settings')).json.notifications;
+  assert.match(s.run.cli('configure', '--allowed-networks', '10.8.0.0/24'), /Restart Briardr to apply/);
+  try {
+    assert.equal((await request(s, 'PUT', '/api/settings', { notifications: { ready: !ready } })).status, 200);
+    assert.deepEqual(disk().allowedNetworks, ['10.8.0.0/24'], 'the command line’s change waits for the restart');
+    assert.equal(disk().notifications.ready, !ready);
+  } finally {
+    s.run.cli('configure', '--allowed-networks', '');
+    await request(s, 'PUT', '/api/settings', { notifications: { ready } });
+  }
+  assert.deepEqual(disk().allowedNetworks, []);
+  assert.equal(disk().notifications.ready, ready);
+});
