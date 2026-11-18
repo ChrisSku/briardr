@@ -179,7 +179,9 @@ with `--ignore <GHSA id>` on the `bun audit` line in [`mise.toml`](../mise.toml)
 Bun, Rust and the linters ([`mise.toml`](../mise.toml)) and the Herdr, herdr-core and Caddy versions
 ([`deploy/versions.env`](../deploy/versions.env)) are updated by hand, and so is a new major version of
 TypeScript: it stays on 5 until svelte-check can check the client with TypeScript 7 (the comment in
-`dependabot.yml` says why).
+`dependabot.yml` says why). So are new minor versions of tokio-tungstenite and sha1, which stay on the
+ones axum's WebSocket support uses, so the server builds one copy of each: move them when axum does
+(`mise exec -- cargo tree --manifest-path server/Cargo.toml -i tokio-tungstenite` shows axum's).
 
 ## Releases
 

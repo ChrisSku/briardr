@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::http::Method;
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{
@@ -16,7 +17,8 @@ use crate::dictation::{transcribe, DictationCategory, MAX_AUDIO_BYTES};
 use crate::docs::{list_docs, read_asset, read_doc, DocEntry, DocsError};
 use crate::files::{delete_entry, list_dir, read_file, search_contents, search_files, FileEntry};
 use crate::git::{
-    changes, file_diff, ChangeKind, ChangedFile, ChangesReport, ChangesState, FileRef, GitError,
+    base_of, changes, changes_since_base, file_diff, head_tree, ChangeKind, ChangedFile,
+    ChangesReport, ChangesState, FileRef, GitError,
 };
 use crate::uploads::{quote_path, receive_upload, uploads_root, UploadKind};
 
@@ -86,6 +88,25 @@ fn changed_docs(cwd: &Path) -> Result<HashSet<String>, std::io::Error> {
     Ok(changed)
 }
 
+/// Whether Changes asks for everything since the branch the work started from (`since=base`), not
+/// only the uncommitted work.
+fn since_base(ctx: &Ctx) -> bool {
+    ctx.query.get("since") == Some("base")
+}
+
+/// What Changes lists: everything since the branch the work started from, or the uncommitted work,
+/// which also says whether there is such a branch to offer.
+fn changes_report(cwd: &Path, since_base: bool) -> ChangesReport {
+    if since_base {
+        return changes_since_base(cwd, "git");
+    }
+    let mut report = changes(cwd, "git");
+    if let (Some(root), ChangesState::Ok | ChangesState::Clean) = (&report.root, report.state) {
+        report.base = base_of(root, "git");
+    }
+    report
+}
+
 fn state_code(state: ChangesState) -> &'static str {
     match state {
         ChangesState::Ok => "ok",
@@ -109,43 +130,107 @@ fn change_code(change: ChangeKind) -> &'static str {
     }
 }
 
-fn changed_file_json(f: &ChangedFile) -> Value {
-    json!({
-        "path": f.path,
-        "origPath": f.orig_path,
-        "index": f.index.to_string(),
-        "worktree": f.worktree.to_string(),
-        "staged": f.staged,
-        "unstaged": f.unstaged,
-        "untracked": f.untracked,
-        "conflicted": f.conflicted,
-        "change": change_code(f.change),
-        "modeChange": f.mode_change.as_ref().map(|m| json!({"from": m.from, "to": m.to})),
-        "binary": f.binary,
-        "additions": f.additions,
-        "deletions": f.deletions,
-        "signature": f.signature,
-    })
+/// `GET /api/streams/:id/changes`: a `ChangesReport`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangesBody<'a> {
+    state: &'static str,
+    root: Option<String>,
+    branch: Option<&'a str>,
+    detached: bool,
+    head_short: Option<&'a str>,
+    no_commits: bool,
+    files: Vec<ChangedFileBody<'a>>,
+    total_files: usize,
+    truncated: bool,
+    as_of: u64,
+    base: Option<BaseBody<'a>>,
+    /// What the files are compared with: `head` (the uncommitted work) or `base`.
+    since: &'static str,
+    /// Only on the error paths.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<&'a str>,
 }
 
-/// The `ChangesReport` JSON; `message` is only set on the error paths and comes last.
-fn changes_json(r: &ChangesReport) -> Value {
-    let mut out = json!({
-        "state": state_code(r.state),
-        "root": r.root.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        "branch": r.branch,
-        "detached": r.detached,
-        "headShort": r.head_short,
-        "noCommits": r.no_commits,
-        "files": r.files.iter().map(changed_file_json).collect::<Vec<_>>(),
-        "totalFiles": r.total_files,
-        "truncated": r.truncated,
-        "asOf": r.as_of,
-    });
-    if let (Some(message), Value::Object(map)) = (&r.message, &mut out) {
-        map.insert("message".into(), json!(message));
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangedFileBody<'a> {
+    path: &'a str,
+    orig_path: Option<&'a str>,
+    index: char,
+    worktree: char,
+    staged: bool,
+    unstaged: bool,
+    untracked: bool,
+    conflicted: bool,
+    change: &'static str,
+    mode_change: Option<ModeChangeBody<'a>>,
+    binary: bool,
+    additions: Option<u64>,
+    deletions: Option<u64>,
+    signature: &'a str,
+}
+
+#[derive(Serialize)]
+struct ModeChangeBody<'a> {
+    from: &'a str,
+    to: &'a str,
+}
+
+/// The branch the work started from: its name, the shared commit abbreviated, and HEAD's commits since.
+#[derive(Serialize)]
+struct BaseBody<'a> {
+    name: &'a str,
+    short: &'a str,
+    ahead: u64,
+}
+
+impl<'a> From<&'a ChangedFile> for ChangedFileBody<'a> {
+    fn from(f: &'a ChangedFile) -> Self {
+        ChangedFileBody {
+            path: &f.path,
+            orig_path: f.orig_path.as_deref(),
+            index: f.index,
+            worktree: f.worktree,
+            staged: f.staged,
+            unstaged: f.unstaged,
+            untracked: f.untracked,
+            conflicted: f.conflicted,
+            change: change_code(f.change),
+            mode_change: f.mode_change.as_ref().map(|m| ModeChangeBody {
+                from: &m.from,
+                to: &m.to,
+            }),
+            binary: f.binary,
+            additions: f.additions,
+            deletions: f.deletions,
+            signature: &f.signature,
+        }
     }
-    out
+}
+
+impl<'a> From<&'a ChangesReport> for ChangesBody<'a> {
+    fn from(r: &'a ChangesReport) -> Self {
+        ChangesBody {
+            state: state_code(r.state),
+            root: r.root.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            branch: r.branch.as_deref(),
+            detached: r.detached,
+            head_short: r.head_short.as_deref(),
+            no_commits: r.no_commits,
+            files: r.files.iter().map(ChangedFileBody::from).collect(),
+            total_files: r.total_files,
+            truncated: r.truncated,
+            as_of: r.as_of,
+            base: r.base.as_ref().map(|b| BaseBody {
+                name: &b.name,
+                short: b.commit.get(..7).unwrap_or(&b.commit),
+                ahead: b.ahead,
+            }),
+            since: if r.since_base { "base" } else { "head" },
+            message: r.message.as_deref(),
+        }
+    }
 }
 
 fn git_code(e: &GitError) -> &'static str {
@@ -365,8 +450,9 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
-            let report = blocking(move || changes(&cwd, "git")).await?;
-            ok(changes_json(&report))
+            let since_base = since_base(&ctx);
+            let report = blocking(move || changes_report(&cwd, since_base)).await?;
+            ok(serde_json::to_value(ChangesBody::from(&report)).map_err(|_| ApiError::Internal)?)
         },
     );
 
@@ -377,7 +463,15 @@ pub(super) fn register(r: &mut Routes) {
         |app: Arc<App>, ctx: Ctx| async move {
             let s = app.stream_with_folder(ctx.param("id"))?;
             let cwd = PathBuf::from(s.cwd.unwrap_or_default());
-            let report = blocking(move || changes(&cwd, "git")).await?;
+            let since_base = since_base(&ctx);
+            let report = blocking(move || {
+                if since_base {
+                    changes_since_base(&cwd, "git")
+                } else {
+                    changes(&cwd, "git")
+                }
+            })
+            .await?;
             let p = ctx.query.get("path").unwrap_or("");
             let found = report.files.iter().find(|x| x.path == p);
             let (Some(root), Some(f)) = (report.root.clone(), found) else {
@@ -393,8 +487,11 @@ pub(super) fn register(r: &mut Routes) {
                 orig_path: f.orig_path.clone(),
                 untracked: f.untracked,
             };
-            let no_commits = report.no_commits;
-            match blocking(move || file_diff(&root, &file, no_commits, "git")).await? {
+            let against = match &report.base {
+                Some(base) if report.since_base => base.commit.clone(),
+                _ => head_tree(report.no_commits).to_string(),
+            };
+            match blocking(move || file_diff(&root, &file, &against, "git")).await? {
                 Ok(d) => ok(json!({
                     "path": d.path,
                     "text": d.text,
@@ -720,5 +817,89 @@ mod tests {
         assert_eq!(git_code(&GitError::Failed("x".into())), "error");
         assert_eq!(change_code(ChangeKind::TypeChanged), "type");
         assert_eq!(state_code(ChangesState::GitMissing), "git_missing");
+    }
+
+    #[test]
+    fn changes_answer_has_the_fields_the_client_reads() {
+        let mut report = ChangesReport {
+            state: ChangesState::Ok,
+            message: None,
+            root: Some(PathBuf::from("/repo")),
+            branch: Some("feature".into()),
+            detached: false,
+            head_short: Some("abcdef0".into()),
+            no_commits: false,
+            files: vec![ChangedFile {
+                path: "run.sh".into(),
+                orig_path: Some("old.sh".into()),
+                index: 'R',
+                worktree: '.',
+                staged: true,
+                unstaged: false,
+                untracked: false,
+                conflicted: false,
+                change: ChangeKind::Renamed,
+                mode_change: Some(crate::git::ModeChange {
+                    from: "100644".into(),
+                    to: "100755".into(),
+                }),
+                binary: false,
+                additions: Some(2),
+                deletions: None,
+                signature: "0123456789abcdef".into(),
+            }],
+            total_files: 1,
+            truncated: false,
+            as_of: 5,
+            base: Some(crate::git::Base {
+                name: "origin/main".into(),
+                commit: "1234567890".repeat(4),
+                ahead: 3,
+            }),
+            since_base: true,
+        };
+        let body = |r: &ChangesReport| serde_json::to_value(ChangesBody::from(r)).unwrap();
+        assert_eq!(
+            body(&report),
+            json!({
+                "state": "ok",
+                "root": "/repo",
+                "branch": "feature",
+                "detached": false,
+                "headShort": "abcdef0",
+                "noCommits": false,
+                "files": [{
+                    "path": "run.sh",
+                    "origPath": "old.sh",
+                    "index": "R",
+                    "worktree": ".",
+                    "staged": true,
+                    "unstaged": false,
+                    "untracked": false,
+                    "conflicted": false,
+                    "change": "renamed",
+                    "modeChange": {"from": "100644", "to": "100755"},
+                    "binary": false,
+                    "additions": 2,
+                    "deletions": null,
+                    "signature": "0123456789abcdef",
+                }],
+                "totalFiles": 1,
+                "truncated": false,
+                "asOf": 5,
+                "base": {"name": "origin/main", "short": "1234567", "ahead": 3},
+                "since": "base",
+            })
+        );
+        report.state = ChangesState::Error;
+        report.message = Some("Git took too long".into());
+        report.base = None;
+        report.since_base = false;
+        let out = body(&report);
+        assert_eq!(out["message"], "Git took too long");
+        assert_eq!(
+            (&out["base"], &out["since"]),
+            (&Value::Null, &json!("head"))
+        );
     }
 }

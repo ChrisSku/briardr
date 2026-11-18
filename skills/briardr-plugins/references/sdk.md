@@ -105,8 +105,8 @@ with a plugin answer `404 {"error":"plugin_disabled"}` while that built-in is of
 | Request | Answer |
 | --- | --- |
 | `GET /api/state` | `{ model: { streams, workspaces, projects, … }, herdr, … }`, everything Herdr reports |
-| `GET /api/streams/<id>/changes` (changes) | Git status of the stream's folder: `{ state: 'ok' \| 'clean' \| 'not_repo' \| …, branch, files: [{ path, change, additions, deletions, … }] }` |
-| `GET /api/streams/<id>/changes/diff?path=<file>` (changes) | That file's diff |
+| `GET /api/streams/<id>/changes` (changes) | Git status of the stream's folder: `{ state: 'ok' \| 'clean' \| 'not_repo' \| …, branch, files: [{ path, change, additions, deletions, … }], base, since }`. `base` is `{ name, short, ahead }` when the branch has commits of its own since the repository's main branch (else null); with `?since=base` the files are everything since it, and `since` says which was answered (`'base'` or `'head'`) |
+| `GET /api/streams/<id>/changes/diff?path=<file>` (changes) | That file's diff (`&since=base`: since the base) |
 | `GET /api/streams/<id>/files?path=<dir>` (files) | `{ path, entries: [{ name, path, … }], total, truncated, asOf }` for one folder |
 | `GET /api/streams/<id>/files/file?path=<file>` (files) | `{ text, size, … }` |
 | `GET /api/streams/<id>/files/search?q=<text>` (files) | Matching file names |
