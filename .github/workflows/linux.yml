@@ -131,6 +131,30 @@ jobs:
         timeout-minutes: 15 # about 6 minutes
         run: mise run test:ui
 
+  mirror-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - run: |
+          cat /etc/apt/apt-mirrors.txt
+          deb=pool/universe/f/ffmpeg/libavcodec60_6.1.1-3ubuntu5_amd64.deb
+          for h in $(grep -o 'https\?://[^/ ]*' /etc/apt/apt-mirrors.txt) http://us-west-2.ec2.archive.ubuntu.com http://us-east-2.ec2.archive.ubuntu.com http://archive.ubuntu.com http://azure.archive.ubuntu.com http://security.ubuntu.com; do
+            echo "$h $(curl -s -o /dev/null -m 20 -w '%{http_code} %{size_download}B %{speed_download}B/s' "$h/ubuntu/$deb")"
+          done
+          h=$(grep -o 'https\?://[^/ ]*' /etc/apt/apt-mirrors.txt | head -1)
+          echo "4 parallel from $h:"
+          for f in pool/universe/f/ffmpeg/libavcodec60_6.1.1-3ubuntu5_amd64.deb pool/universe/f/fonts-ipafont/fonts-ipafont-gothic_00303-21ubuntu1_all.deb pool/main/f/fonts-freefont/fonts-freefont-ttf_20211204+svn4273-2_all.deb pool/universe/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3-5_all.deb; do
+            curl -s -o /dev/null -m 20 -w "  %{size_download}B %{speed_download}B/s\n" "$h/ubuntu/$f" &
+          done
+          wait
+          sudo apt-get install -y -qq --no-install-recommends fonts-ipafont-gothic > /dev/null
+          find /var/cache/apt/archives -maxdepth 1 -name '*.deb'
+          apt-config dump | grep -i 'keep\|clean\|Post-Invoke' || true
+
   package:
     if: github.actor != 'briardr-release[bot]'
     uses: ./.github/workflows/package.yml
