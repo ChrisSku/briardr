@@ -101,27 +101,6 @@ jobs:
         timeout-minutes: 15 # about 6 minutes
         run: mise run test:ui
 
-  webkit-install-probe:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
-        with:
-          install_args: bun
-      - run: bun install --frozen-lockfile
-      - run: |
-          cat /etc/apt/apt-mirrors.txt
-          sudo sed -i 's|^http://[^/]*\.ec2\.archive\.ubuntu\.com/|http://azure.archive.ubuntu.com/|' /etc/apt/apt-mirrors.txt
-          cat /etc/apt/apt-mirrors.txt
-          start=$(date +%s)
-          bun --bun playwright install --with-deps webkit
-          echo "INSTALL TOOK $(( $(date +%s) - start ))s"
-
   package:
     if: github.actor != 'briardr-release[bot]'
     uses: ./.github/workflows/package.yml
