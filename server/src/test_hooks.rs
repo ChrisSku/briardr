@@ -5,7 +5,7 @@
 //   POST /__test/auth/flush                   → {ok}, the devices saved as the minute's last-seen flush does
 //   POST /__test/herdr/refresh                → {ok}
 //   GET  /__test/routes                       → [{method, pattern, public}]
-//   GET  /__test/hub/sent                     → [{conn, method}] (only the length is meaningful)
+//   GET  /__test/hub/sent                     → [{}, …], one per input call made to Herdr (only the length counts)
 //   POST /__test/push/capture {status}        → pushes are recorded instead of sent, answered with `status`
 //   GET  /__test/push/sent                    → [plaintext payload JSON, …]
 //   GET  /__test/push/subject                 → the VAPID subject

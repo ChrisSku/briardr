@@ -3,11 +3,10 @@ use std::sync::Arc;
 
 use axum::http::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::{
     action_err, done, json_body_as, ok, response, send, stream_gone, upload_body, ApiError, App,
-    Ctx, Resp, Routes,
+    Ctx, LiveMessage, Resp, Routes,
 };
 use crate::notes::{Note, NotesError, SaveResult, MAX_NOTES};
 use crate::uploads::{UploadError, UploadKind};
@@ -144,7 +143,9 @@ pub(super) fn register(r: &mut Routes) {
                 .await?
                 .map_err(|_| ApiError::Internal)?;
             match result {
-                SaveResult::TooLarge => Err(action_err(413, "too_large", "Notes are limited to 256 KB.")),
+                SaveResult::TooLarge => {
+                    Err(action_err(413, "too_large", "Notes are limited to 256 KB."))
+                }
                 SaveResult::TooMany => Err(action_err(
                     409,
                     "too_many",
@@ -164,7 +165,11 @@ pub(super) fn register(r: &mut Routes) {
                     Ok(send(409, &body, &[]))
                 }
                 SaveResult::Ok(note) => {
-                    app.broadcast(&json!({"t": "notes", "streamId": stream, "noteId": nid, "revision": note.revision}));
+                    app.broadcast(&LiveMessage::Notes {
+                        stream_id: &stream,
+                        note_id: &nid,
+                        revision: note.revision,
+                    });
                     ok(NoteBody { note })
                 }
             }
@@ -184,9 +189,11 @@ pub(super) fn register(r: &mut Routes) {
                 .await?
                 .map_err(|_| ApiError::Internal)?;
             if removed {
-                app.broadcast(
-                    &json!({"t": "notes", "streamId": stream, "noteId": nid, "revision": 0}),
-                );
+                app.broadcast(&LiveMessage::Notes {
+                    stream_id: &stream,
+                    note_id: &nid,
+                    revision: 0,
+                });
             }
             done()
         },
@@ -266,6 +273,7 @@ pub(super) fn register(r: &mut Routes) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn a_saved_note_names_the_revision_it_was_edited_from() {
