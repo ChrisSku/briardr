@@ -44,7 +44,7 @@ if ('serviceWorker' in navigator) {
 
 // Every screen keeps the focused field, and the sheet it's in, above the on-screen keyboard.
 trackKeyboard();
-// A file dropped where nothing takes it doesn't open in place of Briardr.
+// A file or link dropped where nothing takes it doesn't open in place of Briardr.
 refuseStrayDrops();
 mount(App, { target: document.getElementById('app')! });
 boot();

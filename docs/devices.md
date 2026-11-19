@@ -45,8 +45,8 @@ trackpad you can drop files (not folders) on a terminal you control. You see the
 sent and can remove any. They are uploaded to a private folder on the host, and their paths are
 inserted as one paste, never followed by Enter: for an agent each on a line of its own (Claude Code
 attaches an image path that has a line to itself), for a shell as arguments. Images can also be
-dropped on a note; files dropped anywhere else are refused, so the browser never opens one in place of
-Briardr.
+dropped on a note, and text and links in a field you can type in, like a note or Compose; files, links
+and text dropped anywhere else are refused, so the browser never opens one in place of Briardr.
 
 With a mouse or trackpad, the terminal works like one on the Mac: a program that asked for the mouse
 gets your clicks and drags, and in any program dragging selects text and copies it when you let go.

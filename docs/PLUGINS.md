@@ -146,9 +146,10 @@ page, its backend on the host. Briardr doesn't sandbox it. What Briardr does:
   and backend are refused (`plugin_disabled`), for built-ins too.
 - `briardr.terminal.send` is the same insert path as Briardr's own (one paste, never Enter, only while
   this device controls the terminal, refused across a reconnect with `generation`).
-- Files dropped where nothing takes them are refused, so the browser never opens one in place of
-  Briardr. A plugin's view takes a drop as on any page, by cancelling its `dragover` and `drop`; Briardr
-  refuses only after the events have bubbled past it.
+- Files, links and text dropped where nothing takes them are refused, so the browser never opens one in
+  place of Briardr; text and links still drop into a field you can type in. A plugin's view takes a drop
+  as on any page, by cancelling its `dragover` and `drop`; Briardr refuses only after the events have
+  bubbled past it.
 - The skill tells plugin authors (and their agents) Briardr's rules: no Git writes or terminal input
   behind the user's back, nothing sent anywhere unasked, no secrets or terminal content in logs.
 
