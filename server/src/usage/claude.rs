@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use super::codex::UsageError;
-use super::types::{js_num, ProviderReport, UsageWindow};
+use super::types::{epoch_ms, Members, ProviderReport, Spend, UsageWindow};
 use crate::config::{present, read_json, write_file_atomic, ConfigError};
 use crate::http;
 
@@ -48,7 +48,7 @@ pub async fn read_claude_token() -> Result<String, UsageError> {
     .kill_on_drop(true);
     match tokio::time::timeout(Duration::from_secs(30), cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => {
-            parse_keychain(&String::from_utf8_lossy(&out.stdout), now_ms() as f64)
+            parse_keychain(&String::from_utf8_lossy(&out.stdout), now_ms())
         }
         _ => Err(not_signed_in(
             "Claude Code’s sign-in was not found in the Keychain (or access was denied)",
@@ -56,26 +56,38 @@ pub async fn read_claude_token() -> Result<String, UsageError> {
     }
 }
 
-/// The Keychain item is either `{claudeAiOauth: {...}}` or the OAuth object itself.
-fn parse_keychain(stdout: &str, now_ms: f64) -> Result<String, UsageError> {
+/// Claude Code's sign-in as the Keychain holds it: `{claudeAiOauth: {...}}`, or the OAuth object itself.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum KeychainItem {
+    Wrapped {
+        #[serde(rename = "claudeAiOauth")]
+        oauth: OauthToken,
+    },
+    Plain(OauthToken),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OauthToken {
+    access_token: String,
+    /// Epoch ms.
+    expires_at: Option<f64>,
+}
+
+fn parse_keychain(stdout: &str, now_ms: u64) -> Result<String, UsageError> {
     let unreadable = || not_signed_in("Claude Code’s sign-in could not be read");
-    let root: Value = serde_json::from_str(stdout.trim()).map_err(|_| unreadable())?;
-    let oauth = match root.get("claudeAiOauth") {
-        Some(v) if js_truthy(v) => v,
-        _ => &root,
-    };
-    let token = match oauth.get("accessToken") {
-        Some(Value::String(t)) if !t.is_empty() => t.clone(),
-        _ => return Err(unreadable()),
-    };
-    if let Some(expires) = oauth.get("expiresAt") {
-        if js_truthy(expires) && js_number(expires) < now_ms {
-            return Err(not_signed_in(
-                "Claude Code’s sign-in has expired. Open Claude Code on the Mac once to refresh it.",
-            ));
-        }
+    let item: KeychainItem = serde_json::from_str(stdout.trim()).map_err(|_| unreadable())?;
+    let (KeychainItem::Wrapped { oauth } | KeychainItem::Plain(oauth)) = item;
+    if oauth.access_token.is_empty() {
+        return Err(unreadable());
     }
-    Ok(token)
+    if oauth.expires_at.is_some_and(|t| t < now_ms as f64) {
+        return Err(not_signed_in(
+            "Claude Code’s sign-in has expired. Open Claude Code on the Mac once to refresh it.",
+        ));
+    }
+    Ok(oauth.access_token)
 }
 
 fn not_signed_in(message: &str) -> UsageError {
@@ -104,8 +116,8 @@ fn window_order(id: &str) -> u8 {
 fn claude_report(
     source: &str,
     windows: Vec<UsageWindow>,
-    spend: Value,
-    captured_at: Value,
+    spend: Option<Spend>,
+    captured_at: u64,
 ) -> ProviderReport {
     ProviderReport {
         provider: "claude".into(),
@@ -120,48 +132,50 @@ fn claude_report(
     }
 }
 
-pub fn parse_claude_oauth(body: &Value, now: u64) -> ProviderReport {
-    let entries: Vec<(String, &Value)> = match body {
-        Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
-        Value::Array(items) => items
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (i.to_string(), v))
-            .collect(),
-        _ => Vec::new(),
-    };
-    let mut windows = Vec::new();
-    for (key, v) in entries {
-        let Some(used) = v.get("utilization").and_then(Value::as_f64) else {
-            continue;
-        };
-        windows.push(UsageWindow {
-            label: label_for(&key),
-            id: key,
-            used_percent: js_num(used),
-            resets_at: oauth_reset(v.get("resets_at")),
-            window_minutes: None,
-        });
-    }
-    windows.sort_by_key(|w| window_order(&w.id));
-    let spend = match body.get("extra_usage") {
-        Some(extra) if extra.get("is_enabled").is_some_and(js_truthy) => json!({
-            "usedUsd": or_null(extra.get("used_credits")),
-            "limitUsd": or_null(extra.get("monthly_limit")),
-            "period": "monthly",
-        }),
-        _ => Value::Null,
-    };
-    claude_report("oauth", windows, spend, json!(now))
+/// A member of Anthropic's usage answer: a limit (`five_hour`, `seven_day`, `seven_day_opus`, ...)
+/// and how much of it is used, or `extra_usage`, the paid usage past the plan's limits, which also
+/// says whether it's on and what it cost. A limit the plan doesn't have is `null`.
+#[derive(Debug, Deserialize)]
+struct OauthMember {
+    utilization: Option<f64>,
+    /// ISO 8601.
+    resets_at: Option<String>,
+    is_enabled: Option<bool>,
+    used_credits: Option<f64>,
+    monthly_limit: Option<f64>,
 }
 
-fn oauth_reset(v: Option<&Value>) -> Value {
-    match v {
-        Some(Value::String(s)) if !s.is_empty() => parse_date_ms(s)
-            .filter(|t| *t != 0)
-            .map_or(Value::Null, Value::from),
-        _ => Value::Null,
-    }
+fn parse_claude_oauth(body: &Members<OauthMember>, now: u64) -> ProviderReport {
+    let mut windows: Vec<UsageWindow> = body
+        .0
+        .iter()
+        .filter_map(|(key, m)| {
+            Some(UsageWindow {
+                id: key.clone(),
+                label: label_for(key),
+                used_percent: m.utilization?,
+                resets_at: m
+                    .resets_at
+                    .as_deref()
+                    .and_then(parse_date_ms)
+                    .and_then(|t| u64::try_from(t).ok()),
+                window_minutes: None,
+            })
+        })
+        .collect();
+    windows.sort_by_key(|w| window_order(&w.id));
+    let spend = body
+        .0
+        .iter()
+        .find(|(key, _)| key == "extra_usage")
+        .map(|(_, extra)| extra)
+        .filter(|extra| extra.is_enabled == Some(true))
+        .map(|extra| Spend {
+            used_usd: extra.used_credits,
+            limit_usd: extra.monthly_limit,
+            period: Some("monthly".into()),
+        });
+    claude_report("oauth", windows, spend, now)
 }
 
 pub async fn fetch_claude_oauth() -> Result<ProviderReport, UsageError> {
@@ -182,20 +196,18 @@ pub async fn fetch_claude_oauth() -> Result<ProviderReport, UsageError> {
         })?;
     let status = res.status();
     if status == StatusCode::TOO_MANY_REQUESTS {
-        let ra = res
+        // Seconds to wait; a date (the header's other form) or none waits five minutes.
+        let secs = res
             .headers()
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
-            .map_or(0.0, js_number_str);
-        let secs = if ra.is_finite() && ra > 0.0 {
-            ra
-        } else {
-            300.0
-        };
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|secs| *secs > 0)
+            .unwrap_or(300);
         return Err(UsageError {
             category: "rate_limited".into(),
             message: "Anthropic asked Briardr to wait before checking again".into(),
-            retry_after_ms: Some((secs * 1000.0) as u64),
+            retry_after_ms: Some(secs * 1000),
         });
     }
     if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
@@ -213,66 +225,81 @@ pub async fn fetch_claude_oauth() -> Result<ProviderReport, UsageError> {
         .bytes()
         .await
         .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|b| serde_json::from_slice::<Members<OauthMember>>(&b).ok())
         .ok_or_else(|| UsageError::new("error", "Usage could not be read"))?;
     Ok(parse_claude_oauth(&body, now_ms()))
 }
 
 // ---------- Status-line tap ----------
 
-fn statusline_reset(v: Option<&Value>) -> Value {
-    match v {
-        Some(r) if js_truthy(r) => js_num(js_number(r) * 1000.0),
-        _ => Value::Null,
-    }
+/// What the tap records: when, and the `rate_limits` Claude Code passed to the status line.
+#[derive(Debug, Deserialize)]
+struct Capture {
+    #[serde(rename = "capturedAt")]
+    captured_at: u64,
+    rate_limits: StatuslineLimits,
 }
 
-pub fn parse_statusline_capture(cap: &Value) -> Option<ProviderReport> {
-    let rate_limits = cap.get("rate_limits").filter(|r| js_truthy(r))?;
-    let captured_at = cap.get("capturedAt").filter(|c| js_truthy(c))?;
-    let mut windows = Vec::new();
-    for key in ["five_hour", "seven_day"] {
-        let Some(w) = rate_limits.get(key) else {
-            continue;
-        };
-        if let Some(used) = w.get("used_percentage").and_then(Value::as_f64) {
-            windows.push(UsageWindow {
-                id: key.into(),
-                label: label_for(key),
-                used_percent: js_num(used),
-                resets_at: statusline_reset(w.get("resets_at")),
-                window_minutes: None,
-            });
-        }
-    }
-    let spend_limit = rate_limits.get("spend_limit");
-    if let Some(used) = spend_limit
-        .and_then(|s| s.get("used_percentage"))
-        .and_then(Value::as_f64)
-    {
-        let s = spend_limit.unwrap_or(&Value::Null);
-        windows.push(UsageWindow {
-            id: "spend_limit".into(),
-            label: "Spend limit".into(),
-            used_percent: js_num(used),
-            resets_at: statusline_reset(s.get("resets_at")),
+#[derive(Debug, Deserialize)]
+struct StatuslineLimits {
+    five_hour: Option<StatuslineWindow>,
+    seven_day: Option<StatuslineWindow>,
+    spend_limit: Option<SpendLimit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatuslineWindow {
+    used_percentage: Option<f64>,
+    /// Epoch seconds.
+    resets_at: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpendLimit {
+    #[serde(flatten)]
+    window: StatuslineWindow,
+    used_usd: Option<f64>,
+    limit_usd: Option<f64>,
+    period: Option<String>,
+}
+
+fn statusline_report(cap: &Capture) -> ProviderReport {
+    let limits = &cap.rate_limits;
+    let windows = [
+        (
+            "five_hour",
+            label_for("five_hour"),
+            limits.five_hour.as_ref(),
+        ),
+        (
+            "seven_day",
+            label_for("seven_day"),
+            limits.seven_day.as_ref(),
+        ),
+        (
+            "spend_limit",
+            "Spend limit".to_string(),
+            limits.spend_limit.as_ref().map(|s| &s.window),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(id, label, w)| {
+        let w = w?;
+        Some(UsageWindow {
+            id: id.into(),
+            label,
+            used_percent: w.used_percentage?,
+            resets_at: w.resets_at.and_then(epoch_ms),
             window_minutes: None,
-        });
-    }
-    let spend = match spend_limit.filter(|s| js_truthy(s)) {
-        Some(s) => json!({
-            "usedUsd": or_null(s.get("used_usd")),
-            "limitUsd": or_null(s.get("limit_usd")),
-            "period": or_null(s.get("period")),
-        }),
-        None => Value::Null,
-    };
-    Some(claude_report(
-        "statusline",
-        windows,
-        spend,
-        captured_at.clone(),
-    ))
+        })
+    })
+    .collect();
+    let spend = limits.spend_limit.as_ref().map(|s| Spend {
+        used_usd: s.used_usd,
+        limit_usd: s.limit_usd,
+        period: s.period.clone(),
+    });
+    claude_report("statusline", windows, spend, cap.captured_at)
 }
 
 /// The status-line tap's record of what it changed, kept in the state directory.
@@ -420,7 +447,11 @@ impl StatuslineTap {
             exists,
             after: tap_status_line(before.as_ref(), self.command()),
             fingerprint: sha256_hex(&bytes),
-            chained: or_null(before.as_ref().and_then(|b| b.get("command"))),
+            chained: before
+                .as_ref()
+                .and_then(|b| b.get("command"))
+                .cloned()
+                .unwrap_or(Value::Null),
             before: before.unwrap_or(Value::Null),
         })
     }
@@ -524,7 +555,7 @@ impl StatuslineTap {
         Ok(restored)
     }
     pub fn latest(&self) -> Option<ProviderReport> {
-        parse_statusline_capture(&read_json(&self.capture_file(), Value::Null))
+        read_json::<Option<Capture>>(&self.capture_file(), None).map(|cap| statusline_report(&cap))
     }
     fn write_tap_script(&self) -> Result<(), TapError> {
         fs::DirBuilder::new()
@@ -623,57 +654,6 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn or_null(v: Option<&Value>) -> Value {
-    match v {
-        Some(v) if !v.is_null() => v.clone(),
-        _ => Value::Null,
-    }
-}
-
-/// JavaScript truthiness for a JSON value.
-fn js_truthy(v: &Value) -> bool {
-    match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Value::String(s) => !s.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
-    }
-}
-
-/// JavaScript `Number(value)` for a JSON value; arrays and objects are treated as NaN.
-fn js_number(v: &Value) -> f64 {
-    match v {
-        Value::Null => 0.0,
-        Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
-        Value::String(s) => js_number_str(s),
-        Value::Array(_) | Value::Object(_) => f64::NAN,
-    }
-}
-
-/// JavaScript `Number(string)` for the forms Briardr can receive: decimal and 0x/0o/0b integers.
-fn js_number_str(s: &str) -> f64 {
-    let t = s.trim();
-    if t.is_empty() {
-        return 0.0;
-    }
-    let lower = t.to_ascii_lowercase();
-    for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
-        if let Some(digits) = lower.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix).map_or(f64::NAN, |n| n as f64);
-        }
-    }
-    // Rust accepts spellings such as "inf" and "NaN" that JavaScript's Number() does not.
-    if !t
-        .bytes()
-        .all(|b| b.is_ascii_digit() || matches!(b, b'.' | b'e' | b'E' | b'+' | b'-'))
-    {
-        return f64::NAN;
-    }
-    t.parse::<f64>().unwrap_or(f64::NAN)
-}
-
 fn take_digits(b: &[u8], p: &mut usize, n: usize) -> Option<i64> {
     let digits = b.get(*p..*p + n)?;
     if !digits.iter().all(u8::is_ascii_digit) {
@@ -707,8 +687,8 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-/// `Date.parse` for the ISO 8601 forms the usage endpoint sends. Date-only and offset-less times are
-/// read as UTC. Returns epoch milliseconds.
+/// Epoch milliseconds of an ISO 8601 date or date-time, in the forms the usage endpoint sends. Date-only
+/// and offset-less times are read as UTC; a day past the month's end runs into the next month.
 fn parse_date_ms(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let mut p = 0;
@@ -785,14 +765,56 @@ mod tests {
         include_str!("../../fixtures/usage/parseClaudeOauth.five-hour-and-weekly.json");
     const EMPTY_FIXTURE: &str = include_str!("../../fixtures/usage/parseClaudeOauth.empty.json");
 
+    fn oauth(body: Value) -> Value {
+        let body: Members<OauthMember> = serde_json::from_value(body).unwrap();
+        serde_json::to_value(parse_claude_oauth(&body, 1790000000000)).unwrap()
+    }
+
+    fn statusline(cap: Value) -> Option<Value> {
+        let cap: Capture = serde_json::from_value(cap).ok()?;
+        Some(serde_json::to_value(statusline_report(&cap)).unwrap())
+    }
+
     #[test]
-    fn oauth_fixtures_match_ts_output() {
+    fn oauth_fixtures_give_their_reports() {
         for text in [EMPTY_FIXTURE, FIVE_HOUR_FIXTURE] {
             let fixture: Value = serde_json::from_str(text).unwrap();
-            let now = fixture["input"][1].as_u64().unwrap();
-            let report = parse_claude_oauth(&fixture["input"][0], now);
-            assert_eq!(serde_json::to_value(&report).unwrap(), fixture["output"]);
+            assert_eq!(fixture["input"][1], 1790000000000u64);
+            assert_eq!(oauth(fixture["input"][0].clone()), fixture["output"]);
         }
+    }
+
+    #[test]
+    fn oauth_reads_every_limit_and_the_extra_usage() {
+        let v = oauth(json!({
+            "five_hour": { "utilization": 6.0, "resets_at": "2026-10-11T18:00:00.943648+00:00" },
+            "seven_day": { "utilization": 35.0, "resets_at": null },
+            "seven_day_oauth_apps": null,
+            "seven_day_opus": null,
+            "seven_day_sonnet": { "utilization": 2.5, "resets_at": "2026-10-15T00:00:00Z" },
+            "iguana_necktie": null,
+            "extra_usage": { "is_enabled": true, "monthly_limit": 5000, "used_credits": 1234.0, "utilization": 24.68 }
+        }));
+        assert_eq!(
+            v["windows"],
+            json!([
+                { "id": "five_hour", "label": "5-hour", "usedPercent": 6, "resetsAt": 1791741600943u64 },
+                { "id": "seven_day", "label": "Weekly", "usedPercent": 35, "resetsAt": null },
+                { "id": "seven_day_sonnet", "label": "Weekly · Sonnet", "usedPercent": 2.5, "resetsAt": 1792022400000u64 },
+                { "id": "extra_usage", "label": "extra usage", "usedPercent": 24.68, "resetsAt": null }
+            ])
+        );
+        assert_eq!(
+            v["spend"],
+            json!({ "usedUsd": 1234, "limitUsd": 5000, "period": "monthly" })
+        );
+        let off = oauth(json!({
+            "five_hour": { "utilization": 1 },
+            "extra_usage": { "is_enabled": false, "monthly_limit": null, "used_credits": null, "utilization": null },
+            "tier": "max"
+        }));
+        assert_eq!(off["windows"].as_array().unwrap().len(), 1);
+        assert_eq!(off["spend"], Value::Null);
     }
 
     #[test]
@@ -805,7 +827,7 @@ mod tests {
                 "spend_limit": { "used_percentage": 3, "used_usd": 1.5, "limit_usd": 50, "period": "monthly" }
             }
         });
-        let v = serde_json::to_value(parse_statusline_capture(&cap).unwrap()).unwrap();
+        let v = statusline(cap).unwrap();
         assert_eq!(v["source"], "statusline");
         assert_eq!(v["capturedAt"], 1790000000000u64);
         assert_eq!(
@@ -824,19 +846,30 @@ mod tests {
 
     #[test]
     fn statusline_capture_requires_rate_limits_and_timestamp() {
-        assert!(
-            parse_statusline_capture(&json!({ "capturedAt": 1, "rate_limits": null })).is_none()
-        );
-        assert!(parse_statusline_capture(&json!({ "rate_limits": {} })).is_none());
-        assert!(parse_statusline_capture(&json!(null)).is_none());
-        let cap =
-            json!({ "capturedAt": 1, "rate_limits": { "five_hour": { "used_percentage": 1 } } });
-        let v = serde_json::to_value(parse_statusline_capture(&cap).unwrap()).unwrap();
+        assert!(statusline(json!({ "capturedAt": 1, "rate_limits": null })).is_none());
+        assert!(statusline(json!({ "rate_limits": {} })).is_none());
+        assert!(statusline(json!(null)).is_none());
+        let v = statusline(
+            json!({ "capturedAt": 1, "rate_limits": { "five_hour": { "used_percentage": 1 } } }),
+        )
+        .unwrap();
         assert_eq!(v["spend"], Value::Null);
     }
 
     #[test]
-    fn date_parsing_matches_date_parse() {
+    fn latest_capture_is_read_from_the_state_directory() {
+        let dir = ClaudeHome::new("capture");
+        let tap = dir.tap();
+        assert_eq!(tap.latest(), None);
+        fs::create_dir_all(dir.0.join("state")).unwrap();
+        fs::write(tap.capture_file(), "{\"capturedAt\":5,\"rate_limits\":{}}").unwrap();
+        assert_eq!(tap.latest().map(|r| r.captured_at), Some(5));
+        fs::write(tap.capture_file(), "{\"rate_limits\":{}}").unwrap();
+        assert_eq!(tap.latest(), None);
+    }
+
+    #[test]
+    fn dates_read_as_iso_8601() {
         assert_eq!(parse_date_ms("2026-10-15T00:00:00Z"), Some(1792022400000));
         assert_eq!(parse_date_ms("2026-10-11T18:00:00Z"), Some(1791741600000));
         assert_eq!(
@@ -853,31 +886,30 @@ mod tests {
     }
 
     #[test]
-    fn js_number_conversions() {
-        assert_eq!(js_number_str("42"), 42.0);
-        assert_eq!(js_number_str(""), 0.0);
-        assert_eq!(js_number_str("0x1A"), 26.0);
-        assert_eq!(js_number_str(" 7 "), 7.0);
-        assert!(js_number_str("abc").is_nan());
-        assert!(js_number_str("inf").is_nan());
-    }
-
-    #[test]
     fn keychain_item_forms_and_errors() {
-        let now = 2000.0;
+        let now = 2000;
         let wrapped = r#"{"claudeAiOauth":{"accessToken":"abc","expiresAt":3000}}"#;
         assert_eq!(parse_keychain(wrapped, now).unwrap(), "abc");
         assert_eq!(
             parse_keychain(r#"{"accessToken":"plain"}"#, now).unwrap(),
             "plain"
         );
+        let unknown_expiry =
+            r#"{"claudeAiOauth":{"accessToken":"abc","expiresAt":null,"scopes":[]}}"#;
+        assert_eq!(parse_keychain(unknown_expiry, now).unwrap(), "abc");
         let expired = parse_keychain(r#"{"accessToken":"t","expiresAt":1000}"#, now).unwrap_err();
         assert_eq!(
             expired.message,
             "Claude Code’s sign-in has expired. Open Claude Code on the Mac once to refresh it."
         );
         assert_eq!(expired.category, "not_signed_in");
-        for bad in ["", "not json", r#"{"other":1}"#, r#"{"accessToken":""}"#] {
+        for bad in [
+            "",
+            "not json",
+            r#"{"other":1}"#,
+            r#"{"accessToken":""}"#,
+            r#"{"claudeAiOauth":{"refreshToken":"r"}}"#,
+        ] {
             let err = parse_keychain(bad, now).unwrap_err();
             assert_eq!(err.message, "Claude Code’s sign-in could not be read");
         }
@@ -942,6 +974,15 @@ mod tests {
                 Some(30_000),
             ),
             (
+                http_response(
+                    "429 Too Many Requests",
+                    Some("Wed, 21 Oct 2026 07:28:00 GMT"),
+                    "{}",
+                ),
+                "rate_limited",
+                Some(300_000),
+            ),
+            (
                 http_response("429 Too Many Requests", None, "{}"),
                 "rate_limited",
                 Some(300_000),
@@ -962,6 +1003,7 @@ mod tests {
                 None,
             ),
             (http_response("200 OK", None, "not json"), "error", None),
+            (http_response("200 OK", None, "[]"), "error", None),
         ];
         for (response, category, retry_ms) in cases {
             let err = fetch_via(response).await.unwrap_err();
