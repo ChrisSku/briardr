@@ -5,6 +5,25 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.32
+
+- **The key bar's ⌘ keeps Shift, so ⌘ with a capital Z (or with z and the bar's ⇧) is ⇧⌘Z, not ⌘Z.**
+  ⌘ reaches only programs that turned on a keyboard protocol, which tells the two apart. A ⌘ chord with
+  ⌃ keeps Shift too, from the key bar or a hardware keyboard; ⌃ and ⌥ chords without ⌘ ignore Shift as
+  before. ([#73](https://github.com/ChrisSku/briardr/pull/73))
+- **The page that says Briardr can't open offline follows Settings → Appearance.** Shown when the host can't
+  be reached and the device has no saved copy of the app yet, it was light or dark as the system was, even
+  on a device kept light or dark; it now takes the device's choice too, as the app does. ([#79](https://github.com/ChrisSku/briardr/pull/79))
+- **A link dropped outside a text field no longer replaces Briardr.** Dragged from another app or tab onto
+  the terminal, Peek, a header or a list, a link (or text that's a web address) opened in place of the app;
+  Briardr now refuses it there, as it does files. Text and links still drop into a field you can type in,
+  like a note or Compose, and installed plugins that take drops still get them. ([#80](https://github.com/ChrisSku/briardr/pull/80))
+- **Plugins get Briardr's own messages typed: `onCoreEvent` knows what each one carries.** The client's
+  types for the API and the live and terminal sockets are now generated from the server's, and the
+  `@briardr/sdk` types plugins use come from them: `briardr.onCoreEvent('notes', (m) => …)` types `m` as
+  `{ t, streamId, noteId, revision }` (any other type still works as before), and `Settings.notifications`
+  also has `debounceMs`. Nothing changes at run time. ([#77](https://github.com/ChrisSku/briardr/pull/77))
+
 ## 0.3.31
 
 - **A plugin request whose signal was aborted before the call is cancelled at once, and requests no longer
