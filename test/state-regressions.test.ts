@@ -115,3 +115,34 @@ test('a settings change in the app keeps what `briardr configure` saved for the 
   assert.deepEqual(disk().allowedNetworks, []);
   assert.equal(disk().notifications.ready, ready);
 });
+
+test('`briardr configure` changes only what it is given, and refuses a config.json it can’t parse', () => {
+  const file = path.join(s.dataDir, 'config.json');
+  const kept = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
+  const disk = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+  try {
+    fs.writeFileSync(file, JSON.stringify({ port: 9001, hostnames: ['briardr.test'] }));
+    // The CLI runs with the test server's environment: BRIARDR_PORT, BRIARDR_LISTEN and BRIARDR_HERDR_SESSION.
+    assert.match(s.run.cli('configure', '--allowed-networks', '10.8.0.0/24'), /Restart Briardr to apply/);
+    const saved = disk();
+    assert.deepEqual(saved.allowedNetworks, ['10.8.0.0/24']);
+    assert.deepEqual(saved.hostnames, ['briardr.test']);
+    assert.equal(saved.port, 9001, 'the file’s port, not the BRIARDR_PORT override');
+    assert.deepEqual(saved.listen, ['tailscale'], 'the default, not the BRIARDR_LISTEN override');
+    assert.equal(saved.herdrSession, '', 'the default, not the BRIARDR_HERDR_SESSION override');
+    const backup = fs.readFileSync(`${file}.bak`, 'utf8');
+    for (const broken of ['{"port":', '[]', '{"port": "x"}']) {
+      fs.writeFileSync(file, broken);
+      assert.throws(
+        () => s.run.cli('configure', '--allowed-networks', ''),
+        (e: { status: number; stderr: string }) => e.status === 78 && String(e.stderr).includes(`${file} can't be read`),
+        broken,
+      );
+      assert.equal(fs.readFileSync(file, 'utf8'), broken, 'not saved over');
+      assert.equal(fs.readFileSync(`${file}.bak`, 'utf8'), backup, 'nor its backup');
+    }
+  } finally {
+    if (kept === undefined) fs.rmSync(file);
+    else fs.writeFileSync(file, kept);
+  }
+});
