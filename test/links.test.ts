@@ -50,12 +50,29 @@ test('a logical line joins the rows around any of its rows', () => {
   assert.deepEqual(logicalLineAt(term, 0).rows, [0]);
 });
 
-test('links in a logical line, with their cells; trailing punctuation and closing brackets stay out', () => {
+test('links in a logical line, with their cells; trailing punctuation and the brackets around a link stay out', () => {
   const l = { text: 'see https://example.com/a. (http://localhost:5173/x) "https://e.org/q?a=1"', rows: [0], cols: 200, firstRow: 0 };
   assert.deepEqual(linksInLogicalLine(l).map((k) => k.url), ['https://example.com/a', 'http://localhost:5173/x', 'https://e.org/q?a=1']);
   assert.deepEqual(linksInLogicalLine({ ...l, text: 'ftp://example.com mailto:a@b.c example.com' }), []);
   const [k] = linksInLogicalLine(logicalLineAt(wrappedUrl().term, 2));
   assert.deepEqual(k, { url: URL, start: { x: 3, y: 1 }, end: { x: 6, y: 3 } });
+});
+
+test('a link keeps a closing bracket that closes one opened in it, and ends before one that closes the text around it', () => {
+  const urls = (text: string) => linksInLogicalLine({ text, rows: [0], cols: 200, firstRow: 0 }).map((k) => k.url);
+  const rust = 'https://en.wikipedia.org/wiki/Rust_(programming_language)';
+  assert.deepEqual(urls(rust), [rust]);
+  assert.deepEqual(urls(`(see ${rust})`), [rust]);
+  assert.deepEqual(urls(`see ${rust}.`), [rust]);
+  assert.deepEqual(urls(`(see ${rust}).`), [rust]);
+  assert.deepEqual(urls(`(see ${rust}.)`), [rust]);
+  assert.deepEqual(urls('(see https://x.y)'), ['https://x.y']);
+  assert.deepEqual(urls('[docs](https://x.y/a_(b)_c)'), ['https://x.y/a_(b)_c'], 'a Markdown link');
+  assert.deepEqual(urls('[https://x.y/a[1]]'), ['https://x.y/a[1]']);
+  assert.deepEqual(urls('{https://x.y/{id}}'), ['https://x.y/{id}']);
+  assert.deepEqual(urls('at http://[::1]:5173/ and http://[::1]'), ['http://[::1]:5173/', 'http://[::1]']);
+  assert.deepEqual(urls('https://x.y/a)b'), ['https://x.y/a)b'], 'only a closing bracket at the end is left out');
+  assert.deepEqual(urls('(https://).'), [], 'nothing after the scheme');
 });
 
 test('a link is found from any of its cells, on any of its rows', () => {
@@ -114,6 +131,7 @@ test('the word around a character: a whole URL, or text between spaces, quotes a
     return text.slice(start, end);
   };
   assert.equal(pick('see https://example.com/a?b=1. ok', 10), 'https://example.com/a?b=1');
+  assert.equal(pick('(see https://e.org/Rust_(language)) ok', 10), 'https://e.org/Rust_(language)');
   assert.equal(pick('git commit -m "fix it"', 6), 'commit');
   assert.equal(pick('git commit -m "fix it"', 16), 'fix');
   assert.equal(pick('open(src/main.ts:12)', 9), 'src/main.ts:12');
