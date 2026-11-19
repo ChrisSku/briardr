@@ -5,6 +5,28 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.31
+
+- **A plugin request whose signal was aborted before the call is cancelled at once, and requests no longer
+  keep a listener on their signal after they end.** `briardr.api`, `briardr.core` and `briardr.upload` used
+  to send a request anyway when given a signal that was already aborted, and left a listener on the signal
+  for every request, so one signal kept for a whole screen collected them. Plugins also get
+  `errorMessage(e, fallback)` from `@briardr/sdk`: a failed request's message, ready to show, or the
+  fallback for anything else thrown. ([#60](https://github.com/ChrisSku/briardr/pull/60))
+- **A file dropped outside the terminal no longer replaces Briardr.** Dropped on Peek, the stream's header,
+  the key bar, an open sheet or the list beside the stream, the browser opened the file in place of the app;
+  Briardr now refuses it there. Dropping files on a terminal you control and images on a note work as before,
+  and so do installed plugins that take drops. ([#75](https://github.com/ChrisSku/briardr/pull/75))
+- **Dictation stops when the terminal or its Enter key goes away.** Leaving the stream, or the key bar hiding
+  for a hardware keyboard, while Enter was held kept the microphone recording with nothing left to end it.
+  Now the recording is dropped and the microphone let go of, and nothing is transcribed or inserted. The
+  same goes for letting go of Enter before the microphone is on (while the browser asks for it), and a
+  transcription still on its way when you leave the stream is no longer inserted or reported. ([#76](https://github.com/ChrisSku/briardr/pull/76))
+- **A link in the terminal keeps a closing parenthesis that matches one in it, like
+  `https://en.wikipedia.org/wiki/Rust_(programming_language)`.** It was opened without the `)`. A parenthesis
+  that closes the text around a link, as in `(see https://example.com)`, is still left out, and square brackets
+  and braces follow the same rule, so `http://[::1]` opens in Preview too. ([#74](https://github.com/ChrisSku/briardr/pull/74))
+
 ## 0.3.30
 
 - **The styles that Briardr's screens and built-in plugins keep in their own components now apply.** The client's build dropped them, so file icons in Files could shrink in a narrow row, a search inside files didn't lay out its results or the Names and Contents choice, the pairing QR code in Settings → Devices wasn't sized and centred, the quiet hours times in Settings → Notifications didn't sit side by side, and a new agent's prompt field didn't keep its line spacing. Installed plugins' own styles always applied. ([#67](https://github.com/ChrisSku/briardr/pull/67))

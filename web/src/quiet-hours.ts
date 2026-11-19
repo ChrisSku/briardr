@@ -1,15 +1,13 @@
 // Quiet hours: a span of this device's day without alerts, which the host keeps (push.ts). The host
 // can't see this device's time zone, so it is told the clock: how far ahead of UTC it is, and when that
 // changes next (summer time).
+import type { QuietHours } from './protocol.ts';
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
 /** This device's clock as the host keeps it: minutes ahead of UTC now, and the next change of that. */
-export interface DeviceClock {
-  utcOffset: number;
-  next?: { at: number; utcOffset: number };
-}
+export type DeviceClock = Omit<QuietHours, 'from' | 'to'>;
 
 /** Minutes this device's clock is ahead of UTC at `t` (0 minus, so UTC is 0 and not -0). */
 const offsetAt = (t: number) => 0 - new Date(t).getTimezoneOffset();

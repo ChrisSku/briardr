@@ -331,6 +331,7 @@ struct Known {
 
 /// `GET /api/update`: this version, the latest release the last check found, and how to update to it.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     pub current: &'static str,

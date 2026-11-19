@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum AgentState {
     Blocked,
@@ -16,6 +17,7 @@ pub enum AgentState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum StreamKind {
     Agent,
@@ -25,6 +27,7 @@ pub enum StreamKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
@@ -35,10 +38,12 @@ pub struct Workspace {
     pub cwd: Option<String>,
     /// The machine it lives on, as herdr-core names it (`hc machine ls`); none for this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
@@ -49,6 +54,7 @@ pub struct Project {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Stream {
     pub id: String,
@@ -75,10 +81,12 @@ pub struct Stream {
     /// The machine its terminal runs on, as herdr-core names it; none for this computer. `cwd` is
     /// only ever this computer's: a terminal elsewhere has none, so its files aren't looked for here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub machine: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     pub workspaces: Vec<Workspace>,

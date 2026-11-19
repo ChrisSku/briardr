@@ -46,9 +46,11 @@ const RESUBSCRIBE_DELAY: Duration = Duration::from_millis(300);
 const EVENT_DEBOUNCE: Duration = Duration::from_millis(120);
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HerdrHealth {
     /// Which Herdr this is: "tui" (Herdr TUI) or "core" (herdr-core, under the Herdr app).
+    #[cfg_attr(test, ts(type = r#""tui" | "core""#))]
     pub backend: &'static str,
     pub ok: bool,
     pub problem: Option<String>,
@@ -57,6 +59,7 @@ pub struct HerdrHealth {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Transition {
     pub stream_id: String,

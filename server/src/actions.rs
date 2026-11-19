@@ -199,13 +199,17 @@ pub struct NewStream {
 
 /// `POST /api/workspaces`: the new workspace, its project and its first stream.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedWorkspace {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub project_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub stream_id: Option<String>,
     /// Whether the host's focused pane is still the one it was.
     pub focus_unchanged: bool,
@@ -213,20 +217,25 @@ pub struct CreatedWorkspace {
 
 /// `POST /api/projects`: the new project and its first stream.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedProject {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub project_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub stream_id: Option<String>,
     pub focus_unchanged: bool,
 }
 
 /// `POST /api/streams`: the new stream, and what to tell the person when its agent didn't start as asked.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatedStream {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub stream_id: Option<String>,
     pub note: Option<String>,
     pub focus_unchanged: bool,
@@ -235,12 +244,14 @@ pub struct CreatedStream {
 /// `POST /api/streams/:id/seen`: whether every Herdr client shares what was seen (the Herdr app's
 /// `herdr.seen` label), or only this client keeps it (Herdr TUI).
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Seen {
     pub shared: bool,
 }
 
 /// `GET /api/streams/:id/history`: the stream's last lines as text.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct History {
     pub text: String,
@@ -252,6 +263,7 @@ pub struct History {
 
 /// `GET /api/streams/:id/info`: the stream, and what Herdr says about its agent.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct StreamInfo {
     pub stream: Stream,
@@ -260,13 +272,16 @@ pub struct StreamInfo {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub name: Option<String>,
     /// The agent's kind.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub status: Option<String>,
     pub state_change_seq: Option<u64>,
     /// "present" when Herdr knows the agent's session, never the session itself.
@@ -368,6 +383,7 @@ struct ReadText {
 
 /// `GET /api/agents`: what a new stream can start, and how long its prompt can be.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Agents {
     pub agents: Vec<AgentChoice>,
@@ -376,6 +392,7 @@ pub struct Agents {
 
 /// An agent a new stream can start.
 #[derive(Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct AgentChoice {
     pub kind: String,
     pub name: String,

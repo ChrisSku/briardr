@@ -2,6 +2,7 @@
   import { HostLabel } from '../../host.ts';
   import { onMount } from 'svelte';
   import { api } from '../../api.ts';
+  import type { StreamInfo } from '../../protocol.ts';
   import { model, toast } from '../../store.ts';
   import type { TerminalController } from '../../terminal/controller.ts';
   import type { Stream } from '../../types.ts';
@@ -10,7 +11,7 @@
   let { stream, ctl, onClose }: { stream: Stream; ctl: TerminalController; onClose: () => void } = $props();
   let agentName = $state<string | null>(null);
   onMount(() => {
-    api<{ agent: { name: string | null } | null }>('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (agentName = r.agent?.name ?? null), () => {});
+    api<StreamInfo>('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (agentName = r.agent?.name ?? null), () => {});
   });
 
   const st = $derived(ctl.status.value);

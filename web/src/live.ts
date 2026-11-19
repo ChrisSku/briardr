@@ -2,16 +2,16 @@
 import { api, ApiError, wsUrl } from './api.ts';
 import { onNetworkChange } from './backoff.ts';
 import { networkKind, record } from './diag.ts';
+import type { LiveMessage, LiveRequest } from './protocol.ts';
 import { PROTOCOL, ReconnectingSocket } from './socket.ts';
 import { clockSkew, conn, herdr, host, mac, model, pushBanner, session, visibleStreamId, prefs } from './store.ts';
-import type { Model } from './types.ts';
 import { theHost } from './host.ts';
 import { checkForUpdate } from './updates.ts';
 
-type Listener = (msg: any) => void;
+type Listener = (msg: LiveMessage) => void;
 
 class Live {
-  private socket = new ReconnectingSocket({ name: 'live', maxWait: 30_000, reconnect: () => this.connect() });
+  private socket = new ReconnectingSocket<LiveMessage, LiveRequest>({ name: 'live', maxWait: 30_000, reconnect: () => this.connect() });
   private stopped = false;
   private openedAt = 0;
   private serverInstance: unknown = null;
@@ -87,7 +87,7 @@ class Live {
     conn.value = { ...conn.value, state: 'offline', error: { category: 'network', message: navigator.onLine ? `Can’t reach ${theHost()}.` : 'This device is offline.' }, retryAt: Date.now() + delay };
   }
 
-  private onMessage(msg: any) {
+  private onMessage(msg: LiveMessage) {
     if (msg.t === 'hello') {
       this.serverInstance = msg.instanceId;
       void checkForUpdate(msg.instanceId, true);
@@ -102,7 +102,7 @@ class Live {
     if (msg.t === 'model') {
       if (typeof msg.serverNow === 'number') clockSkew.value = msg.serverNow - Date.now();
       herdr.value = msg.herdr;
-      if (msg.model) model.value = msg.model as Model;
+      if (msg.model) model.value = msg.model;
     } else if (msg.t === 'mac') {
       mac.value = msg.mac;
       if (msg.host) host.value = msg.host;

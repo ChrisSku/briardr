@@ -77,6 +77,13 @@ installs it, or run `curl -fsSL https://releases.herdr.dev/core/install.sh | sh`
 which starts throwaway cores of the run's own and stops them when it ends (`BRIARDR_TEST_HC` picks
 another `hc`).
 
+The client's types for what the server sends and takes (the API's answers, both sockets' messages) are
+generated from the server's own: [`web/src/protocol.ts`](../web/src/protocol.ts) is made from the Rust
+types that `server/src/app/protocol.rs` lists, with [ts-rs](https://github.com/Aleph-Alpha/ts-rs), which
+reads their serde attributes. After changing one of those types, run `mise run protocol` and commit the
+file with the change; `mise run test` fails while it's out of date. Only tests derive the TypeScript
+(`#[cfg_attr(test, derive(ts_rs::TS))]`), so the server's builds don't carry the generator.
+
 For Rust-only changes, a narrower check is:
 
 ```sh

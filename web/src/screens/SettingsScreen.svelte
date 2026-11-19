@@ -10,6 +10,7 @@
   import { iosDevice } from '../device.ts';
   import { pluginContext } from '../plugins/context.ts';
   import { isOn, loadBuiltins, plugins, settingsSections } from '../plugins/registry.svelte.ts';
+  import type { Devices } from '../protocol.ts';
   import { pushStatus } from '../push.ts';
   import { navigate } from '../router.ts';
   import { prefs, toast } from '../store.ts';
@@ -80,7 +81,7 @@
   }
   $effect(() => {
     if (section) return;
-    api<{ devices: unknown[] }>('GET', '/api/devices').then((r) => (devices = r.devices.length), () => {});
+    api<Devices>('GET', '/api/devices').then((r) => (devices = r.devices.length), () => {});
     api<UpdateStatus>('GET', '/api/update').then((r) => (update = r.available ? r.latest : null), () => {});
     if (isOn('usage')) api<{ usage: typeof usage }>('GET', '/api/usage').then((r) => (usage = r.usage), () => {});
   });

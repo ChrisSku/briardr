@@ -283,7 +283,8 @@ struct SiteLink {
 
 /// `POST /api/streams/:id/uploads`: where the upload is on the host, as a path and quoted for a shell.
 #[derive(Serialize)]
-struct Uploaded {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct Uploaded {
     path: String,
     quoted: String,
     bytes: usize,
@@ -291,7 +292,8 @@ struct Uploaded {
 
 /// `POST /api/dictation`: what was said.
 #[derive(Serialize)]
-struct Dictated {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct Dictated {
     text: String,
 }
 

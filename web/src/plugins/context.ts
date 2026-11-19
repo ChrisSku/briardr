@@ -40,7 +40,7 @@ export function pluginContext(id: string): PluginContext {
       liveConn.on((msg) => {
         if (msg.t === 'plugin_event' && msg.plugin === id && msg.topic === topic) fn(msg.data);
       }),
-    onCoreEvent: (type, fn) =>
+    onCoreEvent: (type: string, fn: (msg: any) => void) =>
       liveConn.on((msg) => {
         if (msg.t === type && type !== 'plugin_event') fn(msg);
       }),

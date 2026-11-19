@@ -6,7 +6,8 @@
 import { api } from './api.ts';
 import { record } from './diag.ts';
 import { iosBrowserTab } from './install.ts';
-import { deviceClock, sameClock, type DeviceClock } from './quiet-hours.ts';
+import type { DevicePrefs, NotificationsState, PrefsBody } from './protocol.ts';
+import { deviceClock, sameClock } from './quiet-hours.ts';
 import { persisted, state } from './reactive.svelte.ts';
 
 export type PushProblem =
@@ -32,13 +33,13 @@ export type PushStatus =
 export const pushStatus = state<PushStatus>({ state: 'unknown' });
 
 /** What a device can choose for itself: kinds of alert, and names in them. */
-export type AlertChoice = 'needsYou' | 'finished' | 'ready' | 'lowBattery' | 'includeNames';
+export type AlertChoice = Exclude<keyof DevicePrefs, 'quiet'>;
 /**
  * What this device chose for its alerts, kept on the host until the device is revoked: a choice it didn't
  * make follows the host's setting. `quiet` is a span of this device's day (minutes after midnight)
  * without alerts, with the clock the host tells the time here by.
  */
-export type AlertPrefs = Partial<Record<AlertChoice, boolean>> & { quiet?: { from: number; to: number } & DeviceClock };
+export type AlertPrefs = DevicePrefs;
 /** null until the host answered. */
 export const alertPrefs = state<AlertPrefs | null>(null);
 
@@ -48,7 +49,7 @@ let saving: Promise<unknown> = Promise.resolve();
 export function setAlertPrefs(patch: Partial<Record<AlertChoice, boolean | null>> & { quiet?: { from: number; to: number } | null }): Promise<void> {
   const body = patch.quiet ? { ...patch, quiet: { ...patch.quiet, ...deviceClock() } } : patch;
   const done = saving.then(async () => {
-    alertPrefs.value = (await api<{ prefs: AlertPrefs }>('PUT', '/api/notifications/device', body)).prefs;
+    alertPrefs.value = (await api<PrefsBody>('PUT', '/api/notifications/device', body)).prefs;
   });
   saving = done.catch(() => {});
   return done;
@@ -115,7 +116,7 @@ export function checkPush(): Promise<void> {
 async function reconcile() {
   if (!pushSupported) return void (pushStatus.value = { state: 'unsupported' });
   if (iosBrowserTab) return void (pushStatus.value = { state: 'needs_install' });
-  let server: { subscribed: boolean; endpoint?: string | null; publicKey: string; prefs: AlertPrefs };
+  let server: NotificationsState;
   try {
     server = await api('GET', '/api/notifications', undefined, { timeout: 8000 });
   } catch {
@@ -177,7 +178,7 @@ export async function enablePush(): Promise<'on' | 'denied' | 'not_installed' | 
       await checkPush();
       return 'not_installed';
     }
-    if (!publicKey) publicKey = (await api<{ publicKey: string }>('GET', '/api/notifications')).publicKey;
+    if (!publicKey) publicKey = (await api<NotificationsState>('GET', '/api/notifications')).publicKey;
     // A subscription for another key (or one the host lost) is replaced by a new one.
     const old = await reg.pushManager.getSubscription();
     if (old && !sameKey(old, publicKey)) await old.unsubscribe();

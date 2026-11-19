@@ -78,6 +78,7 @@
       ctl.onPaste = null;
       window.removeEventListener('keydown', onKey, true);
       pointer.dispose();
+      dictation.dispose();
     };
   });
 

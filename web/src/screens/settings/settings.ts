@@ -1,41 +1,4 @@
 // Settings as the host reports them, and how sections save changes.
-import type { HostCaps } from '../../types.ts';
-export interface Settings {
-  /** Which Herdr Briardr talks to: Herdr TUI's server, or herdr-core (the Herdr app's). */
-  herdrBackend: 'tui' | 'core';
-  herdrPath: string;
-  herdrSession: string;
-  herdrCoreSocket: string;
-  herdr: { running: boolean; version: string | null; problem: string | null };
-  notifications: { includeNames: boolean; needsYou: boolean; finished: boolean; ready: boolean; lowBattery: boolean };
-  usage: { claudeKeychainOptIn: boolean; codexEnabled: boolean };
-  power: { keepAwake: boolean };
-  tls: { wanted: string; effective: string };
-  caProfileAvailable: boolean;
-  dictation: boolean;
-  previews: boolean;
-  host: HostCaps;
-  publicOrigin: string | null;
-  version: string;
-}
-
-/** GET /api/update: what the host's last check for a newer release found. */
-export interface UpdateStatus {
-  current: string;
-  latest: string | null;
-  available: boolean;
-  checkedAt: number | null;
-  error: string | null;
-  /** The daily check (`updates.check`). */
-  check: boolean;
-  /** A release installation, which replaces itself; otherwise `how` and `command` say what to run. */
-  canInstall: boolean;
-  how: string | null;
-  command: string | null;
-  /** launchd or systemd starts Briardr again after an update. */
-  restarts: boolean;
-  installing: boolean;
-  notes: string | null;
-}
+export type { Settings, UpdateStatus } from '../../protocol.ts';
 
 export type Save = (patch: object) => Promise<boolean>;

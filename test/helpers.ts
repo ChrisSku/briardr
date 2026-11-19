@@ -258,7 +258,8 @@ export interface Running {
   };
   /** Runs `briardr <args>` on the server's data directory, as on the host, and returns what it printed. */
   cli(...args: string[]): string;
-  herdr: { refresh(): Promise<unknown> };
+  /** Reads Herdr again and resolves once a read worked, so the model then has what Herdr had when it was called. */
+  herdr: { refresh(): Promise<void> };
   app: { listRoutes(): { method: string; pattern: string; public: boolean }[]; d: { previews: { open(device: string, port: number): Promise<any> } } };
   push: { sendImpl: (sub: unknown, body: string, opts: object) => unknown; readonly subject: string };
   hub: { readonly sent: unknown[]; readonly controllers: number };
@@ -379,7 +380,9 @@ function hooks(s: { port: number; dataDir: string }, bin: string, env: NodeJS.Pr
       flush: () => hook('POST', '/auth/flush', {}),
     },
     cli,
-    herdr: { refresh: async () => hook('POST', '/herdr/refresh', {}) },
+    // A server finds Herdr only after it listens (`herdr status` first), so a read right after it starts can
+    // fail, and then its model has nothing yet: the read is asked for again until it works.
+    herdr: { refresh: () => waitUntil('the server to read Herdr', () => hook('POST', '/herdr/refresh', {}).ok) },
     app: {
       listRoutes: () => hook('GET', '/routes'),
       d: { previews: { open: async (device: string, port: number) => hook('POST', '/previews/open', { device, port }) } },
