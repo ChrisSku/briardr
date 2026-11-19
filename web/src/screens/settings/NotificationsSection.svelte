@@ -4,6 +4,7 @@
   import { api, errorMessage } from '../../api.ts';
   import { isIOS } from '../../device.ts';
   import { iosBrowserTab, standalone } from '../../install.ts';
+  import type { DeliveryBody, TestSent } from '../../protocol.ts';
   import { alertPrefs, checkPush, disablePush, enablePush, pushStatus, setAlertPrefs, type AlertChoice, type PushProblem } from '../../push.ts';
   import { minutesOf, timeOfDay } from '../../quiet-hours.ts';
   import { navigate } from '../../router.ts';
@@ -44,21 +45,11 @@
     if (!ok) toast(`Turned off on this device; ${theHost()} is told when it’s reachable.`);
   }
 
-  /** An alert sent to this device, as the host recorded it (`DeliveryRecord` in server/src/push.rs). */
-  interface Delivery {
-    id: string;
-    sentAt: number;
-    accepted: boolean | null;
-    statusCode: number | null;
-    deliveredAt: number | null;
-    error: string | null;
-  }
-
   async function sendTest() {
     test = { phase: 'Sending…' };
     try {
-      const r = await api<{ delivery: Delivery }>('POST', '/api/notifications/test');
-      const d = r.delivery;
+      // The host refuses a test for a device without a subscription (409), so a sent one has its delivery.
+      const d = (await api<TestSent>('POST', '/api/notifications/test')).delivery!;
       if (!d.accepted) {
         void checkPush();
         return (test = { phase: 'Not sent', detail: d.error === 'subscription_gone' ? 'The push service says this device’s subscription expired. Use Repair above.' : `The push service refused it (${d.statusCode ?? d.error}).` });
@@ -66,7 +57,7 @@
       test = { phase: 'Accepted by the push service', detail: 'Waiting for this device to confirm it arrived…' };
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 1000));
-        const q = await api<{ delivery: Delivery | null }>('GET', `/api/notifications/deliveries/${d.id}`);
+        const q = await api<DeliveryBody>('GET', `/api/notifications/deliveries/${d.id}`);
         if (q.delivery?.deliveredAt) return (test = { phase: 'Delivered to this device', detail: `Confirmed ${((q.delivery.deliveredAt - q.delivery.sentAt) / 1000).toFixed(1)} s after sending.` });
       }
       test = { phase: 'Accepted, not confirmed', detail: 'The push service accepted it, but this device hasn’t confirmed receiving it. Briardr won’t claim it was delivered.' };

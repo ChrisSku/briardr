@@ -9,6 +9,7 @@
 <script lang="ts">
   import { TheHost } from '../../host.ts';
   import { api } from '../../api.ts';
+  import type { Agents, CreatedStream } from '../../protocol.ts';
   import { model, toast } from '../../store.ts';
   import type { Project } from '../../types.ts';
   import { ToolIcon } from '../../ui/icons/index.ts';
@@ -28,7 +29,7 @@
   const kind = $derived(choice === 'other' ? otherKind || others[0]?.kind || 'shell' : choice);
   const agent = $derived(known.find((a) => a.kind === kind));
 
-  api<{ agents: AgentChoice[]; maxPrompt: number }>('GET', '/api/agents')
+  api<Agents>('GET', '/api/agents')
     .then((r) => {
       known = r.agents;
       maxPrompt = r.maxPrompt;
@@ -44,7 +45,7 @@
 
   const s = new Submit(async () => {
     const body = { projectId: project.id, kind, name, prompt: agent?.prompt ? prompt : undefined };
-    const r = await api('POST', '/api/streams', body, { timeout: 45_000 });
+    const r = await api<CreatedStream>('POST', '/api/streams', body, { timeout: 45_000 });
     toast(r.note || 'Created stream', r.note ? 6000 : 2600);
     onClose();
     const st = model.value?.streams.find((x) => x.id === r.streamId);

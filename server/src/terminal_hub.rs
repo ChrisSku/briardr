@@ -150,8 +150,9 @@ fn public_reason(c: CloseCategory, host: &str) -> String {
 
 /// What a client sends on /ws/term, by its `t`. Anything else is ignored.
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[serde(tag = "t", rename_all = "snake_case")]
-enum TermRequest {
+pub(crate) enum TermRequest {
     Ping {
         id: Option<Number>,
     },
@@ -185,7 +186,8 @@ enum TermRequest {
 
 /// One `input`: the first of `text`, `keys`, `key` and `paste` that is valid is sent.
 #[derive(Debug, Deserialize)]
-struct InputRequest {
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
+pub(crate) struct InputRequest {
     /// Echoed in `input_ok` or `input_rejected`.
     id: Option<Number>,
     text: Option<String>,
@@ -197,7 +199,8 @@ struct InputRequest {
 }
 
 #[derive(Debug, Deserialize)]
-struct PasteRequest {
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
+pub(crate) struct PasteRequest {
     text: Option<String>,
     /// Wrapped as a bracketed paste when the program turned that on.
     bracketed: Option<bool>,
@@ -212,18 +215,19 @@ struct Tagged {
 
 /// What Briardr sends on /ws/term, by its `t` (frames go as binary messages, `encode_frame`).
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "t", rename_all = "snake_case")]
-enum TermMessage<'a> {
+pub(crate) enum TermMessage<'a> {
     /// `raw`: the stream is the program's own output, so the browser's terminal keeps its scrollback.
     Hello {
         conn: &'a str,
-        mode: &'static str,
+        mode: StreamMode,
         protocol: u32,
         raw: bool,
     },
     /// The stream is live, at the size of its first frame.
     Live {
-        mode: &'static str,
+        mode: StreamMode,
         width: u16,
         height: u16,
     },
@@ -235,11 +239,12 @@ enum TermMessage<'a> {
         code: &'static str,
     },
     Closed {
-        category: &'static str,
+        category: CloseCategory,
         reason: String,
     },
     InputOk {
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         id: Option<Number>,
     },
     InputRejected {
@@ -248,6 +253,7 @@ enum TermMessage<'a> {
     },
     Pong {
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         id: Option<Number>,
     },
 }
@@ -444,7 +450,7 @@ impl TerminalHub {
         let reason = public_reason(CloseCategory::PaneGone, &self.host);
         for c in lock(&self.conns).values() {
             c.send(&TermMessage::Closed {
-                category: CloseCategory::PaneGone.as_str(),
+                category: CloseCategory::PaneGone,
                 reason: reason.clone(),
             });
             let code = 4000 + close_code(CloseCategory::PaneGone);
@@ -505,7 +511,7 @@ impl TerminalHub {
             .is_some_and(|m: Model| m.streams.iter().any(|s| s.id == pane_id));
         if !exists {
             let msg = TermMessage::Closed {
-                category: CloseCategory::PaneGone.as_str(),
+                category: CloseCategory::PaneGone,
                 reason: public_reason(CloseCategory::PaneGone, &self.host),
             };
             if let Ok(msg) = serde_json::to_string(&msg) {
@@ -572,7 +578,7 @@ impl TerminalHub {
         );
         conn.send(&TermMessage::Hello {
             conn: &conn.id,
-            mode: mode.as_str(),
+            mode,
             protocol: PROTOCOL,
             raw,
         });
@@ -599,7 +605,7 @@ impl TerminalHub {
                         if live_pending {
                             live_pending = false;
                             self.event("term_live", json!({"mode": mode.as_str(), "ms": now_ms().saturating_sub(t0)}));
-                            conn.send(&TermMessage::Live { mode: mode.as_str(), width: f.width, height: f.height });
+                            conn.send(&TermMessage::Live { mode, width: f.width, height: f.height });
                         }
                         let _ = conn.tx.send(Out::Binary(encode_frame(&f), f.credit));
                     }
@@ -607,7 +613,7 @@ impl TerminalHub {
                     Some(SessionEvent::Warning(code)) => conn.send(&TermMessage::Warning { code }),
                     Some(SessionEvent::Closed { category, .. }) => {
                         self.event("term_closed", json!({"mode": mode.as_str(), "category": category.as_str()}));
-                        conn.send(&TermMessage::Closed { category: category.as_str(), reason: public_reason(category, &self.host) });
+                        conn.send(&TermMessage::Closed { category, reason: public_reason(category, &self.host) });
                         let removed = {
                             let mut conns = lock(&self.conns);
                             let current = conns.get(&conn.id).is_some_and(|x| Arc::ptr_eq(x, &conn));
@@ -1053,11 +1059,26 @@ mod tests {
         assert_eq!(
             json(TermMessage::Hello {
                 conn: "c1",
-                mode: "control",
+                mode: StreamMode::Control,
                 protocol: PROTOCOL,
                 raw: false
             }),
             json!({"t": "hello", "conn": "c1", "mode": "control", "protocol": 1, "raw": false})
+        );
+        assert_eq!(
+            json(TermMessage::Live {
+                mode: StreamMode::Observe,
+                width: 80,
+                height: 24
+            }),
+            json!({"t": "live", "mode": "observe", "width": 80, "height": 24})
+        );
+        assert_eq!(
+            json(TermMessage::Closed {
+                category: CloseCategory::TakenOver,
+                reason: "Taken over.".into()
+            }),
+            json!({"t": "closed", "category": "taken_over", "reason": "Taken over."})
         );
         assert_eq!(
             json(TermMessage::InputOk { id: None }),

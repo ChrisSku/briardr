@@ -7,6 +7,7 @@
 // and the one before it: pages still running the previous build load their screens' code from it until
 // they reload (web/src/updates.ts). Older shells are deleted.
 import { alertPath, pickWindow } from './alert-window.ts';
+import type { PushPayload } from './protocol.ts';
 
 declare const __BRIARDR_VERSION__: string;
 declare const __BRIARDR_ASSETS__: string[];
@@ -160,20 +161,8 @@ sw.addEventListener('message', (e) => {
   if (e.data?.t === 'status') e.waitUntil(shellStatus().then((s) => e.ports[0]?.postMessage(s)));
 });
 
-interface Payload {
-  id: string;
-  kind: string;
-  title: string;
-  body: string;
-  streamId?: string;
-  tag: string;
-  ts: number;
-  /** Agents that need attention when it was sent (alerts from the monitor only). */
-  attention?: number;
-}
-
 sw.addEventListener('push', (e) => {
-  let p: Payload;
+  let p: PushPayload;
   try {
     p = e.data!.json();
   } catch {

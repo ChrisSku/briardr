@@ -47,7 +47,9 @@ pub struct BackendSpec {
     pub command: Vec<String>,
 }
 
+/// What a plugin adds to Briardr (`contributes` in its manifest).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Contributes {
     #[serde(default)]
@@ -58,12 +60,16 @@ pub struct Contributes {
     pub settings: Vec<Section>,
 }
 
+/// A tab a plugin adds to a stream or to the app.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Tab {
     pub id: String,
     pub label: String,
+    /// One of Briardr's icon names (web/src/ui/icons); unknown names show a generic icon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub icon: Option<String>,
     /// A stream tab that works only for a stream on this computer (it reads its folder, or serves
     /// its localhost): hidden for a terminal on another machine.
@@ -71,7 +77,9 @@ pub struct Tab {
     pub local: bool,
 }
 
+/// A section a plugin adds to Settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub id: String,
@@ -457,6 +465,7 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest, String> {
 
 /// A plugin as the client lists it (`GET /api/plugins`, the session, the live `plugins` message).
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct PluginInfo {
     pub id: String,
     pub name: String,
@@ -468,12 +477,15 @@ pub struct PluginInfo {
     pub backend: Option<BackendInfo>,
     /// The client's URL, while the plugin is on and its build is ready.
     pub client: Option<String>,
+    /// "ok", or why its client can't load: never built ("missing") or built for another Briardr ("stale").
+    #[cfg_attr(test, ts(type = r#""ok" | "missing" | "stale""#))]
     pub build: &'static str,
     pub problem: Option<String>,
 }
 
 /// A plugin's backend command, and whether the user approved this one (its hash) to run.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct BackendInfo {
     pub command: Vec<String>,
     pub approved: bool,

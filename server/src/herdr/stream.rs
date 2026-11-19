@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -19,7 +19,10 @@ const RELEASE_GRACE: Duration = Duration::from_millis(1500);
 const KILL_AFTER_CLOSE: Duration = Duration::from_millis(200);
 const READER_DRAIN: Duration = Duration::from_secs(1);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether a client controls the stream or watches it (lowercase in the terminal's messages).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
 pub enum StreamMode {
     Observe,
     Control,
@@ -34,7 +37,10 @@ impl StreamMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why a stream ended (snake_case in the terminal's messages).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
 pub enum CloseCategory {
     Busy,
     TakenOver,
@@ -157,6 +163,7 @@ pub fn clamp_dim(n: i64, min: i64, max: i64) -> u16 {
 
 /// Which way a scroll goes (lowercase in the client's messages, as in Herdr's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
     Up,
@@ -174,6 +181,7 @@ impl Direction {
 
 /// What a mouse event is (lowercase in the client's messages, as in Herdr's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum MouseAction {
     Down,
@@ -195,6 +203,7 @@ impl MouseAction {
 
 /// The mouse button of an event (lowercase in the client's messages, as in Herdr's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum MouseButton {
     Left,

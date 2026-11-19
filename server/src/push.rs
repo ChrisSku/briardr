@@ -55,21 +55,28 @@ pub struct PushSub {
 /// (`notifications` in the configuration). Kept by device apart from its subscription, so they outlast
 /// a repair, an expired subscription and alerts turned off and on, until the device is revoked.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct DevicePrefs {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub needs_you: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub finished: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub ready: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub low_battery: Option<bool>,
     /// Workspace and stream names in its alerts.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub include_names: Option<bool>,
     /// Hours of the day when the device gets no alerts.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub quiet: Option<QuietHours>,
 }
 
@@ -77,6 +84,7 @@ pub struct DevicePrefs {
 /// The host can't see the device's time zone, so the device says how far its clock is ahead of UTC and
 /// when that changes next (summer time), and says it again when it opens Briardr after a change.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct QuietHours {
     pub from: u16,
@@ -84,11 +92,13 @@ pub struct QuietHours {
     /// Minutes the device's clock is ahead of UTC.
     pub utc_offset: i32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub next: Option<OffsetChange>,
 }
 
 /// A coming change of the device's UTC offset.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct OffsetChange {
     /// When it changes, in ms since the epoch.
@@ -220,6 +230,7 @@ pub struct PushKeys {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PushPayload {
     pub id: String,
@@ -229,15 +240,18 @@ pub struct PushPayload {
     pub body: String,
     /// Stream to open when tapped.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub stream_id: Option<String>,
     pub tag: String,
     pub ts: u64,
     /// Agents that need attention when the alert was sent, for the app's icon badge.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub attention: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryRecord {
     pub id: String,

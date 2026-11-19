@@ -4,6 +4,7 @@
 import { api, errorMessage } from '../../../api.ts';
 import { record } from '../../../diag.ts';
 import { Recorder } from '../../../media.ts';
+import type { Dictated } from '../../../protocol.ts';
 import { toast } from '../../../store.ts';
 import type { TerminalController } from '../../../terminal/controller.ts';
 
@@ -58,7 +59,7 @@ export class Dictation {
     const t0 = performance.now();
     const gone = this.#gone.signal;
     try {
-      const res = await api<{ text: string }>('POST', `/api/dictation?locale=${encodeURIComponent(navigator.language)}`, undefined, { raw: wav, headers: { 'content-type': 'audio/wav' }, timeout: 60_000, signal: gone });
+      const res = await api<Dictated>('POST', `/api/dictation?locale=${encodeURIComponent(navigator.language)}`, undefined, { raw: wav, headers: { 'content-type': 'audio/wav' }, timeout: 60_000, signal: gone });
       record('dictation_done', { ms: Math.round(performance.now() - t0) });
       if (gone.aborted) return;
       if (this.#ctl.paste(res.text, true, this.#generation)) toast('Dictation inserted. Edit, then press Enter.');

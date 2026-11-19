@@ -15,6 +15,7 @@ import { state, type State } from '../reactive.svelte.ts';
 import { anon, networkKind, record } from '../diag.ts';
 import { idbGet, idbSet, type CachedScreen } from '../idb.ts';
 import { viewportInset } from '../keyboard.svelte.ts';
+import type { CloseCategory, TermMessage, TermRequest } from '../protocol.ts';
 import { PROTOCOL, ReconnectingSocket } from '../socket.ts';
 import { applyModsToText, fromKeyEvent, type Outgoing } from './keys.ts';
 import { linkAt, registerLinkProvider } from './links.ts';
@@ -90,7 +91,7 @@ export class TerminalController {
    *  one, as in Peek, a paste goes nowhere: never to another terminal that's open. */
   onPaste: ((p: Pasted) => void) | null = null;
   private serialize = new SerializeAddon();
-  private socket = new ReconnectingSocket({ name: 'term', maxWait: 15_000, reconnect: () => this.connect(this.wantMode, false) });
+  private socket = new ReconnectingSocket<TermMessage, TermRequest>({ name: 'term', maxWait: 15_000, reconnect: () => this.connect(this.wantMode, false) });
   private clientSession = randomId(10);
   private inputId = 0;
   private host: HTMLElement | null = null;
@@ -360,7 +361,7 @@ export class TerminalController {
     this.socket.retryNow();
   }
 
-  private onClosed(category: string, reason: string) {
+  private onClosed(category: CloseCategory, reason: string) {
     record('term_closed', { category });
     const s = this.status.value;
     if (category === 'busy') {
@@ -456,7 +457,7 @@ export class TerminalController {
     return this.status.value.ownership === 'controlling' && this.socket.isOpen;
   }
 
-  private send(msg: { t: string; [k: string]: unknown }): boolean {
+  private send(msg: TermRequest): boolean {
     if (!this.socket.send(msg)) return false;
     if (msg.t === 'input') lastInput = Date.now();
     return true;

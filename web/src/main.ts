@@ -8,6 +8,7 @@ import { record } from './diag.ts';
 import { refuseStrayDrops } from './drops.ts';
 import { trackKeyboard } from './keyboard.svelte.ts';
 import { registerShell } from './offline.ts';
+import type { Session } from './protocol.ts';
 import { streamScreen } from './screens/lazy.svelte.ts';
 import { navigatePath, route } from './router.ts';
 import { acceptSession, startSession } from './session.ts';
@@ -23,7 +24,7 @@ async function boot() {
   // which may be slow or unreachable; the check below still signs it out if it was revoked meanwhile.
   if (wasSignedIn) session.value = { status: 'signed_in', device: { id: '', name: '' } };
   try {
-    const r = await api('GET', '/api/session', undefined, { timeout: 8000 });
+    const r = await api<Session>('GET', '/api/session', undefined, { timeout: 8000 });
     acceptSession(r);
   } catch (e) {
     if (e instanceof ApiError && e.data?.host) host.value = { ...host.value, ...e.data.host };

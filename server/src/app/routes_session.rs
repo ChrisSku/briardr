@@ -54,10 +54,12 @@ struct PairBody {
 /// `POST /api/devices/pairing-code`: a one-time code, the link that opens Briardr with it filled in, and
 /// that link as a QR code's rows of modules (`1` dark, `0` light), for the new device's camera.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-struct PairingCode {
+pub(super) struct PairingCode {
     code: String,
     expires_at: u64,
+    /// At the address this device reached the host by, or the host's own when this device is the host.
     link: String,
     /// None when the link is too long for a QR code.
     qr: Option<Vec<String>>,
@@ -66,8 +68,9 @@ struct PairingCode {
 /// `GET /api/session` and `POST /api/pair`: the same startup data for an existing session and a newly
 /// paired device.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-struct Session<'a> {
+pub(super) struct Session<'a> {
     device: DeviceRef<'a>,
     version: &'static str,
     protocol: u32,
@@ -79,13 +82,15 @@ struct Session<'a> {
 
 /// `GET /api/session` from a device that isn't signed in: enough for the pairing screen's words.
 #[derive(Serialize)]
-struct SignedOut {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct SignedOut {
     error: &'static str,
     paired: bool,
     host: PairingHost,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 struct PairingHost {
     noun: &'static str,
     platform: HostPlatform,
@@ -93,20 +98,25 @@ struct PairingHost {
 
 /// `GET /api/devices`: every paired device, which of them this is, and which take alerts.
 #[derive(Serialize)]
-struct Devices {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct Devices {
     devices: Vec<DeviceEntry>,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 struct DeviceEntry {
     #[serde(flatten)]
     device: DeviceInfo,
+    /// The device asking.
     current: bool,
+    /// It gets alerts.
     push: bool,
 }
 
 /// `GET /api/mac` and `POST /api/power/keep-awake`: the power state and what the host can do.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub(super) struct MacState<'a> {
     pub mac: MacSummary,
     pub host: &'a HostCapabilities,

@@ -9,6 +9,7 @@
   import { ApiError, errorMessage, upload } from '../../api.ts';
   import { record } from '../../diag.ts';
   import { prepareImage, type PreparedImage } from '../../media.ts';
+  import type { Uploaded } from '../../protocol.ts';
   import { toast } from '../../store.ts';
   import type { TerminalController } from '../../terminal/controller.ts';
   import type { Stream } from '../../types.ts';
@@ -80,9 +81,9 @@
     const t0 = performance.now();
     try {
       // One after the other: the paths are inserted in the order the files were picked.
-      const stored: { path: string; quoted: string }[] = [];
+      const stored: Uploaded[] = [];
       for (const p of parts) {
-        stored.push(await upload(`/api/streams/${encodeURIComponent(stream.id)}/uploads?kind=${p.kind}&name=${encodeURIComponent(p.name)}`, p.blob, (sent) => (phase = { k: 'uploading', sent: done + sent, total }), abort.signal));
+        stored.push(await upload<Uploaded>(`/api/streams/${encodeURIComponent(stream.id)}/uploads?kind=${p.kind}&name=${encodeURIComponent(p.name)}`, p.blob, (sent) => (phase = { k: 'uploading', sent: done + sent, total }), abort.signal));
         done += p.blob.size;
       }
       record('upload_done', { kind: noun, count: parts.length, ms: Math.round(performance.now() - t0) });

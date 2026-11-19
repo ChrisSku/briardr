@@ -47,6 +47,13 @@ description = "Typecheck the web client, tests and scripts"
 # Under Bun, so a server with Bun and no Node can typecheck too.
 run = ["bun --bun tsc -p tsconfig.json", "bun --bun svelte-check --tsconfig web/tsconfig.json --fail-on-warnings"]
 
+[tasks.protocol]
+description = "Write web/src/protocol.ts, the client's types for the API and the sockets, from the server's (server/src/app/protocol.rs)"
+# The test that fails while the file is out of date writes it instead. With `test`'s features, so it builds
+# once for both.
+env = { BRIARDR_WRITE_PROTOCOL = "1" }
+run = "cargo test --manifest-path server/Cargo.toml --features test-hooks app::protocol"
+
 [tasks.check]
 description = "Server format and lint checks"
 run = ["cargo fmt --manifest-path server/Cargo.toml --check", "cargo clippy --manifest-path server/Cargo.toml --all-targets --all-features -- -D warnings"]

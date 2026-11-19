@@ -2,44 +2,17 @@
 // (plugins/<id>/ in this repository) and installed ones use the same shapes, through @briardr/sdk.
 import type { Component } from 'svelte';
 import type { Save, Settings } from '../screens/settings/settings.ts';
+import type { LiveMessage, Section, Tab } from '../protocol.ts';
 import type { HostCaps, Stream } from '../types.ts';
 import type { MenuItem } from '../ui/overlays.ts';
 
-export interface TabInfo {
-  id: string;
-  label: string;
-  /** One of Briardr's icon names (ui/icons); unknown names show a generic icon. */
-  icon?: string;
-  /** A stream tab that works only for a stream on this computer (it reads its folder, or serves its localhost): hidden for a terminal on another machine. */
-  local?: boolean;
-}
+export type { Contributes, PluginInfo } from '../protocol.ts';
+// The names plugins know them by.
+export type TabInfo = Tab;
+export type SectionInfo = Section;
 
-export interface SectionInfo {
-  id: string;
-  label: string;
-}
-
-export interface Contributes {
-  streamTabs: TabInfo[];
-  appTabs: TabInfo[];
-  settings: SectionInfo[];
-}
-
-/** A plugin as the server lists it (server/src/plugins/mod.rs `info_json`). */
-export interface PluginInfo {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  builtin: boolean;
-  enabled: boolean;
-  contributes: Partial<Contributes> | null;
-  backend: { command: string[]; approved: boolean; hash: string } | null;
-  /** Where the client loads from; null for built-ins, and while it isn't built for this Briardr. */
-  client?: string | null;
-  build?: 'ok' | 'missing' | 'stale';
-  problem: string | null;
-}
+/** Briardr's own live messages, which `onCoreEvent` passes on; a backend's go to `onEvent`. */
+type CoreEvent = Exclude<LiveMessage, { t: 'plugin_event' }>;
 
 export type Navigation = { stream: string; tab?: string } | { app: string } | { settings: string } | { agents: true };
 
@@ -60,6 +33,8 @@ export interface PluginContext {
   /** Messages the plugin's backend pushes (`{"type":"event","topic",...}`); returns an unsubscribe. */
   onEvent(topic: string, fn: (data: unknown) => void): () => void;
   /** Briardr's own live messages of one type (`t`), e.g. `notes` when a stream's notes change; returns an unsubscribe. */
+  onCoreEvent<T extends CoreEvent['t']>(type: T, fn: (msg: Extract<CoreEvent, { t: T }>) => void): () => void;
+  /** A type this Briardr doesn't send (a newer one may). */
   onCoreEvent(type: string, fn: (msg: Record<string, any>) => void): () => void;
   /** Whether this device reaches Briardr: "online", "connecting", "offline" or "stopped" (signed out). Reactive. */
   connection(): 'connecting' | 'online' | 'offline' | 'stopped';

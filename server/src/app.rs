@@ -49,6 +49,8 @@ use crate::static_files::{extname, static_file};
 use crate::terminal_hub::{speaks_protocol, TerminalHub};
 use crate::usage::Usage;
 
+#[cfg(test)]
+mod protocol;
 mod routes_misc;
 mod routes_notes;
 mod routes_plugins;
@@ -169,6 +171,7 @@ pub fn ok(body: impl Serialize) -> Result<Resp, ApiError> {
 
 /// `{ok}`: whether it was done, from a route that has nothing else to say.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Done {
     pub ok: bool,
 }
@@ -179,9 +182,11 @@ pub fn done() -> Result<Resp, ApiError> {
 
 /// What a refused request says: its code and, for people, what went wrong.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct ErrorBody<'a> {
     pub error: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub message: Option<&'a str>,
 }
 
@@ -414,6 +419,7 @@ pub fn percent_decode(s: &str) -> Option<String> {
 
 /// A device as answers name it.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct DeviceRef<'a> {
     pub id: &'a str,
     pub name: &'a str,
@@ -674,6 +680,7 @@ enum Out {
 
 /// What Briardr sends on /ws/live, by its `t`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum LiveMessage<'a> {
     /// The first message: `instance_id` changes on every server start, so a client can refresh after
@@ -713,6 +720,7 @@ pub enum LiveMessage<'a> {
     /// The answer to the client's `ping`, with the host's time.
     Pong {
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         id: Option<Number>,
         now: u64,
     },
@@ -720,6 +728,7 @@ pub enum LiveMessage<'a> {
 
 /// The streams and Herdr's health, with the host's time and Briardr's version.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelState {
     model: Option<Model>,
@@ -730,6 +739,7 @@ pub struct ModelState {
 
 /// What a client sends on /ws/live: only `ping`; anything else is ignored.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[serde(tag = "t", rename_all = "snake_case")]
 enum LiveRequest {
     Ping { id: Option<Number> },
