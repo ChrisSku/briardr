@@ -1,6 +1,7 @@
 // Light or dark, decided before the page first paints: this device's choice (Settings → Appearance, kept in
 // briardr.prefs), else the system's. The build puts this script into the page itself, ahead of the styles
-// (scripts/build.ts): the app's modules run only after the first paint. The styles follow data-theme on
+// (scripts/build.ts): the app's modules run only after the first paint. The service worker's page for a
+// launch without a saved copy of the app has it too (web/src/sw.ts). The styles follow data-theme on
 // <html>, and so does whatever draws its own colours (web/src/theme.ts).
 import type { ThemeChoice } from './theme.ts';
 

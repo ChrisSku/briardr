@@ -54,7 +54,7 @@ Hold Shift to select without the program seeing the drag. Briardr can't tell whi
 the mouse, so the selection also shows while a program like that handles the same drag itself.
 
 Briardr is light or dark as the device is. Settings → Appearance keeps it light or dark on that device
-whatever its system says, the terminal included.
+whatever its system says, the terminal and the page that says Briardr can't open offline included.
 
 Workspaces, projects (Herdr's tabs) and streams can be renamed and closed from their menus in Workspaces,
 and streams from their ⋯ menu anywhere. Closing asks first, because it stops what runs inside on the host.
