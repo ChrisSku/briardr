@@ -92,6 +92,18 @@ test('Command from the key bar is a chord with letters and punctuation alike', (
   assert.deepEqual(applyModsToText('é', ['super']), { text: 'é' });
 });
 
+test('Command keeps Shift, which a keyboard protocol tells apart: a capital is its letter with Shift', () => {
+  assert.deepEqual(applyModsToText('Z', ['super']), { keys: ['shift+super+z'] });
+  assert.deepEqual(applyModsToText('z', ['super', 'shift']), { keys: ['shift+super+z'] });
+  assert.deepEqual(applyModsToText('Z', ['super', 'shift']), { keys: ['shift+super+z'] });
+  assert.deepEqual(applyModsToText('1', ['super', 'shift']), { keys: ['shift+super+1'] });
+  assert.deepEqual(applyModsToText('/', ['super', 'shift']), { keys: ['shift+super+/'] });
+  assert.deepEqual(applyModsToText('A', ['super', 'alt']), { keys: ['alt+shift+super+a'] });
+  assert.deepEqual(applyModsToText('C', ['ctrl', 'super']), { keys: ['ctrl+shift+super+c'] }, 'with Command, Control keeps it too');
+  assert.deepEqual(applyModsToText('É', ['super']), { text: 'É' });
+  assert.deepEqual(fromKeyEvent(down('Z', 'KeyZ', { ctrlKey: true, shiftKey: true }), ['super']), { keys: ['ctrl+shift+super+z'] }, 'a hardware chord with the bar’s Command');
+});
+
 test('Shift from the key bar capitalizes what is typed', () => {
   assert.deepEqual(applyModsToText('a', ['shift']), { text: 'A' });
   assert.deepEqual(applyModsToText('hi', ['shift']), { text: 'HI' });
