@@ -279,3 +279,67 @@
     <p class="fv-loading muted">Opening…</p>
   {/if}
 </div>
+
+<style>
+  .file-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .fv-head { flex: none; display: flex; align-items: center; gap: 2px; min-height: 50px; padding: 3px 8px; border-bottom: 1px solid var(--line-default); }
+  /* In full screen the way back floats in the top right corner: the head ends before it. */
+  :global(.is-full .surfaces) .fv-head { padding-right: var(--full-clear); }
+  .fv-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 3px 6px; border-radius: 8px; cursor: pointer; }
+  .fv-title:hover { background: var(--bg-sunken); }
+  .fv-title strong, .fv-dir { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fv-dir { font-size: 0.78rem; color: var(--text-secondary); font-family: var(--font-mono); }
+  .fv-meta { flex: none; display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 5px 16px; font-size: 0.78rem; color: var(--text-secondary); border-bottom: 1px solid var(--line-default); background: var(--bg-sunken); }
+  .fv-error { margin: 12px 16px; }
+  .fv-loading { padding: 16px; margin: 0; }
+  .fv-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--bg-surface); overscroll-behavior: contain; }
+  .fv-scroll:focus-visible { outline: 2px solid var(--ink-default); outline-offset: -2px; }
+  .fv-image {
+    flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: repeating-conic-gradient(var(--bg-sunken) 0% 25%, var(--bg-surface) 0% 50%) 50% / 20px 20px;
+  }
+  .fv-image img { max-width: 100%; height: auto; border-radius: 4px; box-shadow: var(--shadow-card); }
+  .fv-html { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; color-scheme: light; }
+  /* The file's lines, numbered in a gutter that stays put when they scroll sideways. Line numbers pick
+     lines for a prompt; picked lines are tinted, lines already in it carry a bar. */
+  .code { margin: 0; padding: 8px 0 calc(28px + env(safe-area-inset-bottom)); font-family: var(--font-mono); line-height: 1.55; tab-size: 4; color: var(--text-primary); counter-reset: ln; }
+  .code.is-nowrap { width: max-content; min-width: 100%; }
+  .code :global(.cl) { display: flex; }
+  .code :global(.cl::before) {
+    counter-increment: ln; content: counter(ln); flex: none; position: sticky; left: 0; box-sizing: content-box;
+    min-width: calc(var(--digits) * 1ch); padding: 0 14px 0 10px; text-align: right; color: var(--text-tertiary); background: var(--bg-surface);
+    -webkit-user-select: none; user-select: none; cursor: pointer;
+  }
+  .code :global(.lc) { flex: 1; min-width: 0; padding-right: 16px; white-space: pre; }
+  .code.is-wrap :global(.lc) { white-space: pre-wrap; overflow-wrap: anywhere; }
+  @media (hover: hover) {
+    .code :global(.cl:hover) { background: color-mix(in srgb, var(--text-primary) 5%, transparent); }
+    .code :global(.cl:hover::before) { color: var(--text-primary); }
+  }
+  .code :global(.cl.is-sel) { background: color-mix(in srgb, var(--ink-default) 14%, transparent); }
+  .code :global(.cl.is-sel::before) { color: var(--ink-default); font-weight: 700; background: color-mix(in srgb, var(--ink-default) 14%, var(--bg-surface)); }
+  .code :global(.cl.is-added::before) { box-shadow: inset -3px 0 0 color-mix(in srgb, var(--ink-default) 60%, transparent); }
+  /* highlight.js's classes in the theme's colours (--hl-*). */
+  .code :global(.hljs-doctag), .code :global(.hljs-keyword), .code :global(.hljs-meta .hljs-keyword), .code :global(.hljs-template-tag), .code :global(.hljs-template-variable), .code :global(.hljs-type), .code :global(.hljs-variable.language_) { color: var(--hl-keyword); }
+  .code :global(.hljs-title), .code :global(.hljs-title.class_), .code :global(.hljs-title.class_.inherited__), .code :global(.hljs-title.function_) { color: var(--hl-title); }
+  .code :global(.hljs-attr), .code :global(.hljs-attribute), .code :global(.hljs-literal), .code :global(.hljs-meta), .code :global(.hljs-number), .code :global(.hljs-operator), .code :global(.hljs-selector-attr), .code :global(.hljs-selector-class), .code :global(.hljs-selector-id), .code :global(.hljs-variable) { color: var(--hl-const); }
+  .code :global(.hljs-meta .hljs-string), .code :global(.hljs-regexp), .code :global(.hljs-string) { color: var(--hl-string); }
+  .code :global(.hljs-built_in), .code :global(.hljs-symbol) { color: var(--hl-builtin); }
+  .code :global(.hljs-code), .code :global(.hljs-comment), .code :global(.hljs-formula) { color: var(--hl-comment); font-style: italic; }
+  .code :global(.hljs-name), .code :global(.hljs-quote), .code :global(.hljs-selector-pseudo), .code :global(.hljs-selector-tag) { color: var(--hl-tag); }
+  .code :global(.hljs-subst) { color: var(--text-primary); }
+  .code :global(.hljs-section) { color: var(--hl-const); font-weight: 700; }
+  .code :global(.hljs-bullet) { color: var(--hl-bullet); }
+  .code :global(.hljs-emphasis) { font-style: italic; }
+  .code :global(.hljs-strong) { font-weight: 700; }
+  .code :global(.hljs-addition) { color: var(--diff-add); background: var(--diff-add-bg); }
+  .code :global(.hljs-deletion) { color: var(--diff-del); background: var(--diff-del-bg); }
+  .fv-selbar {
+    flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 8px max(8px, env(safe-area-inset-bottom)) 16px; border-top: 1px solid var(--line-default); background: var(--bg-sunken);
+  }
+  /* The prompt's bar is under it then, and has the safe area. */
+  :global(.has-prompt) .fv-selbar { padding-bottom: 8px; }
+  .fv-sel-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .fv-sel-label small { font-weight: 400; font-size: 0.78rem; color: var(--text-secondary); }
+</style>

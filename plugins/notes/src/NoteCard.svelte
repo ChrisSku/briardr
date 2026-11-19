@@ -58,3 +58,21 @@
     </button>
   </div>
 </li>
+
+<style>
+  /* A note in the list: a card cut off at a fixed height, fading out when there's more. */
+  .note-card { border: 1px solid var(--line-default); border-radius: 14px; background: var(--bg-sunken); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .note-card-meta { font-size: 0.78rem; }
+  .notes-status { color: var(--state-attention); font-weight: 600; }
+  .note-card-body { max-height: 168px; overflow: hidden; padding: 0; cursor: pointer; }
+  .note-card-body.is-clipped { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 44px), transparent); }
+  .note-card-body > :global(:first-child) { margin-top: 0; }
+  .note-card-body > :global(:last-child) { margin-bottom: 0; }
+  .note-card-body :global(:is(h1, h2, h3)) { font-size: 1.05rem; margin: 8px 0 4px; padding: 0; border: 0; }
+  .note-card-body :global(img) { display: block; max-height: 120px; object-fit: contain; margin: 6px 0; }
+  .note-card-body :global(:is(pre, code)) { background: var(--bg-surface); }
+  .note-card-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding-top: 4px; }
+  .note-card-actions .btn { background: var(--bg-surface); }
+  .note-delete { margin-left: auto; width: 38px; height: 34px; }
+  .note-delete:hover { color: var(--state-danger); }
+</style>

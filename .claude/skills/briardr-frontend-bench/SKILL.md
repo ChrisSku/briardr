@@ -12,7 +12,7 @@ from the client, not from Herdr, Git or the network. One command builds both sid
 |---|---|---|---|
 | `sizes` | How big is each build, raw/gzip/Brotli, and which parts (framework, app, xterm, markdown) grew | seconds | — |
 | `routes` | What a fresh Agents load downloads; does any later screen fetch more; does the server compress | ~1 min | briardr-dev Herdr |
-| `parity` | Do 20 screens × iPhone/iPad/Mac × light/dark look, read and announce the same (pixels, text, accessibility tree) | ~3 min | — |
+| `parity` | Do 32 screens × iPhone/iPad/Mac × light/dark look, read and announce the same (pixels, text, accessibility tree) | ~5 min | — |
 | `validation` | Pairing refusal, revocation, upload cancel, service-worker update + offline launch, for each build and base → cand | ~1 min | briardr-dev Herdr |
 | `tests` | The whole `test-ui` suite against each build, plus `bun test ./test` | ~3 min | briardr-dev Herdr |
 | `perf` | Interaction latency, scripting, long tasks, memory after repeated navigation | quick ~15 min, full ~2.5 h | idle machine |

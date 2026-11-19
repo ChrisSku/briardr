@@ -107,3 +107,22 @@
     </Sheet>
   {/if}
 {/if}
+
+<style>
+  .diff { overflow-x: auto; background: var(--bg-canvas); border-top: 1px solid var(--line-subtle); }
+  .diff pre { margin: 0; padding: 0 0 6px; font: var(--type-mono-small); min-width: max-content; }
+  .diff pre > span { display: block; padding: 1px 12px 1px 0; white-space: pre; color: var(--text-secondary); }
+  /* Line numbers pick lines for a comment; picked lines are tinted, commented ones carry a bar. */
+  .diff .dl-n { display: inline-block; width: 4.5ch; margin-right: 8px; text-align: right; color: var(--text-tertiary); -webkit-user-select: none; user-select: none; cursor: pointer; }
+  .dl-add { background: var(--diff-add-bg); color: var(--diff-add) !important; }
+  .dl-del { background: var(--diff-del-bg); color: var(--diff-del) !important; }
+  .dl-hunk { background: var(--bg-sunken); color: var(--text-tertiary) !important; padding: 6px 12px !important; }
+  .dl-meta { display: none !important; }
+  .diff .note { margin: 8px 12px; }
+  .diff pre > span.is-noted { box-shadow: inset 3px 0 0 var(--state-attention); }
+  .diff pre > span.is-sel { box-shadow: inset 3px 0 0 var(--ink-default); background: color-mix(in srgb, var(--ink-default) 14%, transparent); }
+  .diff-selbar { position: sticky; bottom: var(--review-h, 0px); z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-top: 1px solid var(--line-subtle); background: var(--bg-surface); }
+  .diff-sel-label { flex: 1; min-width: 0; display: flex; flex-direction: column; font-weight: 600; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .diff-sel-label small { font-weight: 400; font-size: 0.78rem; color: var(--text-secondary); }
+  .comment-lines { max-height: 30vh; overflow: auto; }
+</style>

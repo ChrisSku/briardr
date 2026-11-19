@@ -109,3 +109,8 @@
   </ul>
   {#if !!items.length && !canSend}<p class="hint">Take control in Terminal to send a note to it.</p>{/if}
 </div>
+
+<style>
+  .notes-list .surface-head .btn { flex: none; }
+  .note-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+</style>

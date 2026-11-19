@@ -359,6 +359,52 @@
 {/if}
 
 <style>
+  /* The folder (a sunken pane beside the file on iPad and Mac, the whole tab on iPhone) and the file. */
+  .surface.files { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  .files-panes { flex: 1; min-height: 0; display: flex; }
+  .ft-pane { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 0 8px calc(20px + env(safe-area-inset-bottom)); }
+  .is-split .ft-pane { flex: none; width: var(--tree-w); max-width: 60%; background: var(--bg-sunken); }
+  .is-stacked .ft-pane { flex: 1; padding: 0 calc(var(--gutter) - 8px) calc(20px + env(safe-area-inset-bottom)); }
+  .ft-toolbar { position: sticky; top: 0; z-index: 1; background: var(--bg-sunken); margin: 0 -8px; padding-bottom: 8px; flex: none; }
+  .is-stacked .ft-toolbar { background: var(--bg-surface); }
+  .ft-head { padding: 2px 4px 2px 12px; flex: none; }
+  /* In full screen the way back floats over the file's head, not the folder's. */
+  :global(.is-full .surfaces) .is-split .ft-head { margin-right: 0; }
+  .ft-search { margin: 0 8px; border: 1px solid var(--line-default); background: var(--bg-surface); gap: 6px; }
+  .ft-search:focus-within { border-color: var(--ink-default); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink-default) 20%, transparent); }
+  .ft-search input { width: 100%; }
+  .ft-search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+  .ft-search .icon-btn { width: 30px; min-width: 30px; }
+  .ft-search-status { margin: 6px 8px; font-size: 0.8rem; }
   .ft-search-in { display: flex; align-items: center; gap: 8px; margin: 8px 8px 2px; }
   .ft-search-in .ft-search-status { margin: 0; }
+  .ft-head .surface-title { flex-wrap: nowrap; }
+  .ft-folder { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.86rem; }
+  .ft-pane > .error { margin: 4px; }
+  .is-split .ft-pane :global(.icon-btn:hover) { background: var(--bg-selected); }
+  .ft { list-style: none; margin: 0; padding: 0; }
+  /* Keep native text selection off the folder's controls. */
+  .ft, .ft :global(*) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .ft-note { padding: 6px 8px 6px calc(24px + var(--depth) * 16px); color: var(--text-secondary); font-size: 0.84rem; }
+  .ft-resize { flex: none; width: 1px; background: var(--line-default); position: relative; z-index: 2; cursor: col-resize; touch-action: none; }
+  .ft-resize::after { content: ''; position: absolute; inset: 0 -6px; }
+  .ft-resize:hover, .ft-resize:focus-visible, .ft-resize:active { background: var(--ink-default); outline: none; }
+  .fv-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .fv-empty { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+  .fv-tree-btn { position: absolute; top: 4px; left: 8px; }
+  .files-prompt {
+    flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--ink-default);
+    padding: 8px 8px max(8px, env(safe-area-inset-bottom)) 16px; border-top: 1px solid var(--line-default); background: var(--bg-sunken);
+  }
+  .files-prompt-label { flex: 1; min-width: 0; color: var(--text-primary); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The rows of the folder and of a search in it (FileRow, ContentMatches). */
+  :global(.ft-row) {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px 0 calc(4px + var(--depth) * 16px);
+    border: 0; border-radius: 8px; background: none; color: var(--text-primary); font: inherit; font-size: 0.9rem; text-align: left; cursor: pointer;
+  }
+  @media (pointer: coarse) { :global(.ft-row) { min-height: 42px; } }
+  .is-stacked :global(.ft-row) { font-size: 1rem; min-height: 44px; }
+  :global(.ft-row:focus-visible) { outline: 2px solid var(--ink-default); outline-offset: -2px; }
+  :global(.ft-path) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 0.75rem; font-weight: 400; }
+  :global(.ft-dot) { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--state-attention); }
 </style>
