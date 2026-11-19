@@ -5,6 +5,14 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.33
+
+- **`briardr configure` changes only the settings it's given, and refuses a config.json it can't read.**
+  It used to save the `BRIARDR_*` overrides of the shell it ran in (port, preview port, listeners, Herdr
+  session) into config.json along with the change, and to start again from the defaults when config.json
+  couldn't be parsed. Now it changes the file's own settings, like a change in the app's Settings, and a
+  config.json it can't parse stays as it is: the command says which file and why, and changes nothing. ([#82](https://github.com/ChrisSku/briardr/pull/82))
+
 ## 0.3.32
 
 - **The key bar's ⌘ keeps Shift, so ⌘ with a capital Z (or with z and the bar's ⇧) is ⇧⌘Z, not ⌘Z.**
