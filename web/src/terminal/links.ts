@@ -3,7 +3,27 @@
 // picks a link, or the word, at the cell touched.
 import type { Terminal } from '@xterm/xterm';
 
-const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+[^\s<>"'`.,;:!?)\]}]/g;
+const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/g;
+const OPENS: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+/**
+ * The web links in text, with their offsets. A link ends before trailing punctuation, and before a closing
+ * bracket that closes none opened in it: `(see https://e.org/a)`, but `https://e.org/Rust_(language)`.
+ */
+function urlsIn(text: string): { index: number; url: string }[] {
+  const out = [];
+  for (const m of text.matchAll(URL_RE)) {
+    let url = m[0];
+    for (;;) {
+      const c = url[url.length - 1];
+      const open = OPENS[c];
+      if (!'.,;:!?'.includes(c) && !(open && url.split(open).length < url.split(c).length)) break;
+      url = url.slice(0, -1);
+    }
+    if (/:\/\/./.test(url)) out.push({ index: m.index!, url }); // not the scheme alone
+  }
+  return out;
+}
 
 export interface LogicalLine {
   text: string;
@@ -57,11 +77,10 @@ export interface FoundLink {
 
 export function linksInLogicalLine(l: LogicalLine): FoundLink[] {
   const out: FoundLink[] = [];
-  for (const m of l.text.matchAll(URL_RE)) {
-    const s = m.index!;
-    const e = s + m[0].length;
+  for (const { index: s, url } of urlsIn(l.text)) {
+    const e = s + url.length;
     out.push({
-      url: m[0],
+      url,
       start: { x: s % l.cols, y: l.firstRow + Math.floor(s / l.cols) },
       end: { x: e % l.cols, y: l.firstRow + Math.floor(e / l.cols) },
     });
@@ -113,8 +132,8 @@ export function isWebUrl(url: string): boolean {
 
 /** The word (or URL) around a character offset in a string. */
 export function wordAround(text: string, offset: number): { start: number; end: number } {
-  for (const m of text.matchAll(URL_RE)) {
-    if (offset >= m.index! && offset < m.index! + m[0].length) return { start: m.index!, end: m.index! + m[0].length };
+  for (const { index, url } of urlsIn(text)) {
+    if (offset >= index && offset < index + url.length) return { start: index, end: index + url.length };
   }
   const isWord = (c: string) => /[^\s"'`()[\]{}<>|,;]/.test(c);
   let s = offset;

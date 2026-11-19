@@ -74,3 +74,23 @@
     </p>
   {/if}
 </section>
+
+<style>
+  /* A provider's card: its limits as 6 pt meters (ink under 70 %, attention 70–89 %, danger from 90 %). */
+  .usage-card { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+  .usage-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .usage-head h2 { font: var(--type-headline); letter-spacing: var(--track-headline); }
+  .usage-head .tag { margin-left: 0; }
+  .usage-head :global(.asof) { margin-left: auto; }
+  .usage-card .hint, .usage-card .note { margin: 0; }
+  .meter-row { display: flex; flex-direction: column; gap: 5px; }
+  .meter-label { display: flex; justify-content: space-between; gap: 8px; font: var(--type-subhead-strong); letter-spacing: var(--track-subhead-strong); }
+  .meter-value { font-variant-numeric: tabular-nums; }
+  .meter-value.tone-attention { color: var(--state-attention); }
+  .meter-value.tone-danger { color: var(--state-danger); }
+  .meter-sub { font: var(--type-footnote); letter-spacing: var(--track-footnote); color: var(--text-tertiary); }
+  .reset-credits { display: flex; align-items: center; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line-subtle); }
+  .reset-credits-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .reset-credits-text strong { font: var(--type-subhead-strong); }
+  .reset-credits-text span { font: var(--type-footnote); color: var(--text-tertiary); }
+</style>

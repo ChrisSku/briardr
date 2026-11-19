@@ -5,6 +5,7 @@ import { mount } from 'svelte';
 import { api, ApiError } from './api.ts';
 import App from './App.svelte';
 import { record } from './diag.ts';
+import { refuseStrayDrops } from './drops.ts';
 import { trackKeyboard } from './keyboard.svelte.ts';
 import { registerShell } from './offline.ts';
 import type { Session } from './protocol.ts';
@@ -44,5 +45,7 @@ if ('serviceWorker' in navigator) {
 
 // Every screen keeps the focused field, and the sheet it's in, above the on-screen keyboard.
 trackKeyboard();
+// A file dropped where nothing takes it doesn't open in place of Briardr.
+refuseStrayDrops();
 mount(App, { target: document.getElementById('app')! });
 boot();

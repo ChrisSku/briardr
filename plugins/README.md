@@ -11,7 +11,9 @@ The built-ins are made exactly like the plugins anyone writes: a `briardr-plugin
 `src/` behind `definePlugin`, and nothing from Briardr but `@briardr/sdk`. No imports from `web/src`, no
 private props. When one needs something Briardr doesn't offer plugins yet, it goes into the SDK
 (`web/src/sdk/`) for every plugin. `test/builtin-plugins.test.ts` checks this, and also builds each
-one as an installed plugin.
+one as an installed plugin. Their styles are in their components' `<style>` blocks, scoped, in Briardr's
+colour and type variables; `web/src/styles.css` has only what the app and every plugin share (classes
+such as `surface-head`, `btn` and `md`, and the snippets in a `PromptSheet`).
 
 They differ only in delivery: the app's build bundles them (so they work on a first launch and
 offline), they're on until turned off in Settings → Plugins, and they use Briardr's own API instead of a

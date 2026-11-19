@@ -1,7 +1,7 @@
 // Visual and behavioural parity between two builds. Both are served the same fixture with a frozen
 // clock (server and page), then every screen is captured at iPhone, iPad and Mac sizes in light and
 // dark mode. For each screen it compares pixels, the visible text and the accessibility tree.
-//   bun bench/parity.ts base=bench/builds/main-<sha> cand=bench/builds/worktree --out bench/results/parity
+//   bun bench/parity.ts base=bench/builds/main-<sha> cand=bench/builds/worktree --out bench/results/parity [--profiles iphone,ipad,mac]
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, devices, webkit, type Browser, type Page } from 'playwright';
@@ -24,9 +24,15 @@ type Step = { name: string; run: (page: Page, s: FixtureServer) => Promise<void>
 // Builds from before the redesign have a Usage tab; after it, Usage is in Settings and Settings is a gear.
 const nav = (label: string) => async (page: Page) => {
   const main = page.locator('nav[aria-label="Main"]');
-  const button = main.getByRole('button', { name: label, exact: true });
+  // The Agents tab's name has its badge too: "Agents 6 need you" in the sidebar, "6 need you Agents" on iPhone.
+  const button = main.getByRole('button', { name: new RegExp(`(^| )${label}( |$)`) });
   if (label === 'Usage' && !(await button.count())) return void (await main.getByRole('button', { name: 'Settings', exact: true }).click(), await page.locator('.usage-row').first().click());
   await button.click();
+};
+/** On iPhone a file takes the whole tab; its back button shows the folder again. */
+const backToFolder = async (page: Page) => {
+  const back = page.getByRole('button', { name: 'Back to folder' });
+  if (await back.count()) await back.click();
 };
 const busyStream = 's3';
 const streamName = (s: FixtureServer) => s.fixture.model.streams.find((x) => x.id === s.fixture.picks.terminal)!.name;
@@ -48,7 +54,8 @@ const STEPS: Step[] = [
     run: async (page, s) => {
       await page.keyboard.press('Escape');
       await page.waitForSelector('.sheet.jump', { state: 'detached' });
-      await page.locator('.main .stream-row', { hasText: streamName(s) }).getByRole('button', { name: /More actions/ }).click();
+      // On touch the "…" is reached by swiping the row (it stays in the row, a pixel wide): press it directly.
+      await page.locator('.main .stream-row', { hasText: streamName(s) }).getByRole('button', { name: /More actions/ }).dispatchEvent('click');
     },
   },
   {
@@ -83,7 +90,41 @@ const STEPS: Step[] = [
       await page.waitForSelector('.diff');
     },
   },
-  { name: '11-preview', run: async (page) => void (await page.getByRole('tab', { name: 'Preview', exact: true }).click()) },
+  {
+    name: '10a-diff-selection',
+    run: async (page) => {
+      await page.locator('.diff .dl-n').nth(6).click();
+      await page.waitForSelector('.diff-selbar');
+    },
+  },
+  {
+    name: '10b-diff-comment',
+    run: async (page) => {
+      await page.getByRole('button', { name: 'Comment…' }).click();
+      await page.getByLabel('Comment', { exact: true }).fill('Retry this call');
+    },
+  },
+  {
+    name: '10c-review-bar',
+    run: async (page) => {
+      await page.getByRole('button', { name: 'Add comment' }).click();
+      await page.waitForSelector('.changes-review');
+    },
+  },
+  {
+    name: '10d-review-sheet',
+    run: async (page) => {
+      await page.getByRole('button', { name: 'Review…' }).click();
+      await page.waitForSelector('.sheet .prompt-snippet');
+    },
+  },
+  {
+    name: '11-preview',
+    run: async (page) => {
+      if (await page.locator('.sheet-head [aria-label="Close"]').count()) await page.locator('.sheet-head [aria-label="Close"]').click();
+      await page.getByRole('tab', { name: 'Preview', exact: true }).click();
+    },
+  },
   {
     name: '12-docs',
     run: async (page) => {
@@ -93,8 +134,58 @@ const STEPS: Step[] = [
     },
   },
   {
+    name: '12a-files',
+    run: async (page) => {
+      await page.getByRole('tab', { name: 'Files', exact: true }).click();
+      await page.getByRole('button', { name: 'src, folder', exact: true }).click();
+      await page.getByRole('button', { name: 'retry.ts, changed', exact: true }).waitFor();
+    },
+  },
+  {
+    name: '12b-file-code',
+    run: async (page) => {
+      await page.getByRole('button', { name: 'retry.ts, changed', exact: true }).click();
+      await page.waitForSelector('.code .hljs-keyword');
+    },
+  },
+  {
+    name: '12c-file-image',
+    run: async (page) => {
+      await backToFolder(page);
+      await page.getByRole('button', { name: 'logo.png', exact: true }).click();
+      await page.waitForFunction(() => !!(document.querySelector('.fv-image img') as HTMLImageElement | null)?.naturalWidth);
+    },
+  },
+  {
+    name: '12d-files-search',
+    run: async (page) => {
+      await backToFolder(page);
+      await page.getByRole('searchbox', { name: 'Search files by filename' }).fill('retry');
+      await page.getByRole('group', { name: 'Search in' }).getByRole('button', { name: 'Contents' }).click();
+      await page.waitForSelector('.match-line');
+    },
+  },
+  {
+    name: '12e-file-selection',
+    run: async (page) => {
+      await page.locator('.match-line').first().click();
+      await page.waitForSelector('.fv-selbar');
+    },
+  },
+  // Full screen: the tools' top rows leave room for the way back in the corner (⌘2–⌘4: Files, Changes, Preview).
+  {
+    name: '12f-full-screen-files',
+    run: async (page) => {
+      await page.keyboard.press('Meta+Shift+Enter');
+      await page.waitForSelector('.full-exit');
+    },
+  },
+  { name: '12g-full-screen-changes', run: async (page) => void (await page.keyboard.press('Meta+3'), await page.waitForSelector('.branch-row')) },
+  { name: '12h-full-screen-preview', run: async (page) => void (await page.keyboard.press('Meta+4'), await page.waitForSelector('.preview-bar')) },
+  {
     name: '13-notes',
     run: async (page) => {
+      await page.locator('.full-exit').click();
       await page.getByRole('tab', { name: 'Notes', exact: true }).click();
       await page.waitForSelector('.note-card');
     },
@@ -267,7 +358,9 @@ const browser = await webkit.launch();
 const judge = await (await chromium.launch()).newPage();
 const report: any[] = [];
 const errors: Record<string, string[]> = {};
-for (const profile of Object.keys(PROFILES))
+// --profiles iphone,mac compares only those sizes.
+const profiles = argv.includes('--profiles') ? argv[argv.indexOf('--profiles') + 1].split(',') : Object.keys(PROFILES);
+for (const profile of profiles)
   for (const scheme of ['light', 'dark'] as const) {
     const [A, B] = builds;
     const ra = await capture(browser, A, profile, scheme);

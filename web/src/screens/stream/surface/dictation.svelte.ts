@@ -16,6 +16,8 @@ export class Dictation {
   #ctl: TerminalController;
   #rec: Recorder | null = null;
   #generation = 0;
+  /** Aborted when the terminal goes away. */
+  #gone = new AbortController();
 
   constructor(ctl: TerminalController) {
     this.#ctl = ctl;
@@ -28,34 +30,48 @@ export class Dictation {
     this.#rec = r;
     try {
       await r.start();
-      this.active = true;
-      const tick = () => {
-        if (this.#rec !== r) return;
-        this.level = r.level;
-        requestAnimationFrame(tick);
-      };
-      tick();
     } catch {
+      if (this.#rec !== r) return;
       this.#rec = null;
-      toast('Microphone access was denied. Allow it in Settings to dictate.');
+      return toast('Microphone access was denied. Allow it in Settings to dictate.');
     }
+    // Let go, or the terminal went away, while the microphone was starting.
+    if (this.#rec !== r) return r.cancel();
+    this.active = true;
+    const tick = () => {
+      if (this.#rec !== r) return;
+      this.level = r.level;
+      requestAnimationFrame(tick);
+    };
+    tick();
   };
 
   /** Ends the recording: transcribed and inserted, or with `cancel` dropped. */
   end = async (cancel: boolean) => {
     const r = this.#rec;
+    const recording = this.active;
     this.#rec = null;
     this.active = false;
     if (!r) return;
-    if (cancel) return r.cancel();
+    // Let go before the microphone was on: nothing was recorded, and start lets go of it when it comes.
+    if (cancel || !recording) return r.cancel();
     const wav = await r.stop();
     const t0 = performance.now();
+    const gone = this.#gone.signal;
     try {
-      const res = await api<Dictated>('POST', `/api/dictation?locale=${encodeURIComponent(navigator.language)}`, undefined, { raw: wav, headers: { 'content-type': 'audio/wav' }, timeout: 60_000 });
+      const res = await api<Dictated>('POST', `/api/dictation?locale=${encodeURIComponent(navigator.language)}`, undefined, { raw: wav, headers: { 'content-type': 'audio/wav' }, timeout: 60_000, signal: gone });
       record('dictation_done', { ms: Math.round(performance.now() - t0) });
+      if (gone.aborted) return;
       if (this.#ctl.paste(res.text, true, this.#generation)) toast('Dictation inserted. Edit, then press Enter.');
     } catch (e) {
-      toast(errorMessage(e, 'Dictation failed.'), 5000);
+      if (!gone.aborted) toast(errorMessage(e, 'Dictation failed.'), 5000);
     }
   };
+
+  /** The terminal went away (the stream was left or closed): a recording is dropped and the microphone let
+   *  go, and a transcription still on its way is never inserted. */
+  dispose() {
+    this.#gone.abort();
+    void this.end(true);
+  }
 }

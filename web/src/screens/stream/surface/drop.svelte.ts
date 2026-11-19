@@ -1,12 +1,11 @@
 // Files dropped on the terminal: offered for sending, like files picked with the + menu, but only to a
-// terminal in your control (dropRefusal). Every drop Briardr handles is handled here.
+// terminal in your control (dropRefusal). Every drop Briardr handles is handled here; files dropped
+// anywhere else are refused (refuseStrayDrops).
+import { hasFiles } from '../../../drops.ts';
 import { toast } from '../../../store.ts';
 import type { TerminalController } from '../../../terminal/controller.ts';
 import type { Stream } from '../../../types.ts';
 import { droppedFiles, dropRefusal, uploadItems, type UploadItem } from '../insert.ts';
-
-/** The drag carries files, not text or a link. */
-export const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files');
 
 export class FileDrop {
   /** Files that would be offered are over the terminal: it shows the drop mark. */

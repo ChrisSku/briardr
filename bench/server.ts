@@ -181,6 +181,15 @@ export class FixtureServer {
         const text = F.docText(url.searchParams.get('path') || 'README.md');
         return this.json({ text, size: text.length });
       }
+      if (method === 'GET' && rest === '/files') return this.json(F.filesList(url.searchParams.get('path') || '', now));
+      if (method === 'GET' && rest === '/files/file') {
+        const p = url.searchParams.get('path') || '';
+        const text = F.fileText(p);
+        return this.json({ path: p, text, binary: false, size: text.length });
+      }
+      if (method === 'GET' && rest === '/files/search') return this.json(F.filesSearch(url.searchParams.get('q') || '', url.searchParams.get('in') === 'contents'));
+      // Images in Files and Docs: the app's icon stands in for any of them.
+      if (method === 'GET' && rest === '/docs/asset') return new Response(Bun.file(path.join(this.dist, 'icons', 'icon-192.png')), { headers: { 'content-type': 'image/png' } });
       if (method === 'GET' && rest === '/info') return this.json({ agent: { name: 'claude' } });
       if (method === 'GET' && rest === '/history') return this.json({ text: Array.from({ length: 1000 }, (_, i) => `line ${i} ${F.screen(80, 1, i).slice(9)}`).join('\n'), truncated: true, asOf: now });
       const notes = this.notes.get(sid) || [];

@@ -175,3 +175,16 @@
   {/if}
 </div>
 
+
+<style>
+  .fv-pdf { flex: 1; min-height: 0; overflow: auto; background: var(--bg-sunken); overscroll-behavior: contain; }
+  .fv-pdf:focus-visible { outline: 2px solid var(--ink-default); outline-offset: -2px; }
+  .fv-pdf-pages {
+    display: flex; flex-direction: column; align-items: center; gap: 12px; box-sizing: border-box;
+    width: max-content; min-width: 100%; padding: 16px 16px calc(28px + env(safe-area-inset-bottom));
+  }
+  /* Paper stays white in dark mode, as the PDF draws it. */
+  .fv-pdf-page { flex: none; overflow: hidden; background: #fff; border-radius: 2px; box-shadow: var(--shadow-card); }
+  .fv-pdf-page :global(canvas) { display: block; width: 100%; height: 100%; }
+  .fv-loading { padding: 16px; margin: 0; }
+</style>
