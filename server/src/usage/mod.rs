@@ -323,10 +323,10 @@ mod tests {
             windows: vec![],
             credits: None,
             reset_credits: None,
-            spend: Some(Value::Null),
+            spend: Some(None),
             plan: None,
             limit_reached: None,
-            captured_at: json!(at),
+            captured_at: at,
         }
     }
 
