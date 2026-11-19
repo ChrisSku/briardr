@@ -1,5 +1,6 @@
 <!-- Enter: a tap sends Enter; holding it dictates until released (where the host transcribes speech). -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { caps } from '../../../host.ts';
   import { Icon } from '../../../ui/icons/index.ts';
   import { capture } from './capture.ts';
@@ -16,6 +17,12 @@
   let holding = false;
   let pressed = false;
   const canDictate = $derived(caps().dictation);
+  // The key going away while pressed (the key bar hidden, the stream left) ends the press: a hold is
+  // cancelled, and one about to start never does.
+  onMount(() => () => {
+    if (t) clearTimeout(t);
+    if (holding) onHoldEnd(true);
+  });
 </script>
 
 <button
