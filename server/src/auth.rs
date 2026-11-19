@@ -36,6 +36,7 @@ pub struct Device {
 
 /// A device as the API shows it; the token hash stays inside Auth.
 #[derive(Debug, Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub id: String,

@@ -1,39 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, ApiError } from '../../api.ts';
+  import type { DeviceEntry as Device, Devices, PairingCode } from '../../protocol.ts';
   import { session, toast } from '../../store.ts';
   import { Icon } from '../../ui/icons/index.ts';
   import { ago, confirmDialog } from '../../ui/kit.ts';
   import { openRename } from '../RenameSheet.svelte';
   import Section from './Section.svelte';
 
-  interface Device {
-    id: string;
-    name: string;
-    createdAt: number;
-    lastSeenAt: number | null;
-    /** The device showing this list. */
-    current: boolean;
-    /** It gets alerts. */
-    push: boolean;
-  }
   let list = $state.raw<Device[] | null>(null);
   let failed = $state<string | null>(null);
-  /** A one-time code, the link that opens Briardr with it filled in (where this device reached it, or the
-   *  host's address when it's the host itself), and that link as a QR code's rows of 0 and 1. */
-  interface PairingCode {
-    code: string;
-    expiresAt: number;
-    link: string;
-    qr: string[] | null;
-  }
   let code = $state.raw<PairingCode | null>(null);
   const opens = $derived(code && new URL(code.link).host);
   /** The dark modules as one path, a unit square each, inside a quiet zone of four. */
   const qrPath = (rows: string[]) => rows.flatMap((row, y) => Array.from(row, (m, x) => (m === '1' ? `M${x + 4} ${y + 4}h1v1h-1z` : ''))).join('');
   const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
   const load = () =>
-    api<{ devices: Device[] }>('GET', '/api/devices').then(
+    api<Devices>('GET', '/api/devices').then(
       (r) => ((list = r.devices), (failed = null)),
       (e) => (failed = message(e, 'Couldn’t load the devices.')),
     );

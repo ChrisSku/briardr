@@ -5,7 +5,7 @@ import { derived, persisted, state } from '../reactive.svelte.ts';
 import { BUILTIN_LOADERS, BUILTIN_MANIFESTS } from './builtin.ts';
 import type { Contributes, PluginInfo, PluginModule, SectionInfo, TabInfo } from './types.ts';
 
-/** Until the server has answered: the built-ins, all on. */
+/** Until the server has answered: the built-ins, all on, as it lists them. */
 const DEFAULT: PluginInfo[] = BUILTIN_MANIFESTS.map((m) => ({
   id: m.id,
   name: m.name,
@@ -13,8 +13,10 @@ const DEFAULT: PluginInfo[] = BUILTIN_MANIFESTS.map((m) => ({
   version: '',
   builtin: true,
   enabled: true,
-  contributes: m.contributes,
+  contributes: { streamTabs: [], appTabs: [], settings: [], ...m.contributes },
   backend: null,
+  client: null,
+  build: 'ok',
   problem: null,
 }));
 

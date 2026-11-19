@@ -50,7 +50,8 @@ setInterval(() => (now.value = Date.now()), 1000);
 // Saved at most once a second: the model is about 150 KB of JSON at 500 streams, and live updates can
 // replace it many times a second.
 export const model = persisted<Model | null>('briardr.cache.model', null, 1000);
-export const herdr = persisted<HerdrHealth | null>('briardr.cache.herdr', null, 1000);
+/** Herdr's health; one an older Briardr cached has no `backend`. */
+export const herdr = persisted<(Omit<HerdrHealth, 'backend'> & Partial<Pick<HerdrHealth, 'backend'>>) | null>('briardr.cache.herdr', null, 1000);
 export const mac = persisted<MacSummary | null>('briardr.cache.mac', null, 1000);
 /** What the host supports (host.ts); before sign-in only its noun is known. */
 export const host = persisted<Partial<HostCaps> | null>('briardr.cache.host', null);

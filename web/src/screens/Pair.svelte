@@ -4,6 +4,7 @@
   import { api, ApiError } from '../api.ts';
   import { record } from '../diag.ts';
   import { installSuggestion, platform, standalone } from '../install.ts';
+  import type { Session } from '../protocol.ts';
   import { linkedCode, navigate } from '../router.ts';
   import { acceptSession, startSession } from '../session.ts';
   import { Icon } from '../ui/icons/index.ts';
@@ -34,7 +35,7 @@
     busy = true;
     error = null;
     try {
-      const r = await api('POST', '/api/pair', { code, name });
+      const r = await api<Session>('POST', '/api/pair', { code, name });
       record('paired', {});
       if (!standalone && installSuggestion.value !== 'dismissed') installSuggestion.value = 'pending';
       acceptSession(r);

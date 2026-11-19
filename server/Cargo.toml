@@ -64,6 +64,9 @@ qrcode = { version = "0.14", default-features = false }
 unicode-normalization = "0.1"
 
 [dev-dependencies]
+# web/src/protocol.ts, the client's types for the API and the sockets, from the server's (src/app/protocol.rs). Only
+# tests derive them, so the server's builds don't carry the generator.
+ts-rs = { version = "12", features = ["serde-json-impl"] }
 
 [profile.release]
 strip = true

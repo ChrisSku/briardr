@@ -208,8 +208,9 @@ struct StatuslineRemoved {
 
 /// `GET /api/notifications`: this device's subscription and alert choices, and the host's settings.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-struct NotificationsState {
+pub(super) struct NotificationsState {
     public_key: String,
     subscribed: bool,
     endpoint: Option<String>,
@@ -219,27 +220,34 @@ struct NotificationsState {
 
 /// `PUT /api/notifications/device`: the device's alert choices after the change.
 #[derive(Serialize)]
-struct PrefsBody {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct PrefsBody {
     prefs: DevicePrefs,
 }
 
 /// `POST /api/notifications/test`: the test alert's delivery, when there was a subscription to send to.
 #[derive(Serialize)]
-struct TestSent {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct TestSent {
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     delivery: Option<DeliveryRecord>,
 }
 
 /// `GET /api/notifications/deliveries/:id`: the delivery, None when it isn't known.
 #[derive(Serialize)]
-struct DeliveryBody {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct DeliveryBody {
     delivery: Option<DeliveryRecord>,
 }
 
 /// `GET /api/settings`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-struct Settings<'a> {
+pub(super) struct Settings<'a> {
+    /// Which Herdr Briardr talks to: Herdr TUI's server, or herdr-core (the Herdr app's).
+    #[cfg_attr(test, ts(type = r#""tui" | "core""#))]
     herdr_backend: String,
     herdr_path: String,
     herdr_session: String,
@@ -259,6 +267,7 @@ struct Settings<'a> {
 
 /// Whether the configured Herdr runs, its version, and what's wrong with it (`HerdrStatus::problem`).
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 struct HerdrState {
     running: bool,
     version: Option<String>,
@@ -266,6 +275,7 @@ struct HerdrState {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 struct UsageSettings {
     claude_keychain_opt_in: bool,
@@ -274,6 +284,7 @@ struct UsageSettings {
 
 /// The TLS mode asked for, and the one in effect.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 struct TlsModes {
     wanted: String,
     effective: String,
@@ -281,7 +292,8 @@ struct TlsModes {
 
 /// `POST /api/update/install`: the version installed, and whether Briardr restarts on it by itself.
 #[derive(Serialize)]
-struct Installed {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct Installed {
     ok: bool,
     version: String,
     restarts: bool,

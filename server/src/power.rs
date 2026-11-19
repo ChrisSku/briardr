@@ -44,17 +44,23 @@ const EXCLUDED_OWNERS: [&str; 5] = [
 const SLEEP_REQUEST_LIMIT: usize = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Battery {
     pub present: bool,
     pub percent: Option<u32>,
-    /// "ac" | "battery" | "unknown"
+    /// Where its power comes from.
+    #[cfg_attr(test, ts(type = r#""ac" | "battery" | "unknown""#))]
     pub source: String,
     pub charging: bool,
     pub charged: bool,
     /// Minutes remaining (on battery) or until full (charging); None when unknown.
     pub minutes: Option<u32>,
-    /// "remaining" | "until_full" | "calculating" | "unavailable"
+    /// What `minutes` counts.
+    #[cfg_attr(
+        test,
+        ts(type = r#""remaining" | "until_full" | "calculating" | "unavailable""#)
+    )]
     pub time_kind: String,
 }
 
@@ -73,6 +79,7 @@ impl Battery {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct KeepAwake {
     /// Always on is turned on in Settings.
@@ -104,6 +111,7 @@ impl KeepAwake {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct MacSummary {
     pub name: String,
@@ -546,13 +554,17 @@ struct KeepAwakeBeforeSleep {
 /// `POST /api/power/sleep`'s answer: the Mac goes to sleep (`duplicate` when this request ID already
 /// put it to sleep, `at` then), or the request is refused with an `error`.
 #[derive(Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct SleepAnswer {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub duplicate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub error: Option<&'static str>,
 }
 

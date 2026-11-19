@@ -2,15 +2,16 @@
   import { HostLabel } from '../../host.ts';
   import { onMount } from 'svelte';
   import { api } from '../../api.ts';
+  import type { StreamInfo } from '../../protocol.ts';
   import { model, toast } from '../../store.ts';
   import type { TerminalController } from '../../terminal/controller.ts';
   import type { Stream } from '../../types.ts';
   import { AsOf, Sheet } from '../../ui/kit.ts';
 
   let { stream, ctl, onClose }: { stream: Stream; ctl: TerminalController; onClose: () => void } = $props();
-  let info = $state.raw<any>(null);
+  let info = $state.raw<StreamInfo | null>(null);
   onMount(() => {
-    api('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (info = r), () => (info = { error: true }));
+    api<StreamInfo>('GET', `/api/streams/${encodeURIComponent(stream.id)}/info`).then((r) => (info = r), () => {});
   });
 
   const st = $derived(ctl.status.value);

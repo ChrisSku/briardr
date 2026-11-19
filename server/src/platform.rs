@@ -2,6 +2,7 @@
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum HostPlatform {
     Macos,
@@ -11,6 +12,7 @@ pub enum HostPlatform {
 
 /// What the client sees as `host` (in /api/session, /api/mac, settings and the live `mac` message).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HostCapabilities {
     pub platform: HostPlatform,

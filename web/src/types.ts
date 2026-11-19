@@ -1,99 +1,11 @@
-export type AgentState = 'blocked' | 'working' | 'done' | 'idle' | 'unknown';
-export type StreamKind = 'agent' | 'shell' | 'editor' | 'program';
+// The model and the host as the server sends them (protocol.ts, made from the server's own types), by the
+// names the client and plugins (@briardr/sdk) use, and the groups the client sorts agents into.
+import type { AgentState, HostCapabilities, Stream } from './protocol.ts';
 
-export interface Workspace {
-  id: string;
-  name: string;
-  number: number;
-  focused: boolean;
-  activeProjectId: string | null;
-  cwd: string | null;
-  /** The machine it lives on (herdr-core's `hc machine` name); missing for this computer. */
-  machine?: string;
-}
-
-export interface Project {
-  id: string;
-  workspaceId: string;
-  name: string;
-  number: number;
-  focused: boolean;
-}
-
-export interface Stream {
-  id: string;
-  workspaceId: string;
-  projectId: string;
-  terminalId: string;
-  name: string;
-  label: string | null;
-  kind: StreamKind;
-  tool: string;
-  state: AgentState | null;
-  stateChangeSeq: number | null;
-  stateSince: number | null;
-  cwd: string | null;
-  folder: string | null;
-  focused: boolean;
-  title: string | null;
-  rows: number | null;
-  /** The machine its terminal runs on (herdr-core); missing for this computer. Such a stream has no `cwd` here. */
-  machine?: string;
-}
-
-export interface Model {
-  workspaces: Workspace[];
-  projects: Project[];
-  streams: Stream[];
-  focusedStreamId: string | null;
-  herdrVersion: string | null;
-  asOf: number;
-}
-
-/** An agent a new stream can start (`GET /api/agents`), as the connected Herdr starts it. */
-export interface AgentChoice {
-  kind: string;
-  name: string;
-  /** It takes a first message when it starts. */
-  prompt: boolean;
-}
-
-export interface HerdrHealth {
-  /** Herdr TUI, or herdr-core under the Herdr app (missing in a cache an older Briardr wrote). */
-  backend?: 'tui' | 'core';
-  ok: boolean;
-  problem: string | null;
-  version: string | null;
-  lastOkAt: number | null;
-}
-
-export interface Battery {
-  present: boolean;
-  percent: number | null;
-  source: 'ac' | 'battery' | 'unknown';
-  charging: boolean;
-  charged: boolean;
-  minutes: number | null;
-  timeKind: 'remaining' | 'until_full' | 'calculating' | 'unavailable';
-}
-
-export interface MacSummary {
-  name: string;
-  battery: Battery;
-  keepAwake: { wanted: boolean; briardr: boolean; lidClosed: boolean; setupNeeded: boolean; lowBattery: boolean; others: string[]; sleepDisabled: boolean };
-  asOf: number;
-}
+export type { AgentChoice, AgentState, Battery, HerdrHealth, MacSummary, Model, Project, Stream, StreamKind, Workspace } from './protocol.ts';
 
 /** What the computer running Briardr supports (server/src/platform.rs). */
-export interface HostCaps {
-  platform: 'macos' | 'linux' | 'other';
-  noun: string;
-  battery: boolean;
-  keepAwake: boolean;
-  sleep: boolean;
-  dictation: boolean;
-  claudeKeychain: boolean;
-}
+export type HostCaps = HostCapabilities;
 
 export type Group = 'attention' | 'working' | 'finished' | 'ready' | 'unknown';
 

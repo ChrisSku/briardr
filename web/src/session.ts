@@ -5,21 +5,13 @@ import { pruneScreens } from './idb.ts';
 import { whenIdle } from './idle.ts';
 import { liveConn } from './live.ts';
 import { preloadBuiltins, setPlugins } from './plugins/registry.svelte.ts';
-import type { PluginInfo } from './plugins/types.ts';
+import type { MacState, Session } from './protocol.ts';
 import { watchPush } from './push.ts';
 import { preloadScreens } from './screens/lazy.svelte.ts';
 import { host, mac, session } from './store.ts';
-import type { HostCaps } from './types.ts';
 import { rememberServer } from './updates.ts';
 
-export interface SessionInfo {
-  device: { id: string; name: string };
-  instanceId: string;
-  host: HostCaps;
-  plugins: PluginInfo[];
-}
-
-export function acceptSession(info: SessionInfo) {
+export function acceptSession(info: Session) {
   rememberServer(info.instanceId);
   host.value = info.host;
   setPlugins(info.plugins);
@@ -38,7 +30,7 @@ export function startSession() {
     whenIdle(() => void pruneScreens());
   }
   liveConn.start();
-  api('GET', '/api/mac').then((r) => {
+  api<MacState>('GET', '/api/mac').then((r) => {
     mac.value = r.mac;
     if (r.host) host.value = r.host;
   }, () => {});

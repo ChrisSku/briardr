@@ -69,7 +69,7 @@ interface PluginContext {
   menu(items: MenuItem[], anchor: HTMLElement | { x: number; y: number }, title?: string): void; // MenuItem: { label, onSelect, icon?, disabled?, destructive?, hint? }
   navigate(to: { stream: string; tab?: string } | { app: string } | { settings: string } | { agents: true }): void;
   onEvent(topic: string, fn: (data: unknown) => void): () => void;   // your backend's events
-  onCoreEvent(type: string, fn: (msg) => void): () => void;          // Briardr's own, e.g. 'notes' ({ streamId, noteId, revision })
+  onCoreEvent(type: string, fn: (msg) => void): () => void;          // Briardr's own, e.g. 'notes' ({ t, streamId, noteId, revision }), typed for the types Briardr sends
   prefs: { get<T>(key: string, fallback: T): T; set(key: string, value: unknown): void }; // this device only
   host(): HostCaps & { the: string };   // platform: 'macos' | 'linux'; the: "the Mac" | "the server"
   connection(): 'connecting' | 'online' | 'offline' | 'stopped';     // reactive

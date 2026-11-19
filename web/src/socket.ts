@@ -14,11 +14,16 @@ export const PROTOCOL = 1;
 const PING_EVERY = 10_000;
 const PONG_DEADLINE = 5_000;
 
-/** One connection's events. */
-export interface Connection {
+/** A message either way, tagged by its `t`: protocol.ts has the ones each socket speaks. */
+type Tagged = { t: string; [k: string]: unknown };
+/** What both sockets take to check the connection: the server answers it with a `pong`. */
+type Ping = { t: 'ping'; id: number };
+
+/** One connection's events, for a socket that sends messages of type In (protocol.ts). */
+export interface Connection<In> {
   opened?(): void;
   /** A JSON text message, pongs included. */
-  message(msg: any): void;
+  message(msg: In): void;
   /** A binary message. */
   frame?(data: Uint8Array): void;
   /** It ended without close(): with its close code, or null when it stopped answering pings. */
@@ -34,11 +39,12 @@ export interface SocketOptions {
   reconnect: () => void;
 }
 
-export class ReconnectingSocket {
+/** A socket that receives In and sends Out. */
+export class ReconnectingSocket<In extends { t: string } = Tagged, Out extends { t: string } = Tagged> {
   private opts: SocketOptions;
   private backoff: Backoff;
   private ws: WebSocket | null = null;
-  private on: Connection | null = null;
+  private on: Connection<In> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pongTimer: ReturnType<typeof setTimeout> | null = null;
@@ -67,7 +73,7 @@ export class ReconnectingSocket {
   }
 
   /** Connect, replacing the connection before this one, or the wait for it. */
-  open(url: string, on: Connection) {
+  open(url: string, on: Connection<In>) {
     this.cancelRetry();
     this.end();
     this.netOff ??= onNetworkChange(() => {
@@ -79,7 +85,7 @@ export class ReconnectingSocket {
     ws.onopen = () => on.opened?.();
     ws.onmessage = (e) => {
       if (typeof e.data !== 'string') return on.frame?.(new Uint8Array(e.data));
-      let msg: any;
+      let msg: In;
       try {
         msg = JSON.parse(e.data);
       } catch {
@@ -116,7 +122,7 @@ export class ReconnectingSocket {
   }
 
   /** Sends msg as JSON if the connection is open. Returns false, and keeps nothing, if it isn't. */
-  send(msg: object): boolean {
+  send(msg: Out | Ping): boolean {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify(msg));

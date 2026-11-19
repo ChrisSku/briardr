@@ -55,9 +55,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
 }
 
 /** Upload with progress and cancellation (fetch has no upload progress). An update waits for it. */
-export function upload(path: string, blob: Blob, onProgress: (sent: number, total: number) => void, signal: AbortSignal): Promise<any> {
+export function upload<T = any>(path: string, blob: Blob, onProgress: (sent: number, total: number) => void, signal: AbortSignal): Promise<T> {
   const release = holdUpdates('the upload finishes');
-  return new Promise<any>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', path);
     xhr.withCredentials = true;

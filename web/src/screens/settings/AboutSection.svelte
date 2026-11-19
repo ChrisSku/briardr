@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, ApiError } from '../../api.ts';
   import { caps, hostNoun, theHost } from '../../host.ts';
+  import type { Installed } from '../../protocol.ts';
   import { ago, confirmDialog } from '../../ui/kit.ts';
   import Section from './Section.svelte';
   import type { Save, Settings, UpdateStatus } from './settings.ts';
@@ -10,7 +11,7 @@
   // Updates: what the host's last check found, and installing it (only a release installation can).
   let u = $state.raw<UpdateStatus | null>(null);
   let busy = $state<null | 'checking' | 'installing'>(null);
-  let installed = $state.raw<{ version: string; restarts: boolean } | null>(null);
+  let installed = $state.raw<Installed | null>(null);
   let failed = $state<string | null>(null);
   api<UpdateStatus>('GET', '/api/update').then((r) => (u = r), () => {});
 
@@ -33,7 +34,7 @@
     failed = null;
     try {
       // Downloading can take a while on a slow connection; the host gives up after five minutes.
-      installed = await api('POST', '/api/update/install', { version }, { timeout: 330_000 });
+      installed = await api<Installed>('POST', '/api/update/install', { version }, { timeout: 330_000 });
     } catch (e) {
       failed = e instanceof ApiError ? e.message : `Couldn’t reach ${theHost()}. The update may still be installing; check again in a minute.`;
     } finally {

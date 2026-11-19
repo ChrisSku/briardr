@@ -6,7 +6,7 @@
   import { api, ApiError } from '../../api.ts';
   import { theHost } from '../../host.ts';
   import { loadErrors, plugins, setPlugins } from '../../plugins/registry.svelte.ts';
-  import type { PluginInfo } from '../../plugins/types.ts';
+  import type { PluginInfo, Plugins } from '../../protocol.ts';
   import { toast } from '../../store.ts';
   import { confirmDialog } from '../../ui/kit.ts';
   import Section from './Section.svelte';
@@ -17,7 +17,7 @@
   const installed = $derived(plugins.value.filter((p) => !p.builtin));
 
   // Fresh from the server: plugins may have been installed or changed since the cached list.
-  api<{ plugins: PluginInfo[] }>('GET', '/api/plugins').then((r) => setPlugins(r.plugins), () => {});
+  api<Plugins>('GET', '/api/plugins').then((r) => setPlugins(r.plugins), () => {});
 
   async function toggle(p: PluginInfo, on: boolean, el: HTMLInputElement) {
     let approve: string | undefined;
@@ -29,7 +29,7 @@
     }
     busy = p.id;
     try {
-      const r = await api<{ plugins: PluginInfo[] }>('PUT', `/api/plugins/${encodeURIComponent(p.id)}`, { enabled: on, approve });
+      const r = await api<Plugins>('PUT', `/api/plugins/${encodeURIComponent(p.id)}`, { enabled: on, approve });
       setPlugins(r.plugins);
     } catch (e) {
       el.checked = !on;

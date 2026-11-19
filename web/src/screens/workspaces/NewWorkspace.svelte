@@ -1,6 +1,7 @@
 <script lang="ts">
   import { theHost, TheHost } from '../../host.ts';
   import { api } from '../../api.ts';
+  import type { CreatedWorkspace } from '../../protocol.ts';
   import { toast } from '../../store.ts';
   import { Sheet } from '../../ui/kit.ts';
   import { Submit } from '../submit.svelte.ts';
@@ -9,7 +10,7 @@
   let name = $state('');
   let folder = $state('~/');
   const s = new Submit(async () => {
-    const r = await api('POST', '/api/workspaces', { name, folder });
+    const r = await api<CreatedWorkspace>('POST', '/api/workspaces', { name, folder });
     toast(`Created workspace${r.focusUnchanged === false ? ` (${theHost()}’s focus changed)` : ''}`);
     onClose();
   });

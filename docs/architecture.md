@@ -13,6 +13,7 @@ views and actions around them.
 | `server/src/herdr/` | Local control-socket requests, normalized state, events, and terminal sessions; `backend.rs` switches between Herdr TUI and herdr-core. |
 | `server/src/herdr/core/` | herdr-core: its framed connection, terminal records and the Herdr app's layout documents (one per machine), terminal streams, and the key, paste and mouse encoding for the program's modes (herdr-core takes bytes). |
 | `server/src/terminal_hub.rs` | Per-device terminal ownership, observation, control, and release. |
+| `web/src/protocol.ts` | The API's answers and both sockets' messages as TypeScript, generated from the server's types (`server/src/app/protocol.rs`, `mise run protocol`). |
 | `web/src/screens/` | Svelte app screens, stream tools, settings, and responsive navigation. |
 | `web/src/terminal/` | Browser terminal controller, input rules, keys, and links. |
 | `web/src/sw.ts` | Offline shell, versioned assets, and push handling. Live operations need a connection. |

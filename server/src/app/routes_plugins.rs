@@ -68,7 +68,8 @@ static CHANGES: Mutex<()> = Mutex::const_new(());
 
 /// `GET /api/plugins` and `PUT /api/plugins/:id`: the plugins as they are now.
 #[derive(Serialize)]
-struct Plugins {
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub(super) struct Plugins {
     plugins: Vec<PluginInfo>,
 }
 
