@@ -21,7 +21,9 @@ briardr status
 ```
 
 `configure` validates changes before saving and keeps the previous configuration in `config.json.bak`.
-Use `--dry-run` to inspect a proposed change. Restart the server after deployment changes: until then
+It changes only the settings it's given, in `config.json` as the file has it: it never saves the
+`BRIARDR_*` overrides (below) of the shell it runs in, and it refuses a `config.json` it can't read
+rather than starting again from the defaults. Use `--dry-run` to inspect a proposed change. Restart the server after deployment changes: until then
 it runs with the configuration it started with. Managed Linux installations should use
 `scripts/setup-linux.sh` for access-mode changes so the services, firewall, and proxy agree with
 Briardr's configuration.

@@ -46,8 +46,8 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use crate::auth::Auth;
 use crate::config::{
-    default_data_dir, load_config, lock_for, parse_public_origin, save_config, validate_config,
-    BriardrConfig, ConfigError, Paths,
+    default_data_dir, load_config, lock_for, parse_public_origin, read_config, save_config,
+    validate_config, BriardrConfig, ConfigError, Paths,
 };
 use crate::deploy::{caddyfile, systemd_units, UnitOptions};
 use crate::herdr::backend::Target;
@@ -403,7 +403,12 @@ async fn configure(ctx: &Ctx, rest: &[String]) -> CliResult {
         let file = file.clone();
         blocking(move || lock_for(&file)).await??
     };
-    let before = load_config_only(ctx).await?;
+    // The file's own settings, not this shell's `BRIARDR_*` overrides, and never defaults over a file
+    // that can't be parsed.
+    let before = {
+        let (paths, env) = (ctx.paths.clone(), ctx.env.clone());
+        blocking(move || read_config(&paths, &env)).await??
+    };
     let (cfg, dry_run) = apply_configure(&before, rest)?;
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&cfg)?);

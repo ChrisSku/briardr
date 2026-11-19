@@ -402,33 +402,39 @@ pub fn load_config(
     Ok(cfg)
 }
 
-/// config.json as it is on disk, for a change to save over: without the `BRIARDR_*` overrides, which are
-/// the running server's, and with no file meaning the defaults. Unlike `load_config`, a file that can't be
-/// read or parsed is an error, so a change is never saved over it.
+/// config.json as it is on disk, for a change to save over (the app's settings, `briardr configure`):
+/// without the `BRIARDR_*` overrides, which are the running server's, and with no file meaning the defaults.
+/// Unlike `load_config`, a file that can't be read or parsed is an error naming it, so a change is never
+/// saved over it.
 pub fn read_config(
     paths: &Paths,
     env: &std::collections::HashMap<String, String>,
 ) -> Result<BriardrConfig, ConfigError> {
-    let raw = match fs::read(paths.config()) {
-        Ok(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+    let file = paths.config();
+    let unreadable = |why: &dyn std::fmt::Display| {
+        ConfigError::Invalid(format!(
+            "{} can't be read ({why}), so nothing was changed. Fix it, or move it away to start from the defaults.",
+            file.display()
+        ))
+    };
+    let raw = match fs::read(&file) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|e| unreadable(&e))?,
         Err(e) if e.kind() == io::ErrorKind::NotFound => Value::Object(Map::new()),
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(unreadable(&e)),
     };
     if !raw.is_object() {
-        return Err(ConfigError::Invalid(
-            "config.json must be a JSON object.".to_string(),
-        ));
+        return Err(unreadable(&"it isn't a JSON object"));
     }
-    over_defaults(raw, env)
+    over_defaults(raw, env).map_err(|e| unreadable(&e))
 }
 
 /// The settings in `raw` (config.json's object), with the defaults for the rest.
 fn over_defaults(
     raw: Value,
     env: &std::collections::HashMap<String, String>,
-) -> Result<BriardrConfig, ConfigError> {
+) -> serde_json::Result<BriardrConfig> {
     let defaults = serde_json::to_value(default_config(env, &home_dir(env)))?;
-    Ok(serde_json::from_value(deep_merge(defaults, raw))?)
+    serde_json::from_value(deep_merge(defaults, raw))
 }
 
 /// JSON string literal, as `JSON.stringify` writes it in error messages.
@@ -1016,7 +1022,11 @@ mod tests {
         assert_eq!(load_config(&paths, &env).unwrap().port, 8443);
         for broken in ["{\"port\":", "[]", "{\"port\": \"x\"}"] {
             fs::write(paths.config(), broken).unwrap();
-            assert!(read_config(&paths, &env).is_err(), "{broken}");
+            let message = invalid_message(read_config(&paths, &env).map(drop));
+            assert!(
+                message.starts_with(&format!("{} can't be read (", paths.config().display())),
+                "{broken}: {message}"
+            );
         }
     }
 
