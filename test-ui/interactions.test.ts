@@ -873,16 +873,19 @@ describe('agents list, peek, banners and links', () => {
     assert.equal(await a.page.locator('.term-host.is-drop').count(), 0, 'the drop mark is gone');
   });
 
-  test('files dropped where nothing takes them are refused, so the browser doesn’t open one in place of Briardr', async () => {
-    // WebKit gives the page synthetic drag events as it would a drag from Finder, but never opens a file
-    // for them, so what's checked is what decides that: whether the page cancelled the dragover and the
-    // drop. A listener on the element, where a plugin's would be, has each event first: `first` says
-    // nothing had cancelled it yet.
-    const drag = (target: Locator, what: 'image' | 'log' | 'text') =>
+  test('files, links and text dropped where nothing takes them are refused, so the browser doesn’t open one in place of Briardr', async () => {
+    // WebKit gives the page synthetic drag events as it would a drag from Finder or another app, but never
+    // opens a file or link for them, so what's checked is what decides that: whether the page cancelled the
+    // dragover and the drop. A listener on the element, where a plugin's would be, has each event first:
+    // `first` says nothing had cancelled it yet.
+    const drag = (target: Locator, what: 'image' | 'log' | 'text' | 'link') =>
       target.evaluate(async (el, what) => {
         const dt = new DataTransfer();
         if (what === 'text') dt.setData('text/plain', 'a few words');
-        else if (what === 'log') dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
+        else if (what === 'link') {
+          dt.setData('text/uri-list', 'https://example.com/guide');
+          dt.setData('text/plain', 'https://example.com/guide');
+        } else if (what === 'log') dt.items.add(new File(['log line'], 'build.log', { type: 'text/plain' }));
         else {
           const c = document.createElement('canvas');
           c.width = c.height = 40;
@@ -903,12 +906,17 @@ describe('agents list, peek, banners and links', () => {
         return { over: over.defaultPrevented, drop: drop.defaultPrevented, first };
       }, what);
     const refused = { over: true, drop: true, first: true };
+    // A field you can type in takes text and links by itself.
+    const typedIn = { over: false, drop: false, first: true };
     const a = await device('mac', 'mac-stray-drop');
     onTestFinished(() => a.ctx.close().catch(() => {}));
     await openTarget(a.page);
     assert.deepEqual(await drag(a.page.locator('.stream-head'), 'log'), refused, 'the stream’s header');
     assert.deepEqual(await drag(a.page.locator('.list-pane'), 'log'), refused, 'the list beside the stream');
-    assert.deepEqual(await drag(a.page.locator('.stream-head'), 'text'), { over: false, drop: false, first: true }, 'text is left to the browser');
+    assert.deepEqual(await drag(a.page.locator('.stream-head'), 'link'), refused, 'a link');
+    // The browser opens text that's a web address like a link, and the page can't read it before the drop.
+    assert.deepEqual(await drag(a.page.locator('.stream-head'), 'text'), refused, 'text');
+    assert.deepEqual(await drag(a.page.locator('.term-surface .term-screen'), 'link'), refused, 'a link on the terminal');
     // The terminal still takes files.
     assert.deepEqual(await drag(a.page.locator('.term-surface .term-screen'), 'log'), refused);
     await a.page.getByRole('dialog', { name: 'Send file' }).getByText('build.log').waitFor();
@@ -921,12 +929,16 @@ describe('agents list, peek, banners and links', () => {
     await a.page.getByRole('menuitem', { name: /Peek/ }).click();
     await a.page.getByText('Watching live · read-only').waitFor();
     assert.deepEqual(await drag(a.page.locator('.peek-screen'), 'log'), refused, 'Peek');
+    assert.deepEqual(await drag(a.page.locator('.peek-screen'), 'link'), refused, 'a link on Peek');
     assert.deepEqual(await drag(a.page.locator('.scrim'), 'log'), refused, 'the scrim');
     await a.page.getByRole('button', { name: 'Close' }).click();
-    // A note takes images; another file dropped on it is refused, and the note is left as it was.
+    // A note takes images; another file dropped on it is refused, and the note is left as it was. Text and
+    // links drop into it as into any field.
     await a.page.getByRole('tab', { name: 'Notes' }).click();
     await a.page.getByRole('button', { name: 'New note' }).click();
     const area = a.page.getByLabel('Note for ui target');
+    assert.deepEqual(await drag(area, 'link'), typedIn, 'a link on a note');
+    assert.deepEqual(await drag(area, 'text'), typedIn, 'text on a note');
     assert.deepEqual(await drag(area, 'log'), refused);
     assert.equal(await area.inputValue(), '');
     assert.deepEqual(await drag(area, 'image'), refused);
@@ -938,6 +950,14 @@ describe('agents list, peek, banners and links', () => {
     await b.page.goto(s.base + '/workspaces');
     await b.page.locator('.tree-streams .row-main', { hasText: 'ui target' }).click();
     assert.deepEqual(await drag(b.page.locator('.keybar'), 'log'), refused, 'the key bar');
+    assert.deepEqual(await drag(b.page.locator('.keybar'), 'link'), refused, 'a link on the key bar');
+    // Compose's field takes text and links, and refuses files.
+    await b.page.getByRole('button', { name: 'Insert text, image or file' }).click();
+    await b.page.getByRole('menuitem', { name: /Compose/ }).click();
+    const message = b.page.getByLabel('Message for ui target');
+    assert.deepEqual(await drag(message, 'link'), typedIn, 'a link on Compose');
+    assert.deepEqual(await drag(message, 'text'), typedIn, 'text on Compose');
+    assert.deepEqual(await drag(message, 'log'), refused, 'a file on Compose');
   });
 
   test('on a touch screen, swiping a row left shows Peek and More; a tap closes it again', async () => {
