@@ -1,7 +1,7 @@
 // The installed app on poor connections and across updates, in WebKit with the service worker on:
 // - launches: a stalled network, proxy errors (502/503/504) and an unreachable host open the cached app,
 //   labeled stale, and it reconnects by itself; other answers (a sign-in page) pass through; without a
-//   cached shell the launch says why, without reloading in a loop.
+//   cached shell the launch says why, in the device’s theme, without reloading in a loop.
 // - updates: pages on the previous build keep working (its code stays cached) until they reload; a page
 //   with work in progress waits and says so; clients converge on the new build, reloading once each; a
 //   build whose shell doesn't install leaves the current one in use.
@@ -186,9 +186,13 @@ describe('launch on a poor connection', () => {
     await page.getByText('proxy error 401').waitFor({ timeout: 10_000 });
   });
 
-  test('without a cached shell, the launch says why, retries only when asked or back online, and saves the shell again', async () => {
+  test('without a cached shell, the launch says why in the device’s theme, retries only when asked or back online, and saves the shell again', async () => {
     const { page } = await installed('no shell');
     onTestFinished(() => proxy.set('pass'));
+    // This device is dark whatever its system (light) says.
+    await page.goto(proxy.base + '/settings/appearance');
+    await page.locator('#set-appearance label', { hasText: 'Dark' }).click();
+    await page.goto(proxy.base + '/agents');
     await page.evaluate(async () => {
       for (const k of await caches.keys()) await caches.delete(k);
     });
@@ -196,6 +200,12 @@ describe('launch on a poor connection', () => {
     const count = navigations(page);
     await page.reload();
     await page.getByText('Briardr can’t open right now').waitFor({ timeout: 10_000 });
+    const look = await page.evaluate(() => ({
+      theme: document.documentElement.dataset.theme,
+      background: getComputedStyle(document.body).backgroundColor,
+      bar: document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),
+    }));
+    assert.deepEqual(look, { theme: 'dark', background: 'rgb(13, 12, 11)', bar: '#0d0c0b' });
     await sleep(4000);
     assert.equal(count(), 1, 'no reload loop');
     await proxy.set('pass');

@@ -173,6 +173,10 @@ async function build() {
   }
   const withIcons = (text: string) => text.replace(/\/icons\/[\w.-]+\.png/g, (u) => icons[u] || u);
   const source = gitInfo();
+  // The theme (web/src/theme-early.ts) is set before the first paint: in the page itself (below), and in the
+  // service worker's page for a launch without a saved copy of the app.
+  const [early] = await bundle({ entrypoints: [path.join(web, 'src', 'theme-early.ts')], format: 'iife' });
+  const theme = (await early.text()).trim();
   // The build's version names its offline shell and tells open pages to reload. It covers everything the
   // shell is made of: the bundles' names (content hashes) and the main bundle, the icons, the service
   // worker, the page and the other public files. Written in last, as a placeholder until then; the branch
@@ -186,6 +190,7 @@ async function build() {
     define: {
       __BRIARDR_VERSION__: JSON.stringify(VERSION),
       __BRIARDR_ICON__: JSON.stringify(icons['/icons/icon-192.png']),
+      __BRIARDR_THEME__: JSON.stringify(theme),
       // Chunks too, so a client still on this version can load them after the next build replaced them.
       // The brand tile's dog is linked from the app by its plain name.
       __BRIARDR_ASSETS__: JSON.stringify(['/', `/${js}`, ...Object.values(SDK_MODULES).map((n) => `${SDK_PATH}/${n}.js`), ...(css ? [`/${css}`] : []), ...outputs.filter((p) => p.endsWith('.js') && p !== js).map((p) => `/${p}`), '/manifest.webmanifest', ...['icon-192.png', 'icon-512.png', 'apple-touch-icon.png'].map((f) => icons[`/icons/${f}`]), '/icons/briard.png']),
@@ -208,8 +213,6 @@ async function build() {
   // and the theme (web/src/theme-early.ts), which is in the page itself so that it runs before the first
   // paint without a request of its own (a launch on a stalled network would wait for one).
   const importMap = JSON.stringify({ imports: runtime });
-  const [early] = await bundle({ entrypoints: [path.join(web, 'src', 'theme-early.ts')], format: 'iife' });
-  const theme = (await early.text()).trim();
   const scriptHash = (text: string) => `'sha256-${crypto.createHash('sha256').update(text).digest('base64')}'`;
   fs.writeFileSync(path.join(dist, 'index.html.csp'), `${scriptHash(importMap)} ${scriptHash(theme)}\n`);
   const page = withIcons(fs.readFileSync(path.join(web, 'index.html'), 'utf8'))

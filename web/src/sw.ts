@@ -12,6 +12,8 @@ import type { PushPayload } from './protocol.ts';
 declare const __BRIARDR_VERSION__: string;
 declare const __BRIARDR_ASSETS__: string[];
 declare const __BRIARDR_ICON__: string;
+/** web/src/theme-early.ts, built: sets the page's theme from this device's choice, else the system's. */
+declare const __BRIARDR_THEME__: string;
 const sw = self as unknown as ServiceWorkerGlobalScope;
 const SHELL = 'briardr-shell-';
 const CACHE = SHELL + __BRIARDR_VERSION__;
@@ -117,14 +119,18 @@ async function navigation(e: FetchEvent): Promise<Response> {
   }
 }
 
-/** Shown when the app was never saved for offline use (or its copy was cleared) and the host can't be reached. */
+/**
+ * Shown when the app was never saved for offline use (or its copy was cleared) and the host can't be reached.
+ * Light or dark as the app is: the theme script sets data-theme on <html> before the first paint.
+ */
 function offlinePage(): Response {
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark"><meta name="briardr-offline" content="1"><title>Briardr</title>
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#f6f5f3"><meta name="briardr-offline" content="1"><title>Briardr</title>
+<script>${__BRIARDR_THEME__}</script>
 <style>
-:root{--bg:#f6f5f3;--fg:#1c1917;--muted:#5c5650;--ink:#1c1917;--on-ink:#fff}
-@media (prefers-color-scheme:dark){:root{--bg:#0d0c0b;--fg:#f4f2ef;--muted:#b3aca4;--ink:#f4f2ef;--on-ink:#171614}}
+:root{color-scheme:light;--bg:#f6f5f3;--fg:#1c1917;--muted:#5c5650;--ink:#1c1917;--on-ink:#fff}
+:root[data-theme=dark]{color-scheme:dark;--bg:#0d0c0b;--fg:#f4f2ef;--muted:#b3aca4;--ink:#f4f2ef;--on-ink:#171614}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);font:17px/1.4 -apple-system,system-ui,sans-serif;padding:16px;box-sizing:border-box}
 main{max-width:26rem}h1{font-size:22px;margin:0 0 8px}p{margin:0 0 16px;color:var(--muted)}
 button{font:inherit;font-weight:600;color:var(--on-ink);background:var(--ink);border:0;border-radius:12px;padding:10px 18px;min-height:44px}
