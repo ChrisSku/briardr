@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, ApiError } from '../../api.ts';
+  import { api, errorMessage } from '../../api.ts';
   import type { History } from '../../protocol.ts';
   import type { Stream } from '../../types.ts';
   import { AsOf, Sheet } from '../../ui/kit.ts';
@@ -20,7 +20,7 @@
     err = null;
     api<History>('GET', `/api/streams/${encodeURIComponent(sid)}/history?lines=${n}`, undefined, { timeout: 20_000 }).then(
       (r) => (data = r),
-      (e) => (err = e instanceof ApiError ? e.message : 'Couldn’t load history.'),
+      (e) => (err = errorMessage(e, 'Couldn’t load history.')),
     );
   });
 

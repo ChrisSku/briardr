@@ -6,7 +6,8 @@
 -->
 <script lang="ts">
   import { caps, HostLabel } from '../host.ts';
-  import { api, ApiError } from '../api.ts';
+  import { api, errorMessage } from '../api.ts';
+  import { iosDevice } from '../device.ts';
   import { pluginContext } from '../plugins/context.ts';
   import { isOn, loadBuiltins, plugins, settingsSections } from '../plugins/registry.svelte.ts';
   import type { Devices } from '../protocol.ts';
@@ -36,7 +37,7 @@
   const hasPower = $derived(caps().battery || caps().keepAwake || caps().sleep);
   let s = $state.raw<Settings | null>(null);
   let err = $state<string | null>(null);
-  const reload = () => api<Settings>('GET', '/api/settings').then((r) => (s = r), (e) => (err = e instanceof ApiError ? e.message : 'Couldn’t load settings.'));
+  const reload = () => api<Settings>('GET', '/api/settings').then((r) => (s = r), (e) => (err = errorMessage(e, 'Couldn’t load settings.')));
   reload();
   void loadBuiltins('settings');
 
@@ -46,18 +47,13 @@
       await reload();
       return true;
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : 'Couldn’t save.');
+      toast(errorMessage(e, 'Couldn’t save.'));
       return false;
     }
   }
 
   const open = (id: string) => navigate({ name: 'settings', section: id });
-  const device = (() => {
-    const ua = navigator.userAgent;
-    if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'iPad';
-    if (/iPhone/.test(ua)) return 'iPhone';
-    return 'device';
-  })();
+  const device = iosDevice() ?? 'device';
 
   // A plugin's section (Usage, installed plugins'), when this page is one.
   const plugin = $derived(settingsSections.value.find((x) => x.id === section));

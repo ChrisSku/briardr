@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, ApiError } from '../../api.ts';
+  import { api, errorMessage } from '../../api.ts';
   import { caps, hostNoun, theHost } from '../../host.ts';
   import type { Installed } from '../../protocol.ts';
   import { ago, confirmDialog } from '../../ui/kit.ts';
@@ -21,7 +21,7 @@
     try {
       u = await api<UpdateStatus>('POST', '/api/update/check', {});
     } catch (e) {
-      failed = e instanceof ApiError ? e.message : `Couldn’t reach ${theHost()}.`;
+      failed = errorMessage(e, `Couldn’t reach ${theHost()}.`);
     } finally {
       busy = null;
     }
@@ -36,7 +36,7 @@
       // Downloading can take a while on a slow connection; the host gives up after five minutes.
       installed = await api<Installed>('POST', '/api/update/install', { version }, { timeout: 330_000 });
     } catch (e) {
-      failed = e instanceof ApiError ? e.message : `Couldn’t reach ${theHost()}. The update may still be installing; check again in a minute.`;
+      failed = errorMessage(e, `Couldn’t reach ${theHost()}. The update may still be installing; check again in a minute.`);
     } finally {
       busy = null;
     }

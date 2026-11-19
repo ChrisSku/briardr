@@ -5,6 +5,10 @@ Notable changes to Briardr, newest first. Each version's section becomes its
 [Semantic Versioning](https://semver.org); before 1.0, a minor version can change setup or behavior, so
 read its notes before upgrading.
 
+## 0.3.30
+
+- **The styles that Briardr's screens and built-in plugins keep in their own components now apply.** The client's build dropped them, so file icons in Files could shrink in a narrow row, a search inside files didn't lay out its results or the Names and Contents choice, the pairing QR code in Settings → Devices wasn't sized and centred, the quiet hours times in Settings → Notifications didn't sit side by side, and a new agent's prompt field didn't keep its line spacing. Installed plugins' own styles always applied. ([#67](https://github.com/ChrisSku/briardr/pull/67))
+
 ## 0.3.29
 
 - **Changes can show everything since the branch the work started from, not only what isn't committed yet.** When a stream's branch has commits of its own, Changes offers "Since main" beside "Uncommitted": the branch's commits and its uncommitted work as one set of changes, compared with the newest commit the branch shares with the repository's main branch (the one `origin/HEAD` names, else `main` or `master`). Work an agent has already committed no longer drops out of review. Reviewed marks, and the lines comments mark, are kept apart for the two views. ([#54](https://github.com/ChrisSku/briardr/pull/54))

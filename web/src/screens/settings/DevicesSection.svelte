@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, ApiError } from '../../api.ts';
+  import { api, errorMessage } from '../../api.ts';
   import type { DeviceEntry as Device, Devices, PairingCode } from '../../protocol.ts';
   import { session, toast } from '../../store.ts';
   import { Icon } from '../../ui/icons/index.ts';
@@ -14,11 +14,10 @@
   const opens = $derived(code && new URL(code.link).host);
   /** The dark modules as one path, a unit square each, inside a quiet zone of four. */
   const qrPath = (rows: string[]) => rows.flatMap((row, y) => Array.from(row, (m, x) => (m === '1' ? `M${x + 4} ${y + 4}h1v1h-1z` : ''))).join('');
-  const message = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
   const load = () =>
     api<Devices>('GET', '/api/devices').then(
       (r) => ((list = r.devices), (failed = null)),
-      (e) => (failed = message(e, 'Couldn’t load the devices.')),
+      (e) => (failed = errorMessage(e, 'Couldn’t load the devices.')),
     );
   onMount(load);
 
@@ -29,7 +28,7 @@
       await api('DELETE', `/api/devices/${encodeURIComponent(d.id)}`);
     } catch (e) {
       // It still has access: say so, and show the list as the host has it.
-      toast(message(e, d.current ? 'Couldn’t sign out.' : `Couldn’t revoke ${d.name}.`), 5000);
+      toast(errorMessage(e, d.current ? 'Couldn’t sign out.' : `Couldn’t revoke ${d.name}.`), 5000);
       return void load();
     }
     if (d.current) {
@@ -43,7 +42,7 @@
   const addDevice = () =>
     api<PairingCode>('POST', '/api/devices/pairing-code').then(
       (r) => (code = r),
-      (e) => toast(message(e, 'Couldn’t create a pairing code.'), 5000),
+      (e) => toast(errorMessage(e, 'Couldn’t create a pairing code.'), 5000),
     );
 </script>
 

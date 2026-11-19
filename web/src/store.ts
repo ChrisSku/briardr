@@ -1,5 +1,5 @@
-// App state. Server-sourced state carries its "as of" time; device-only preferences, caches,
-// seen markers and review checkmarks persist in this browser only.
+// App state. Server-sourced state carries its "as of" time; device-only preferences, caches and
+// seen markers persist in this browser only.
 import type { Snippet } from 'svelte';
 import { derived, load, persisted, save, State, state } from './reactive.svelte.ts';
 import type { ThemeChoice } from './theme.ts';
@@ -41,12 +41,12 @@ class Connection extends State<Conn> {
 export const conn = new Connection({ state: 'connecting', error: null, retryAt: null, lastOnlineAt: load<number | null>('briardr.cache.lastOnline', null) });
 save('briardr.cache.lastOnline', conn.value.lastOnlineAt);
 
-/** serverNow - Date.now(), so "as of" times use the Mac's clock. */
+/** serverNow - Date.now(), so "as of" times use the host's clock. */
 export const clockSkew = state(0);
 export const now = state(Date.now());
 setInterval(() => (now.value = Date.now()), 1000);
 
-// ---------- cached Mac state ----------
+// ---------- cached host state ----------
 // Saved at most once a second: the model is about 150 KB of JSON at 500 streams, and live updates can
 // replace it many times a second.
 export const model = persisted<Model | null>('briardr.cache.model', null, 1000);
@@ -73,7 +73,7 @@ export const prefs = persisted<{
   screenReaderTerminal: false,
   lowBatteryInApp: true,
 });
-/** Files: line wrapping (null: on for phones, off otherwise) and the width of the folder pane. */
+/** Agents: the one group the list shows (null: every group). */
 export const agentFilter = persisted<Group | null>('briardr.agents.filter', null);
 /** Agents groups showing every row instead of the first few (Needs you always shows every row). */
 export const expanded = persisted<Record<string, boolean>>('briardr.agents.expanded', {});
@@ -91,7 +91,7 @@ export function seenKey(s: { terminalId: string; stateChangeSeq: number | null; 
   return `${s.terminalId}|${s.stateChangeSeq ?? s.stateSince ?? 0}`;
 }
 
-/** When this device last opened each stream (Mac clock, ms): orders Jump search by recent activity. */
+/** When this device last opened each stream (host clock, ms): orders Jump search by recent activity. */
 export const lastOpened = persisted<Record<string, number>>('briardr.lastOpened', {});
 export function markOpened(id: string) {
   const next = { ...lastOpened.value, [id]: Date.now() + clockSkew.value };

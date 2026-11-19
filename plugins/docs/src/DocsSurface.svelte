@@ -1,7 +1,7 @@
 <!-- Docs: Markdown files in the stream's folder, rendered natively, with a Source toggle. -->
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ApiError, AsOf, Empty, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
+  import { AsOf, Empty, errorMessage, Icon, PullToRefresh, type StreamTabProps } from '@briardr/sdk';
   import DocView from './DocView.svelte';
 
   interface DocEntry {
@@ -23,7 +23,7 @@
     try {
       list = await briardr.core('GET', `/api/streams/${encodeURIComponent(stream.id)}/docs`, undefined, { timeout: 20_000 });
     } catch (e) {
-      error = e instanceof ApiError ? e.message : 'Couldn’t list documents.';
+      error = errorMessage(e, 'Couldn’t list documents.');
     }
   }
   const id = $derived(stream.id);

@@ -1,9 +1,10 @@
 <!-- Pairing: the only screen available before this device is signed in. The brand gets its moment here. -->
 <script lang="ts">
   import { hostNoun, isMac, theHost } from '../host.ts';
-  import { api, ApiError } from '../api.ts';
+  import { api, errorMessage } from '../api.ts';
+  import { iosDevice } from '../device.ts';
   import { record } from '../diag.ts';
-  import { installSuggestion, platform, standalone } from '../install.ts';
+  import { installSuggestion, iosBrowserTab, standalone } from '../install.ts';
   import type { Session } from '../protocol.ts';
   import { linkedCode, navigate } from '../router.ts';
   import { acceptSession, startSession } from '../session.ts';
@@ -11,22 +12,14 @@
 
   let { reason }: { reason?: string } = $props();
 
-  function defaultName(): string {
-    const ua = navigator.userAgent;
-    if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'iPad';
-    if (/iPhone/.test(ua)) return 'iPhone';
-    if (/Macintosh/.test(ua)) return 'Mac';
-    return 'Device';
-  }
-
   // A pairing link (its QR code) brings the code filled in; signing in is still up to the person here. On
   // an iPhone or iPad the Home Screen app signs in separately, and the code works once.
-  const installFirst = linkedCode && !standalone && (platform() === 'iphone' || platform() === 'ipad');
+  const installFirst = linkedCode && iosBrowserTab;
 
   let code = $state(linkedCode);
   let focused = $state(false);
   const chars = $derived(code.replace(/[^A-Z0-9]/g, '').slice(0, 8));
-  let name = $state(defaultName());
+  let name = $state(iosDevice() ?? (/Macintosh/.test(navigator.userAgent) ? 'Mac' : 'Device'));
   let busy = $state(false);
   let error = $state<string | null>(null);
 
@@ -43,7 +36,7 @@
       startSession();
       navigate({ name: 'agents' }, { replace: true });
     } catch (x) {
-      error = x instanceof ApiError ? x.message : `Couldn’t reach ${theHost()}.`;
+      error = errorMessage(x, `Couldn’t reach ${theHost()}.`);
     } finally {
       busy = false;
     }

@@ -1,7 +1,7 @@
 // Several windows on one computer: each holds its own live connection and controls its own stream. Windows
 // share this device's stored state (reactive.svelte.ts keeps it in step), and a pane has one controller, so
 // a window opening a stream another one controls watches it instead.
-import { platform } from './install.ts';
+import { platform } from './device.ts';
 import { pathOf, type Route } from './routes.ts';
 import { toast } from './store.ts';
 

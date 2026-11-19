@@ -3,7 +3,7 @@
   backend runs a program on the host, so turning it on first shows that command for approval.
 -->
 <script lang="ts">
-  import { api, ApiError } from '../../api.ts';
+  import { api, errorMessage } from '../../api.ts';
   import { theHost } from '../../host.ts';
   import { loadErrors, plugins, setPlugins } from '../../plugins/registry.svelte.ts';
   import type { PluginInfo, Plugins } from '../../protocol.ts';
@@ -33,7 +33,7 @@
       setPlugins(r.plugins);
     } catch (e) {
       el.checked = !on;
-      toast(e instanceof ApiError ? e.message : 'Couldn’t change the plugin.');
+      toast(errorMessage(e, 'Couldn’t change the plugin.'));
     } finally {
       busy = null;
     }

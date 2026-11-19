@@ -5,7 +5,7 @@
 // no permission prompt. Permission is only ever requested from a button.
 import { api } from './api.ts';
 import { record } from './diag.ts';
-import { standalone } from './install.ts';
+import { iosBrowserTab } from './install.ts';
 import type { DevicePrefs, NotificationsState, PrefsBody } from './protocol.ts';
 import { deviceClock, sameClock } from './quiet-hours.ts';
 import { persisted, state } from './reactive.svelte.ts';
@@ -58,7 +58,6 @@ export function setAlertPrefs(patch: Partial<Record<AlertChoice, boolean | null>
 const wanted = persisted<boolean | null>('briardr.push.wanted', null);
 
 export const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-const isApple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 let publicKey = '';
 
 function keyBytes(b64: string): Uint8Array<ArrayBuffer> {
@@ -116,7 +115,7 @@ export function checkPush(): Promise<void> {
 
 async function reconcile() {
   if (!pushSupported) return void (pushStatus.value = { state: 'unsupported' });
-  if (isApple && !standalone) return void (pushStatus.value = { state: 'needs_install' });
+  if (iosBrowserTab) return void (pushStatus.value = { state: 'needs_install' });
   let server: NotificationsState;
   try {
     server = await api('GET', '/api/notifications', undefined, { timeout: 8000 });

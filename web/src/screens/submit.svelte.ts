@@ -1,5 +1,5 @@
 // Form submission state for sheets: busy while the request runs, and the error to show if it fails.
-import { ApiError } from '../api.ts';
+import { errorMessage } from '../api.ts';
 
 export class Submit {
   busy = $state(false);
@@ -15,7 +15,7 @@ export class Submit {
     try {
       await this.#fn();
     } catch (err) {
-      this.error = err instanceof ApiError ? err.message : 'Something went wrong.';
+      this.error = errorMessage(err, 'Something went wrong.');
     } finally {
       this.busy = false;
     }
